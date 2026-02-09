@@ -25,6 +25,6 @@ omi pull
 
 ## Roadmap
 
-- [] Create hash of file: `SELECT hex(sha256(data)) FROM files`
-- [] Add file to database as BLOB and hash as TEXT
+- [ ] Create hash of file: `SELECT hex(sha256(data)) FROM files`
+- [ ] Add file to database as BLOB and hash as TEXT
 - ...
