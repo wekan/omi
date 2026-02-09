@@ -27,6 +27,7 @@ omi pull
 
 - WeDOS, kanban made with FreeDOS .bat and Bash scripts: https://github.com/wekan/wedos
 - SQLite for Amiga: https://aminet.net/search?query=sqlite&ord=DESC&sort=date
+- https://aminet.net/package/util/cli/sha256
 - Fossil SCM: https://github.com/howinfo/howinfo/wiki/Fossil
 - FreeDOS: https://github.com/howinfo/howinfo/wiki/FreeDOS
 - Amiga: https://github.com/howinfo/howinfo/wiki/Amiga
