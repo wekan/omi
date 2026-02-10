@@ -1869,7 +1869,7 @@ ${contentHtml}
       }
       
       return `<tr>
-  <td><a href="${fileLinkPath}">${escapeHtml(fileTypeLabel)} ${fileBasename}</a></td>
+  <td><a href="${fileLinkPath}">[${escapeHtml(fileTypeLabel)}] ${fileBasename}</a></td>
   <td>${fileSize}</td>
   <td>${fileDateTime}</td>
   <td>${actionsHtml}</td>

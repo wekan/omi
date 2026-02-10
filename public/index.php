@@ -2269,7 +2269,7 @@ if (isset($_GET['image'])) {
 <?php if (!empty($organized['files'])): ?>
 <?php foreach ($organized['files'] as $file): ?>
 <tr>
-<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']); ?>"><?php echo htmlspecialchars(getFileTypeLabel($file['filename'])); ?> <?php echo htmlspecialchars(basename($file['filename'])); ?></a></td>
+<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']); ?>[<?php echo htmlspecialchars(getFileTypeLabel($file['filename'])); ?>] <?php echo htmlspecialchars(basename($file['filename'])); ?></a></td>
 <td><?php echo number_format($file['size']); ?></td>
 <td><?php echo htmlspecialchars($file['datetime']); ?></td>
 <td>

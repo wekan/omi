@@ -2613,7 +2613,7 @@ begin
             '</div>' +
             '</div>';
         end;
-        TableRows := TableRows + '<tr><td><a href="' + EntryPath + '">' + HtmlEncode(GetFileTypeLabel(DisplayName)) + ' ' + HtmlEncode(DisplayName) + '</a></td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
+        TableRows := TableRows + '<tr><td><a href="' + EntryPath + '">[' + HtmlEncode(GetFileTypeLabel(DisplayName)) + '] ' + HtmlEncode(DisplayName) + '</a></td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
       end;
 
       if TableRows = '' then
