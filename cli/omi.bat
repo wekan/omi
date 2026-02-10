@@ -3,13 +3,13 @@ REM Omi - Version Control for FreeDOS
 REM Optimized Micro Index - Git-like commands with SQLite storage
 
 REM Read settings from settings.txt
-FOR /F "tokens=2 delims==" %%A IN ('FIND "SQLITE=" settings.txt') DO SET SQLITE=%%A
-FOR /F "tokens=2 delims==" %%A IN ('FIND "USERNAME=" settings.txt') DO SET USERNAME=%%A
-FOR /F "tokens=2 delims==" %%A IN ('FIND "PASSWORD=" settings.txt') DO SET PASSWORD=%%A
-FOR /F "tokens=2 delims==" %%A IN ('FIND "REPOS=" settings.txt') DO SET REPOS=%%A
-FOR /F "tokens=2 delims==" %%A IN ('FIND "CURL=" settings.txt') DO SET CURL=%%A
-FOR /F "tokens=2 delims==" %%A IN ('FIND "API_ENABLED=" settings.txt') DO SET API_ENABLED=%%A
-FOR /F "tokens=2 delims==" %%A IN ('FIND "API_RATE_LIMIT=" settings.txt') DO SET API_RATE_LIMIT=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "SQLITE=" .\..\settings.txt') DO SET SQLITE=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "USERNAME=" .\..\settings.txt') DO SET USERNAME=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "PASSWORD=" .\..\settings.txt') DO SET PASSWORD=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "REPOS=" .\..\settings.txt') DO SET REPOS=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "CURL=" .\..\settings.txt') DO SET CURL=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "API_ENABLED=" .\..\settings.txt') DO SET API_ENABLED=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "API_RATE_LIMIT=" .\..\settings.txt') DO SET API_RATE_LIMIT=%%A
 
 REM Set defaults
 IF "%API_ENABLED%"=="" SET API_ENABLED=1

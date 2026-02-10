@@ -1,7 +1,7 @@
 # AmigaShell CLI (omi)
 
-> **Documentation:** [README.md](README.md) | [FEATURES.md](FEATURES.md) | [WEB.md](WEB.md) | [SERVER.md](SERVER.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)  
-> **CLI Options:** [CLI_BASH.md](CLI_BASH.md) | [CLI_BAT.md](CLI_BAT.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)
+> **Documentation:** [README.md](README.md) | [FEATURES.md](FEATURES.md) | [WEB.md](WEB.md) | [SERVER_PHP.md](SERVER_PHP.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)  
+> **CLI Options:** [CLI_BASH.md](CLI_BASH.md) | [CLI_BAT.md](CLI_BAT.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md) | [CLI_C89.md](CLI_C89.md) | [CLI_TCL.md](CLI_TCL.md)
 
 The AmigaShell implementation (`omi`) runs on Commodore Amiga and AmigaOS systems.
 

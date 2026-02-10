@@ -1,6 +1,6 @@
 # Omi CLI for C# (Mono)
 
-**Other CLI Versions:** [CLI_PYTHON3.md](CLI_PYTHON3.md) | [CLI_HAXE5.md](CLI_HAXE5.md) | [CLI_BASH.md](CLI_BASH.md) | [CLI_BAT.md](CLI_BAT.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md) | [CLI_LUA.md](CLI_LUA.md)  
+**Other CLI Versions:** [CLI_PYTHON3.md](CLI_PYTHON3.md) | [CLI_HAXE5.md](CLI_HAXE5.md) | [CLI_C89.md](CLI_C89.md) | [CLI_TCL.md](CLI_TCL.md) | [CLI_BASH.md](CLI_BASH.md) | [CLI_BAT.md](CLI_BAT.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md) | [CLI_LUA.md](CLI_LUA.md)  
 
 ## Overview
 
@@ -794,12 +794,14 @@ sqlite3 repo.omi \
 - **[FEATURES.md](FEATURES.md)** - Feature overview
 - **[CLI_PYTHON3.md](CLI_PYTHON3.md)** - CLI alternative (Python 3)
 - **[CLI_HAXE5.md](CLI_HAXE5.md)** - CLI alternative (Haxe 5)
+- **[CLI_C89.md](CLI_C89.md)** - CLI alternative (C89)
+- **[CLI_TCL.md](CLI_TCL.md)** - CLI alternative (Tcl)
 - **[CLI_BASH.md](CLI_BASH.md)** - CLI alternative (Bash)
 - **[CLI_BAT.md](CLI_BAT.md)** - CLI alternative (FreeDOS)
 - **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI alternative (Amiga)
 - **[CLI_LUA.md](CLI_LUA.md)** - CLI alternative (Lua)
 - **[WEB.md](WEB.md)** - Web interface
-- **[SERVER.md](SERVER.md)** - Server setup
+- **[SERVER_PHP.md](SERVER_PHP.md)** - Server setup
 - **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Database design
 - **[Mono Official Documentation](https://www.mono-project.com/)** - Mono runtime reference
 - **[C# Language Reference](https://docs.microsoft.com/en-us/dotnet/csharp/)** - C# syntax and features

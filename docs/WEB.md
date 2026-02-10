@@ -5,7 +5,13 @@
 
 ## Overview
 
-The Omi web interface is a PHP application that provides:
+Omi has web server implementations in PHP (traditional) and JavaScript (Node.js, Bun, Deno).
+
+**Choose your server:**
+- **[JavaScript Server](SERVER_JS.md)** (Node.js, Bun, Deno) - Modern runtimes, single JavaScript file
+- **PHP Server** (this document) - Traditional web server, widely deployed
+
+Both servers provide:
 - Repository browsing
 - File viewing and editing
 - User account management
@@ -342,6 +348,8 @@ The web interface is HTML 3.2 compatible for maximum browser support:
 - **[CLI_PYTHON3.md](CLI_PYTHON3.md)** - CLI alternative (Python 3)
 - **[CLI_HAXE5.md](CLI_HAXE5.md)** - CLI alternative (Haxe 5)
 - **[CLI_CSHARP.md](CLI_CSHARP.md)** - CLI alternative (C# / Mono)
+- **[CLI_C89.md](CLI_C89.md)** - CLI alternative (C89)
+- **[CLI_TCL.md](CLI_TCL.md)** - CLI alternative (Tcl)
 - **[CLI_BASH.md](CLI_BASH.md)** - CLI alternative (Bash)
 - **[CLI_BAT.md](CLI_BAT.md)** - CLI alternative (FreeDOS)
 - **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI alternative (Amiga)

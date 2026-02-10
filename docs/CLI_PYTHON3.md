@@ -745,6 +745,8 @@ Python 3 implementation benefits:
 - **[FEATURES.md](FEATURES.md)** - Feature overview
 - **[CLI_HAXE5.md](CLI_HAXE5.md)** - CLI alternative (Haxe 5)
 - **[CLI_CSHARP.md](CLI_CSHARP.md)** - CLI alternative (C# / Mono)
+- **[CLI_C89.md](CLI_C89.md)** - CLI alternative (C89)
+- **[CLI_TCL.md](CLI_TCL.md)** - CLI alternative (Tcl)
 - **[CLI_BASH.md](CLI_BASH.md)** - CLI alternative (Bash)
 - **[CLI_BAT.md](CLI_BAT.md)** - CLI alternative (FreeDOS)
 - **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI alternative (Amiga)

@@ -9,7 +9,7 @@ function Settings.load()
   local settings = {}
   
   -- Read settings.txt
-  local settings_file = io.open("settings.txt", "r")
+  local settings_file = io.open("../settings.txt", "r")
   if not settings_file then
     print("Error: settings.txt not found")
     os.exit(1)

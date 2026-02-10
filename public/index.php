@@ -9,9 +9,9 @@ session_start();
 // Configuration
 define('REPOS_DIR', __DIR__ . '/../repos');
 define('SETTINGS_FILE', __DIR__ . '/../settings.txt');
-define('USERS_FILE', __DIR__ . '/../phpusers.txt');
-define('LOCKED_USERS_FILE', __DIR__ . '/../phpusersbruteforcelocked.txt');
-define('FAILED_ATTEMPTS_FILE', __DIR__ . '/../phpusersfailedattempts.txt');
+define('USERS_FILE', __DIR__ . '/../users.txt');
+define('LOCKED_USERS_FILE', __DIR__ . '/../usersbruteforcelocked.txt');
+define('FAILED_ATTEMPTS_FILE', __DIR__ . '/../usersfailedattempts.txt');
 
 // Ensure repos directory exists
 if (!is_dir(REPOS_DIR)) {

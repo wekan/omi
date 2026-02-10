@@ -6,7 +6,7 @@
 .KET }
 
 ; Read settings from settings.txt
-Execute >T:omi_settings "Type settings.txt"
+Execute >T:omi_settings "Type ../settings.txt"
 Search T:omi_settings "SQLITE=" >T:omi_var
 Execute <T:omi_var
 Search T:omi_settings "USERNAME=" >T:omi_var

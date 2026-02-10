@@ -551,7 +551,7 @@ class Omi
         }
 
         var settings = new Settings();
-        settings.LoadFromFile("settings.txt");
+        settings.LoadFromFile("../settings.txt");
 
         var dbPath = settings.LocalRepoPath ?? "repo.omi";
         var repo = new OmiRepository(settings, dbPath);

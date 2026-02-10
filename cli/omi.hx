@@ -36,12 +36,12 @@ class Settings {
     public static function load(): Settings {
         var settings = new Settings();
         
-        if (!FileSystem.exists("settings.txt")) {
+        if (!FileSystem.exists("../settings.txt")) {
             Sys.println("Error: settings.txt not found");
             Sys.exit(1);
         }
         
-        var content = File.getContent("settings.txt");
+        var content = File.getContent("../settings.txt");
         var lines = content.split("\n");
         
         for (line in lines) {

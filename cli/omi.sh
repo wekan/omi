@@ -3,16 +3,16 @@
 # Optimized Micro Index - Git-like commands with SQLite storage
 
 # Read settings from settings.txt
-SQLITE=$(grep "^SQLITE=" settings.txt | cut -d'=' -f2)
-USERNAME=$(grep "^USERNAME=" settings.txt | cut -d'=' -f2)
-PASSWORD=$(grep "^PASSWORD=" settings.txt | cut -d'=' -f2)
-REPOS=$(grep "^REPOS=" settings.txt | cut -d'=' -f2)
-CURL=$(grep "^CURL=" settings.txt | cut -d'=' -f2)
-API_ENABLED=$(grep "^API_ENABLED=" settings.txt | cut -d'=' -f2)
-API_RATE_LIMIT=$(grep "^API_RATE_LIMIT=" settings.txt | cut -d'=' -f2)
-API_RATE_LIMIT_WINDOW=$(grep "^API_RATE_LIMIT_WINDOW=" settings.txt | cut -d'=' -f2)
-USE_INTERNAL_HTTP=$(grep "^USE_INTERNAL_HTTP=" settings.txt | cut -d'=' -f2)
-HTTP_TIMEOUT=$(grep "^HTTP_TIMEOUT=" settings.txt | cut -d'=' -f2)
+SQLITE=$(grep "^SQLITE=" ../settings.txt | cut -d'=' -f2)
+USERNAME=$(grep "^USERNAME=" ../settings.txt | cut -d'=' -f2)
+PASSWORD=$(grep "^PASSWORD=" ../settings.txt | cut -d'=' -f2)
+REPOS=$(grep "^REPOS=" ../settings.txt | cut -d'=' -f2)
+CURL=$(grep "^CURL=" ../settings.txt | cut -d'=' -f2)
+API_ENABLED=$(grep "^API_ENABLED=" ../settings.txt | cut -d'=' -f2)
+API_RATE_LIMIT=$(grep "^API_RATE_LIMIT=" ../settings.txt | cut -d'=' -f2)
+API_RATE_LIMIT_WINDOW=$(grep "^API_RATE_LIMIT_WINDOW=" ../settings.txt | cut -d'=' -f2)
+USE_INTERNAL_HTTP=$(grep "^USE_INTERNAL_HTTP=" ../settings.txt | cut -d'=' -f2)
+HTTP_TIMEOUT=$(grep "^HTTP_TIMEOUT=" ../settings.txt | cut -d'=' -f2)
 
 # Set defaults
 API_ENABLED=${API_ENABLED:-1}

@@ -665,11 +665,13 @@ Use Omi in Haxe build scripts:
 - **[CLI_PYTHON3.md](CLI_PYTHON3.md)** - CLI alternative (Python 3)
 - **[CLI_BASH.md](CLI_BASH.md)** - CLI alternative (Bash)
 - **[CLI_CSHARP.md](CLI_CSHARP.md)** - CLI alternative (C# / Mono)
+- **[CLI_C89.md](CLI_C89.md)** - CLI alternative (C89)
+- **[CLI_TCL.md](CLI_TCL.md)** - CLI alternative (Tcl)
 - **[CLI_BAT.md](CLI_BAT.md)** - CLI alternative (FreeDOS)
 - **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI alternative (Amiga)
 - **[CLI_LUA.md](CLI_LUA.md)** - CLI alternative (Lua)
 - **[WEB.md](WEB.md)** - Web interface
-- **[SERVER.md](SERVER.md)** - Server setup
+- **[SERVER_PHP.md](SERVER_PHP.md)** - Server setup
 - **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Database design
 - **[Haxe Official Documentation](https://haxe.org/manual/)** - Language reference
 

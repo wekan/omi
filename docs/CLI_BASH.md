@@ -1,7 +1,7 @@
 # Bash CLI (omi.sh)
 
 > **Documentation:** [README.md](README.md) | [FEATURES.md](FEATURES.md) | [WEB.md](WEB.md) | [SERVER.md](SERVER.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)  
-> **CLI Options:** [CLI_BASH.md](CLI_BASH.md) | [CLI_BAT.md](CLI_BAT.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)
+> **CLI Options:** [CLI_BASH.md](CLI_BASH.md) | [CLI_BAT.md](CLI_BAT.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md) | [CLI_C89.md](CLI_C89.md) | [CLI_TCL.md](CLI_TCL.md)
 
 The Bash implementation (`omi.sh`) runs on Linux, macOS, Unix and any system with Bash 3.0+.
 

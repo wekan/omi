@@ -14,13 +14,16 @@ Omi is a lightweight Git-like version control system for retro systems and moder
 |----------|---------|----------|
 | **[FEATURES.md](FEATURES.md)** | Feature overview and capabilities | Everyone |
 | **[CLI_PYTHON3.md](CLI_PYTHON3.md)** | Command line for Python 3 (recommended) | Python developers |
+| **[CLI_HAXE5.md](CLI_HAXE5.md)** | Command line for Haxe 5 (typed, compiled) | Haxe developers |
 | **[CLI_CSHARP.md](CLI_CSHARP.md)** | Command line for C# / Mono (compiled) | .NET developers |
-| **[CLI_CSHARP.md](CLI_CSHARP.md)** | Command line for C# / Mono (compiled) | .NET developers |
+| **[CLI_C89.md](CLI_C89.md)** | Command line for C89 (portable C) | C developers |
+| **[CLI_TCL.md](CLI_TCL.md)** | Command line for Tcl (tclsh) | Tcl developers |
 | **[CLI_BASH.md](CLI_BASH.md)** | Command line for Linux/Unix/macOS | Bash users |
 | **[CLI_BAT.md](CLI_BAT.md)** | Command line for FreeDOS/Windows CMD | DOS users |
 | **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** | Command line for Commodore Amiga | Amiga users |
 | **[CLI_LUA.md](CLI_LUA.md)** | Command line for Lua (cross-platform) | Lua developers |
 | **[WEB.md](WEB.md)** | Web interface and browser access | Web users |
+| **[SERVER_JS.md](SERVER_JS.md)** | Web server (JavaScript runtimes) | Node.js/Bun/Deno developers |
 | **[SERVER.md](SERVER.md)** | Server setup and configuration | System admins |
 | **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** | Database structure and design | Developers |
 
@@ -42,6 +45,16 @@ Choose the CLI guide for your platform:
   - .NET language with full type system
   - Compiles to IL bytecode with JIT
   - Works on Linux, macOS, Windows, FreeBSD
+
+- **C89 (Portable C):** [CLI_C89.md](CLI_C89.md)
+  - C89 compatible for classic compilers
+  - Builds on AmigaOS, Windows, macOS, BSD, Linux
+  - Optional internal HTTP via libcurl
+
+- **Tcl (tclsh):** [CLI_TCL.md](CLI_TCL.md)
+  - Tcl 8.5+ with sqlite3 and http packages
+  - Internal HTTP via Tcl http, curl fallback
+  - Works on Unix, Windows, macOS, BSD
 
 - **Bash (Linux/macOS/Unix):** [CLI_BASH.md](CLI_BASH.md)
   - Installation, commands, usage examples
@@ -72,7 +85,7 @@ Choose the CLI guide for your platform:
 - **Brute force protection** - Account lockout after failed attempts
 - **API rate limiting** - Per-user request limits
 - **HTML 3.2 compatible** - Works with retro browsers
-- **Multi-platform** - Bash, FreeDOS, AmigaShell, web interface
+- **Multi-platform** - Bash, FreeDOS, AmigaShell, C89, Tcl, web interface
 
 See [FEATURES.md](FEATURES.md) for complete feature list.
 
@@ -144,6 +157,9 @@ Project files:
 - **omi.sh** (~320 lines) - Bash implementation
 - **omi.bat** (~240 lines) - FreeDOS implementation
 - **omi** (~210 lines) - AmigaShell implementation
+- **omi.c** (~500 lines) - C89 implementation
+- **omi.tcl** (~350 lines) - Tcl implementation
+- **public/server.js** (~800 lines) - JavaScript web server (Node.js, Bun, Deno)
 - **public/index.php** (~1530 lines) - Web interface
 - **repos/** - Directory for repository files
 - Database files: `*.omi` (SQLite format)
@@ -152,15 +168,17 @@ Project files:
 
 | Platform | CLI Implementation | Web Access |
 |----------|-------------------|----------|
-| Linux | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ [CLI_HAXE5.md](CLI_HAXE5.md) ✅ [CLI_CSHARP.md](CLI_CSHARP.md) ✅ [CLI_BASH.md](CLI_BASH.md) ✅ [CLI_LUA.md](CLI_LUA.md) ✅ | Yes |
-| macOS | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ [CLI_HAXE5.md](CLI_HAXE5.md) ✅ [CLI_CSHARP.md](CLI_CSHARP.md) ✅ [CLI_BASH.md](CLI_BASH.md) ✅ [CLI_LUA.md](CLI_LUA.md) ✅ | Yes |
-| Windows | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ [CLI_HAXE5.md](CLI_HAXE5.md) ✅ [CLI_CSHARP.md](CLI_CSHARP.md) ✅ [CLI_BASH.md](CLI_BASH.md) via WSL | Yes |
+| Linux | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ [CLI_HAXE5.md](CLI_HAXE5.md) ✅ [CLI_CSHARP.md](CLI_CSHARP.md) ✅ [CLI_C89.md](CLI_C89.md) ✅ [CLI_TCL.md](CLI_TCL.md) ✅ [CLI_BASH.md](CLI_BASH.md) ✅ [CLI_LUA.md](CLI_LUA.md) ✅ | Yes |
+| macOS | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ [CLI_HAXE5.md](CLI_HAXE5.md) ✅ [CLI_CSHARP.md](CLI_CSHARP.md) ✅ [CLI_C89.md](CLI_C89.md) ✅ [CLI_TCL.md](CLI_TCL.md) ✅ [CLI_BASH.md](CLI_BASH.md) ✅ [CLI_LUA.md](CLI_LUA.md) ✅ | Yes |
+| Windows | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ [CLI_HAXE5.md](CLI_HAXE5.md) ✅ [CLI_CSHARP.md](CLI_CSHARP.md) ✅ [CLI_C89.md](CLI_C89.md) ✅ [CLI_TCL.md](CLI_TCL.md) ✅ [CLI_BASH.md](CLI_BASH.md) via WSL | Yes |
 | FreeDOS | [CLI_BAT.md](CLI_BAT.md) ✅ | Yes (with Dillo) |
 | Commodore Amiga | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md) ✅ | Yes (with IBrowse) |
-| Generic Unix | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ [CLI_HAXE5.md](CLI_HAXE5.md) ✅ [CLI_CSHARP.md](CLI_CSHARP.md) ✅ [CLI_BASH.md](CLI_BASH.md) ✅ [CLI_LUA.md](CLI_LUA.md) ✅ | Yes |
+| Generic Unix | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ [CLI_HAXE5.md](CLI_HAXE5.md) ✅ [CLI_CSHARP.md](CLI_CSHARP.md) ✅ [CLI_C89.md](CLI_C89.md) ✅ [CLI_BASH.md](CLI_BASH.md) ✅ [CLI_LUA.md](CLI_LUA.md) ✅ | Yes |
 | Python Environments | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ | Yes |
 | Haxe Projects | [CLI_HAXE5.md](CLI_HAXE5.md) ✅ | Yes |
 | .NET Projects | [CLI_CSHARP.md](CLI_CSHARP.md) ✅ | Yes |
+| C Projects | [CLI_C89.md](CLI_C89.md) ✅ | Yes |
+| Tcl Environments | [CLI_TCL.md](CLI_TCL.md) ✅ | Yes |
 | Lua Environments | [CLI_LUA.md](CLI_LUA.md) ✅ | Yes (if web access available) |
 
 ## Common Workflows
@@ -230,12 +248,16 @@ See [FEATURES.md](FEATURES.md) for complete security information.
 |------|------|----------|
 | FEATURES.md | Brief | What can you do with Omi |
 | CLI_PYTHON3.md | Detailed | Python 3 CLI guide (recommended) |
+| CLI_HAXE5.md | Detailed | Haxe 5 CLI guide (compiled, multi-target) |
 | CLI_CSHARP.md | Detailed | C# / Mono CLI guide (compiled) |
+| CLI_C89.md | Detailed | C89 CLI guide (portable C) |
+| CLI_TCL.md | Detailed | Tcl CLI guide (tclsh) |
 | CLI_BASH.md | Detailed | Linux/Unix CLI guide |
 | CLI_BAT.md | Detailed | DOS/Windows CLI guide |
 | CLI_AMIGASHELL.md | Detailed | Amiga CLI guide |
 | CLI_LUA.md | Detailed | Lua CLI guide (cross-platform) |
 | WEB.md | Detailed | Web interface guide |
+| SERVER_JS.md | Detailed | JavaScript server guide (Node.js/Bun/Deno) |
 | SERVER.md | Detailed | Server setup guide |
 | DATABASE_SCHEMA.md | Reference | Database technical details |
 | README.md | Navigation | This file |

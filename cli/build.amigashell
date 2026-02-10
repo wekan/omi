@@ -1,0 +1,42 @@
+; Omi build menu for AmigaShell
+; Requires haxe (for multi-target) and optional gcc/vbcc
+
+SET ROOTDIR `PWD`
+SET BUILDDIR "build"
+
+IF NOT EXISTS $BUILDDIR
+  MAKEDIR $BUILDDIR
+ENDIF
+
+ECHO "Build targets:"
+ECHO " 1) All (Haxe + C89)"
+ECHO " 2) Haxe: cpp"
+ECHO " 3) Haxe: js"
+ECHO " 4) Haxe: python"
+ECHO " 5) Haxe: php"
+ECHO " 6) Haxe: cs"
+ECHO " 7) Haxe: java"
+ECHO " 8) C89 (native)"
+ECHO " 0) Quit"
+
+ASK "Select target:" choice
+
+IF "$choice" EQ "1"
+  EXECUTE "haxe -cp $ROOTDIR -main Omi -cpp $BUILDDIR/cpp"
+  EXECUTE "haxe -cp $ROOTDIR -main Omi -js $BUILDDIR/js/omi.js"
+  EXECUTE "haxe -cp $ROOTDIR -main Omi -python $BUILDDIR/python/omi.py"
+  EXECUTE "haxe -cp $ROOTDIR -main Omi -php $BUILDDIR/php"
+  EXECUTE "haxe -cp $ROOTDIR -main Omi -cs $BUILDDIR/cs"
+  EXECUTE "haxe -cp $ROOTDIR -main Omi -java $BUILDDIR/java"
+  EXECUTE "gcc -O2 -o $BUILDDIR/c89/omi $ROOTDIR/omi.c -lsqlite3"
+ENDIF
+
+IF "$choice" EQ "2" THEN EXECUTE "haxe -cp $ROOTDIR -main Omi -cpp $BUILDDIR/cpp" ENDIF
+IF "$choice" EQ "3" THEN EXECUTE "haxe -cp $ROOTDIR -main Omi -js $BUILDDIR/js/omi.js" ENDIF
+IF "$choice" EQ "4" THEN EXECUTE "haxe -cp $ROOTDIR -main Omi -python $BUILDDIR/python/omi.py" ENDIF
+IF "$choice" EQ "5" THEN EXECUTE "haxe -cp $ROOTDIR -main Omi -php $BUILDDIR/php" ENDIF
+IF "$choice" EQ "6" THEN EXECUTE "haxe -cp $ROOTDIR -main Omi -cs $BUILDDIR/cs" ENDIF
+IF "$choice" EQ "7" THEN EXECUTE "haxe -cp $ROOTDIR -main Omi -java $BUILDDIR/java" ENDIF
+IF "$choice" EQ "8" THEN EXECUTE "gcc -O2 -o $BUILDDIR/c89/omi $ROOTDIR/omi.c -lsqlite3" ENDIF
+
+ECHO "Build complete. Output in $BUILDDIR"

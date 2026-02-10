@@ -1,4 +1,4 @@
-# Server Setup Guide
+# Omi Server - PHP Implementation
 
 > **Documentation Index:** See [README.md](README.md) for documentation overview  
 > **Quick Start:** See [README.md](README.md#server-deployment)
@@ -340,6 +340,8 @@ ls -la settings.txt phpusers.txt repos/
 - **[CLI_PYTHON3.md](CLI_PYTHON3.md)** - CLI usage (Python 3)
 - **[CLI_HAXE5.md](CLI_HAXE5.md)** - CLI usage (Haxe 5)
 - **[CLI_CSHARP.md](CLI_CSHARP.md)** - CLI usage (C# / Mono)
+- **[CLI_C89.md](CLI_C89.md)** - CLI usage (C89)
+- **[CLI_TCL.md](CLI_TCL.md)** - CLI usage (Tcl)
 - **[CLI_BASH.md](CLI_BASH.md)** - CLI usage (Bash)
 - **[CLI_BAT.md](CLI_BAT.md)** - CLI usage (FreeDOS)
 - **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI usage (Amiga)

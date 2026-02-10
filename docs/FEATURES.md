@@ -37,6 +37,8 @@ Omi is a lightweight Git-like version control system designed for retro systems 
 - **Python 3.6+** - Pure Python (recommended)
 - **Haxe 5.0+** - Multi-target compiled language (native, Python, JS, C#)
 - **C# / Mono** - Compiled CLI with .NET compatibility
+- **C89** - Portable C implementation (classic compilers)
+- **Tcl 8.5+** - Tclsh scripting language
 - **AmigaShell** - Native script for Commodore Amiga systems
 - **FreeDOS Batch** - Compatible with FreeDOS and DOS variants
 - **Bash** - Unix/Linux shell script
@@ -167,7 +169,7 @@ Omi is a lightweight Git-like version control system designed for retro systems 
 - **CLI_BAT.md** - Command line for FreeDOS/Windows
 - **CLI_AMIGASHELL.md** - Command line for Commodore Amiga
 - **WEB.md** - Web interface documentation
-- **SERVER.md** - Server setup and configuration
+- **SERVER_PHP.md** - PHP server setup and configuration
 - **DATABASE_SCHEMA.md** - Database structure details
 
 ## Performance & Efficiency
@@ -222,6 +224,8 @@ Omi is a lightweight Git-like version control system designed for retro systems 
 - **[CLI_PYTHON3.md](CLI_PYTHON3.md)** - CLI commands (Python 3)
 - **[CLI_HAXE5.md](CLI_HAXE5.md)** - CLI commands (Haxe 5)
 - **[CLI_CSHARP.md](CLI_CSHARP.md)** - CLI commands (C# / Mono)
+- **[CLI_C89.md](CLI_C89.md)** - CLI commands (C89)
+- **[CLI_TCL.md](CLI_TCL.md)** - CLI commands (Tcl)
 - **[CLI_BASH.md](CLI_BASH.md)** - CLI commands (Bash)
 - **[CLI_BAT.md](CLI_BAT.md)** - CLI commands (FreeDOS)
 - **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI commands (Amiga)

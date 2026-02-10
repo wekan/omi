@@ -31,11 +31,11 @@ class Settings:
         """Load settings from settings.txt file"""
         settings = {}
         
-        if not os.path.exists("settings.txt"):
+        if not os.path.exists("../settings.txt"):
             print("Error: settings.txt not found")
             sys.exit(1)
         
-        with open("settings.txt", "r") as f:
+        with open("../settings.txt", "r") as f:
             for line in f:
                 match = re.match(r"^([^=]+)=(.*)$", line.strip())
                 if match:
