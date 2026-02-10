@@ -132,26 +132,61 @@ function checkBruteForce($username) {
     return false;
 }
 
-// Load users from phpusers.txt (format: username:password:otp)
+// Load users from phpusers.txt (format: username:password:otp:language)
 function loadUsers() {
     $users = [];
     if (file_exists(USERS_FILE)) {
         $lines = file(USERS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         foreach ($lines as $line) {
             if (strpos($line, ':') !== false) {
-                $parts = explode(':', $line, 3);
+                $parts = explode(':', $line, 4);
                 $username = trim($parts[0]);
                 $password = trim($parts[1]);
                 $otp = isset($parts[2]) ? trim($parts[2]) : '';
-                $users[$username] = ['password' => $password, 'otp' => $otp];
+                $language = isset($parts[3]) ? trim($parts[3]) : 'en';
+                $users[$username] = ['password' => $password, 'otp' => $otp, 'language' => $language];
             }
         }
     }
     return $users;
 }
 
-// Generate random OTP secret (base32)
-function generateOTPSecret($length = 16) {
+// Get browser language from Accept-Language header
+function getBrowserLanguage() {
+    $acceptLanguage = $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? 'en';
+    $languages = explode(',', $acceptLanguage);
+    $lang = trim(explode(';', $languages[0])[0]);
+    // Normalize language code (en-US -> en)
+    if (strpos($lang, '-') !== false) {
+        $parts = explode('-', $lang);
+        return strtolower($parts[0]);
+    }
+    return strtolower($lang);
+}
+
+// Load translation file
+function loadTranslations($language = 'en') {
+    $langFile = __DIR__ . '/i18n/' . $language . '.i18n.json';
+    if (!file_exists($langFile)) {
+        $langFile = __DIR__ . '/i18n/en.i18n.json';
+    }
+    if (file_exists($langFile)) {
+        $json = file_get_contents($langFile);
+        return json_decode($json, true) ?: [];
+    }
+    return [];
+}
+
+// Get translation
+function t($key, $translations = []) {
+    if (isset($translations[$key])) {
+        return $translations[$key];
+    }
+    return $key;
+}
+
+// Generate TOTP secret
+function generateSecret($length = 32) {
     $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
     $secret = '';
     for ($i = 0; $i < $length; $i++) {
@@ -786,11 +821,27 @@ function commitFile($db, $filename, $content) {
         // Get current datetime
         $datetime = date('Y-m-d H:i:s');
 
+        // Get latest commit to preserve existing files
+        $stmt = $pdo->query("SELECT id FROM commits ORDER BY id DESC LIMIT 1");
+        $latestCommit = $stmt->fetch(PDO::FETCH_ASSOC);
+
         // Create commit
         $stmt = $pdo->prepare("INSERT INTO commits (message, datetime, user) VALUES (?, ?, ?)");
         $stmt->execute(["Edited: $filename", $datetime, getUsername()]);
 
         $commitId = $pdo->lastInsertId();
+
+        // Preserve all existing files from latest commit (except the one being updated)
+        if ($latestCommit) {
+            $stmt = $pdo->prepare("SELECT filename, hash, datetime FROM files WHERE commit_id = ? AND filename != ?");
+            $stmt->execute([$latestCommit['id'], $filename]);
+            $existingFiles = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            foreach ($existingFiles as $file) {
+                $stmt = $pdo->prepare("INSERT INTO files (filename, hash, datetime, commit_id) VALUES (?, ?, ?, ?)");
+                $stmt->execute([$file['filename'], $file['hash'], $file['datetime'], $commitId]);
+            }
+        }
 
         // Add file record
         $stmt = $pdo->prepare("INSERT INTO files (filename, hash, datetime, commit_id) VALUES (?, ?, ?, ?)");
@@ -827,11 +878,27 @@ function uploadFile($db, $filename, $content) {
         // Get current datetime
         $datetime = date('Y-m-d H:i:s');
 
+        // Get latest commit to preserve existing files
+        $stmt = $pdo->query("SELECT id FROM commits ORDER BY id DESC LIMIT 1");
+        $latestCommit = $stmt->fetch(PDO::FETCH_ASSOC);
+
         // Create commit
         $stmt = $pdo->prepare("INSERT INTO commits (message, datetime, user) VALUES (?, ?, ?)");
         $stmt->execute(["Uploaded: $filename", $datetime, getUsername()]);
 
         $commitId = $pdo->lastInsertId();
+
+        // Preserve all existing files from latest commit (except the one being updated)
+        if ($latestCommit) {
+            $stmt = $pdo->prepare("SELECT filename, hash, datetime FROM files WHERE commit_id = ? AND filename != ?");
+            $stmt->execute([$latestCommit['id'], $filename]);
+            $existingFiles = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            foreach ($existingFiles as $file) {
+                $stmt = $pdo->prepare("INSERT INTO files (filename, hash, datetime, commit_id) VALUES (?, ?, ?, ?)");
+                $stmt->execute([$file['filename'], $file['hash'], $file['datetime'], $commitId]);
+            }
+        }
 
         // Add file record
         $stmt = $pdo->prepare("INSERT INTO files (filename, hash, datetime, commit_id) VALUES (?, ?, ?, ?)");
@@ -853,13 +920,29 @@ function deleteFile($db, $filename) {
         // Get current datetime
         $datetime = date('Y-m-d H:i:s');
 
+        // Get latest commit to preserve existing files
+        $stmt = $pdo->query("SELECT id FROM commits ORDER BY id DESC LIMIT 1");
+        $latestCommit = $stmt->fetch(PDO::FETCH_ASSOC);
+
         // Create commit
         $stmt = $pdo->prepare("INSERT INTO commits (message, datetime, user) VALUES (?, ?, ?)");
         $stmt->execute(["Deleted: $filename", $datetime, getUsername()]);
 
         $commitId = $pdo->lastInsertId();
 
-        // Note: We don't need to insert a file record. 
+        // Preserve all existing files from latest commit EXCEPT the one being deleted
+        if ($latestCommit) {
+            $stmt = $pdo->prepare("SELECT filename, hash, datetime FROM files WHERE commit_id = ? AND filename != ?");
+            $stmt->execute([$latestCommit['id'], $filename]);
+            $existingFiles = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            foreach ($existingFiles as $file) {
+                $stmt = $pdo->prepare("INSERT INTO files (filename, hash, datetime, commit_id) VALUES (?, ?, ?, ?)");
+                $stmt->execute([$file['filename'], $file['hash'], $file['datetime'], $commitId]);
+            }
+        }
+
+        // Note: We don't insert a file record for the deleted file.
         // The file is "deleted" by not having a record in the latest commit.
         // Previous commits still have the file record pointing to the blob.
 
@@ -976,8 +1059,9 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-up') !== false) {
                 checkBruteForce($username);
                 $error = 'User already exists';
             } else {
-                // Add new user (with empty OTP field)
-                $line = $username . ':' . $password . ':' . "\n";
+                // Add new user with browser language detection
+                $browserLanguage = getBrowserLanguage();
+                $line = $username . ':' . $password . '::' . $browserLanguage . "\n";
                 if (file_put_contents(USERS_FILE, $line, FILE_APPEND | LOCK_EX)) {
                     $success = 'Account created! You can now sign in.';
                 } else {
@@ -1082,6 +1166,90 @@ if (strpos($_SERVER['REQUEST_URI'], '/settings') !== false && strpos($_SERVER['R
 <tr><td>CURL executable:</td><td><input type="text" name="CURL" size="50" value="<?php echo htmlspecialchars($settings['CURL'] ?? 'curl'); ?>"></td></tr>
 <tr><td colspan="2"><input type="submit" value="Save Settings"></td></tr>
 </table>
+</form>
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>
+    <?php
+    exit;
+}
+
+// Handle /language route
+if (strpos($_SERVER['REQUEST_URI'], '/language') !== false) {
+    if (!isLoggedIn()) {
+        header('Location: /sign-in');
+        exit;
+    }
+
+    $username = getUsername();
+    $users = loadUsers();
+    $currentLanguage = $users[$username]['language'] ?? 'en';
+    
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $newLanguage = $_POST['language'] ?? 'en';
+        
+        // Update language in users array
+        if (isset($users[$username])) {
+            $users[$username]['language'] = $newLanguage;
+            
+            // Save back to file
+            $userContent = '';
+            foreach ($users as $u => $data) {
+                $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . ':' . $data['language'] . "\n";
+            }
+            
+            if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
+                $currentLanguage = $newLanguage;
+                $success = 'Language changed successfully';
+            }
+        }
+    }
+    
+    // Load available languages
+    $langFile = __DIR__ . '/languages.json';
+    $languages = [];
+    if (file_exists($langFile)) {
+        $langData = json_decode(file_get_contents($langFile), true);
+        $languages = $langData ?: [];
+    }
+    
+    $translations = loadTranslations($currentLanguage);
+    
+    // Check if current language is RTL
+    $isRTL = false;
+    if (isset($languages[$currentLanguage]['rtl'])) {
+        $isRTL = $languages[$currentLanguage]['rtl'];
+    }
+    
+    $dirAttr = $isRTL ? 'rtl' : 'ltr';
+    ?>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html dir="<?php echo $dirAttr; ?>">
+<head>
+<title><?php echo isset($translations['language']) ? htmlspecialchars($translations['language']) : 'Language'; ?> - Omi Server</title>
+</head>
+<body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>Omi Server</h1></td><td align="right"><small><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a></small></td></tr>
+</table>
+<p><a href="/">[Home]</a> | <a href="/people">[People]</a> | <a href="/settings">[Settings]</a></p>
+<hr>
+<h2><?php echo isset($translations['language']) ? htmlspecialchars($translations['language']) : 'Select Language'; ?></h2>
+<?php if (isset($success)): ?>
+<p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p>
+<?php endif; ?>
+<form method="POST">
+<table border="1" cellpadding="5">
+<tr bgcolor="#333333"><th><font color="white">Language</font></th></tr>
+<?php foreach ($languages as $langCode => $langInfo): ?>
+<tr>
+<td><input type="radio" name="language" value="<?php echo htmlspecialchars($langCode); ?>" <?php echo ($currentLanguage === $langCode) ? 'checked' : ''; ?>> <?php echo htmlspecialchars($langInfo['name'] ?? $langCode); ?> (<?php echo htmlspecialchars($langCode); ?>) <?php echo ($langInfo['rtl'] ?? false) ? '(RTL)' : ''; ?></td>
+</tr>
+<?php endforeach; ?>
+</table>
+<br>
+<input type="submit" value="<?php echo isset($translations['save']) ? htmlspecialchars($translations['save']) : 'Save'; ?>">
 </form>
 <hr>
 <p><small>Omi Server</small></p>
@@ -1354,7 +1522,7 @@ if (isset($_GET['log'])) {
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1>Commit History - <?php echo htmlspecialchars($reponame); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="/settings">[Settings]</a> | <a href="/people">[People]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $reponame)); ?>">[Repository Root]</a></p>
+<p><a href="/">[Home]</a> | <a href="/settings">[Settings]</a> | <a href="/language">[Language]</a> | <a href="/people">[People]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $reponame)); ?>">[Repository Root]</a></p>
 <hr>
 <?php if (empty($commits)): ?>
 <p>No commits found</p>
@@ -1448,7 +1616,7 @@ if (isset($_GET['image'])) {
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="/settings">[Settings]</a> | <a href="/people">[People]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[Repository Root]</a></p>
+<p><a href="/">[Home]</a> | <a href="/settings">[Settings]</a> | <a href="/language">[Language]</a> | <a href="/people">[People]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[Repository Root]</a></p>
 <h2>Image: <?php echo htmlspecialchars($imagePath); ?></h2>
 <hr>
 <div style="text-align:center">
@@ -1577,7 +1745,7 @@ if (isset($_GET['image'])) {
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="?log=<?php echo urlencode($repoName); ?>">[Log]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[Repository Root]</a></p>
+<p><a href="/">[Home]</a> | <a href="/language">[Language]</a> | <a href="?log=<?php echo urlencode($repoName); ?>">[Log]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[Repository Root]</a></p>
 <h2>File: <?php echo htmlspecialchars($repoPath); ?></h2>
 <?php if ($show_delete_confirm): ?>
 <!-- Delete confirmation form (HTML 3.2 compatible, no JavaScript) -->
@@ -2100,7 +2268,7 @@ if (isset($_GET['image'])) {
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Omi Server - Repository List</h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
+<tr><td><h1>Omi Server - Repository List</h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[Language]</a> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
 </table>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#e8f4f8">

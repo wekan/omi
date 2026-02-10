@@ -1,0 +1,842 @@
+{
+  "ace": {
+    "code": "ace",
+    "tag": "ace",
+    "name": "Acehnese",
+    "rtl": false
+  },
+  "af": {
+    "code": "af",
+    "tag": "af",
+    "name": "Afrikaans",
+    "rtl": false
+  },
+  "af_ZA": {
+    "code": "af",
+    "tag": "af_ZA",
+    "name": "Afrikaans (South Africa)",
+    "rtl": false
+  },
+  "en_AU": {
+    "code": "en",
+    "tag": "en_AU",
+    "name": "English (Australia)",
+    "rtl": false
+  },
+  "en_ZA": {
+    "code": "en",
+    "tag": "en_ZA",
+    "name": "English (South Africa)",
+    "rtl": false
+  },
+  "ar-DZ": {
+    "code": "ar",
+    "tag": "ar-DZ",
+    "name": "دزيرية",
+    "rtl": true
+  },
+  "ar-EG": {
+    "code": "ar",
+    "tag": "ar-EG",
+    "name": "مَصرى",
+    "rtl": true
+  },
+  "ar": {
+    "code": "ar",
+    "tag": "ar",
+    "name": "العربية",
+    "rtl": true
+  },
+  "ary": {
+    "code": "ary",
+    "tag": "ary",
+    "name": "عربي مغربي",
+    "rtl": true
+  },
+  "az-AZ": {
+    "code": "az",
+    "tag": "az-AZ",
+    "name": "Azərbaycan (Azərbaycan)",
+    "rtl": false
+  },
+  "az-LA": {
+    "code": "az",
+    "tag": "az-LA",
+    "name": "Azərbaycan (Latin)",
+    "rtl": false
+  },
+  "az": {
+    "code": "az",
+    "tag": "az",
+    "name": "Azərbaycan",
+    "rtl": false
+  },
+  "bg": {
+    "code": "bg",
+    "tag": "bg",
+    "name": "Български",
+    "rtl": false
+  },
+  "br": {
+    "code": "br",
+    "tag": "br",
+    "name": "Brezhoneg",
+    "rtl": false
+  },
+  "ca": {
+    "code": "ca",
+    "tag": "ca",
+    "name": "Català",
+    "rtl": false
+  },
+  "ca-ES": {
+    "code": "ca",
+    "tag": "ca-ES",
+    "name": "Català (Espanya)",
+    "rtl": false
+  },
+  "cmn": {
+    "code": "cn",
+    "tag": "cnm",
+    "name": "官話 / 官话",
+    "rtl": false
+  },
+  "cs": {
+    "code": "cs",
+    "tag": "cs",
+    "name": "čeština",
+    "rtl": false
+  },
+  "cs-CZ": {
+    "code": "cs",
+    "tag": "cs-CZ",
+    "name": "čeština (Česká republika)",
+    "rtl": false
+  },
+  "cy-GB": {
+    "code": "cy",
+    "tag": "cy-GB",
+    "name": "Welsh (UK)",
+    "rtl": false
+  },
+  "cy": {
+    "code": "cy",
+    "tag": "cy",
+    "name": "Welsh",
+    "rtl": false
+  },
+  "da": {
+    "code": "da",
+    "tag": "da",
+    "name": "Dansk",
+    "rtl": false
+  },
+  "de-AT": {
+    "code": "de",
+    "tag": "de-AT",
+    "name": "Deutsch (Österreich)",
+    "rtl": false
+  },
+  "de-CH": {
+    "code": "de",
+    "tag": "de-CH",
+    "name": "Deutsch (Schweiz)",
+    "rtl": false
+  },
+  "de-DE": {
+    "code": "de",
+    "tag": "de-DE",
+    "name": "Deutsch (Deutschland)",
+    "rtl": false
+  },
+  "de": {
+    "code": "de",
+    "tag": "de",
+    "name": "Deutsch",
+    "rtl": false
+  },
+  "el-GR": {
+    "code": "el",
+    "tag": "el-GR",
+    "name": "Ελληνικά (Ελλάδα)",
+    "rtl": false
+  },
+  "el": {
+    "code": "el",
+    "tag": "el",
+    "name": "Ελληνικά",
+    "rtl": false
+  },
+  "en-BR": {
+    "code": "en",
+    "tag": "en-BR",
+    "name": "English (Brazil)",
+    "rtl": false
+  },
+  "en-DE": {
+    "code": "en",
+    "tag": "en-DE",
+    "name": "English (Germany)",
+    "rtl": false
+  },
+  "en-GB": {
+    "code": "en",
+    "tag": "en-GB",
+    "name": "English (UK)",
+    "rtl": false
+  },
+  "en-IT": {
+    "code": "en",
+    "tag": "en-IT",
+    "name": "English (Italy)",
+    "rtl": false
+  },
+  "en-MY": {
+    "code": "en",
+    "tag": "en-MY",
+    "name": "English (Malaysia)",
+    "rtl": false
+  },
+  "en-YS": {
+    "code": "en",
+    "tag": "en-YS",
+    "name": "English (Yeshivish)",
+    "rtl": false
+  },
+  "en": {
+    "code": "en",
+    "tag": "en",
+    "name": "English",
+    "rtl": false
+  },
+  "eo": {
+    "code": "eo",
+    "tag": "eo",
+    "name": "Esperanto",
+    "rtl": false
+  },
+  "ast-ES": {
+    "code": "es",
+    "tag": "ast-ES",
+    "name": "Español de Asturias",
+    "rtl": false
+  },
+  "es-AR": {
+    "code": "es",
+    "tag": "es-AR",
+    "name": "Español de Argentina",
+    "rtl": false
+  },
+  "es-CL": {
+    "code": "es",
+    "tag": "es-CL",
+    "name": "Español de Chile",
+    "rtl": false
+  },
+  "es-CO": {
+    "code": "es",
+    "tag": "es-CO",
+    "name": "Español en Colombia",
+    "rtl": false
+  },
+  "es-LA": {
+    "code": "es",
+    "tag": "es-LA",
+    "name": "Español de América Latina",
+    "rtl": false
+  },
+  "es-MX": {
+    "code": "es",
+    "tag": "es-MX",
+    "name": "Español de México",
+    "rtl": false
+  },
+  "es-PE": {
+    "code": "es",
+    "tag": "es-PE",
+    "name": "Español de Perú",
+    "rtl": false
+  },
+  "es-PY": {
+    "code": "es",
+    "tag": "es-PY",
+    "name": "Español de Paraguayo",
+    "rtl": false
+  },
+  "es": {
+    "code": "es",
+    "tag": "es",
+    "name": "Español",
+    "rtl": false
+  },
+  "et-EE": {
+    "code": "et",
+    "tag": "et-EE",
+    "name": "Eesti keel (Eesti)",
+    "rtl": false
+  },
+  "eu": {
+    "code": "eu",
+    "tag": "eu",
+    "name": "Euskara",
+    "rtl": false
+  },
+  "fa-IR": {
+    "code": "fa",
+    "tag": "fa-IR",
+    "name": "فارسی/پارسی (ایران\u200e)",
+    "rtl": true
+  },
+  "fa": {
+    "code": "fa",
+    "tag": "fa",
+    "name": "فارسی",
+    "rtl": true
+  },
+  "fi": {
+    "code": "fi",
+    "tag": "fi",
+    "name": "Suomi",
+    "rtl": false
+  },
+  "fr-BE": {
+    "code": "fr",
+    "tag": "fr-BE",
+    "name": "Français (Belgique)",
+    "rtl": false
+  },
+  "fr-CA": {
+    "code": "fr",
+    "tag": "fr-CA",
+    "name": "Français (Canada)",
+    "rtl": false
+  },
+  "fr-CH": {
+    "code": "fr",
+    "tag": "fr-CH",
+    "name": "Français (Schweiz)",
+    "rtl": false
+  },
+  "fr": {
+    "code": "fr",
+    "tag": "fr",
+    "name": "Français",
+    "rtl": false
+  },
+  "fy-NL": {
+    "code": "fy",
+    "tag": "fy-NL",
+    "name": "Westerlauwersk Frysk (Nederlân)",
+    "rtl": false
+  },
+  "fy": {
+    "code": "fy",
+    "tag": "fy",
+    "name": "Westerlauwersk Frysk",
+    "rtl": false
+  },
+  "gl-ES": {
+    "code": "gl",
+    "tag": "gl-ES",
+    "name": "Galego (España)",
+    "rtl": false
+  },
+  "gl": {
+    "code": "gl",
+    "tag": "gl",
+    "name": "Galego",
+    "rtl": false
+  },
+  "gu-IN": {
+    "code": "gu",
+    "tag": "gu-IN",
+    "name": "ગુજરાતી",
+    "rtl": false
+  },
+  "he-IL": {
+    "code": "he",
+    "tag": "he-IL",
+    "name": "עברית (ישראל)",
+    "rtl": true
+  },
+  "he": {
+    "code": "he",
+    "tag": "he",
+    "name": "עברית",
+    "rtl": true
+  },
+  "hi-IN": {
+    "code": "hi",
+    "tag": "hi-IN",
+    "name": "हिंदी (भारत)",
+    "rtl": false
+  },
+  "hi": {
+    "code": "hi",
+    "tag": "hi",
+    "name": "हिन्दी",
+    "rtl": false
+  },
+  "hr": {
+    "code": "hr",
+    "tag": "hr",
+    "name": "Hrvatski",
+    "rtl": false
+  },
+  "hu": {
+    "code": "hu",
+    "tag": "hu",
+    "name": "Magyar",
+    "rtl": false
+  },
+  "hy": {
+    "code": "hy",
+    "tag": "hy",
+    "name": "Հայերեն",
+    "rtl": false
+  },
+  "id": {
+    "code": "id",
+    "tag": "id",
+    "name": "Bahasa Indonesia",
+    "rtl": false
+  },
+  "ig": {
+    "code": "ig",
+    "tag": "ig",
+    "name": "Igbo",
+    "rtl": false
+  },
+  "it": {
+    "code": "it",
+    "tag": "it",
+    "name": "Italiano",
+    "rtl": false
+  },
+  "ja": {
+    "code": "ja",
+    "tag": "ja",
+    "name": "日本語",
+    "rtl": false
+  },
+  "ja-Hira": {
+    "code": "ja",
+    "tag": "ja-Hira",
+    "name": "平仮名",
+    "rtl": false
+  },
+  "ja-JP": {
+    "code": "ja",
+    "tag": "ja-JP",
+    "name": "日本語（日本）",
+    "rtl": false
+  },
+  "ka": {
+    "code": "ka",
+    "tag": "ka",
+    "name": "ქართული",
+    "rtl": false
+  },
+  "km": {
+    "code": "km",
+    "tag": "km",
+    "name": "ភាសាខ្មែរ",
+    "rtl": false
+  },
+  "km-KH": {
+    "code": "km",
+    "tag": "km_KH",
+    "name": "ខ្មែរ (កម្ពុជា)",
+    "rtl": false
+  },
+  "ko-KR": {
+    "code": "ko",
+    "tag": "ko-KR",
+    "name": "한국어(한국)",
+    "rtl": false
+  },
+  "ko": {
+    "code": "ko",
+    "tag": "ko",
+    "name": "한국어",
+    "rtl": false
+  },
+  "lt": {
+    "code": "lt",
+    "tag": "lt",
+    "name": "Lietuvių kalba",
+    "rtl": false
+  },
+  "lv": {
+    "code": "lv",
+    "tag": "lv",
+    "name": "Latviešu valoda",
+    "rtl": false
+  },
+  "mk": {
+    "code": "mk",
+    "tag": "mk",
+    "name": "македонски јазик",
+    "rtl": false
+  },
+  "mn": {
+    "code": "mn",
+    "tag": "mn",
+    "name": "Монгол",
+    "rtl": false
+  },
+  "ms": {
+    "code": "ms",
+    "tag": "ms",
+    "name": "بهاس ملايو",
+    "rtl": false
+  },
+  "ms-MY": {
+    "code": "ms",
+    "tag": "ms-MY",
+    "name": "بهاس ملايو (Malaysia)",
+    "rtl": false
+  },
+  "nb": {
+    "code": "nb",
+    "tag": "nb",
+    "name": "Norsk bokmål",
+    "rtl": false
+  },
+  "nl-NL": {
+    "code": "nl",
+    "tag": "nl-NL",
+    "name": "Nederlands (Nederland)",
+    "rtl": false
+  },
+  "nl": {
+    "code": "nl",
+    "tag": "nl",
+    "name": "Nederlands",
+    "rtl": false
+  },
+  "oc": {
+    "code": "oc",
+    "tag": "oc",
+    "name": "Occitan",
+    "rtl": false
+  },
+  "or-IN": {
+    "code": "or",
+    "tag": "or-IN",
+    "name": "ଓଡିଆ (ଭାରତ)",
+    "rtl": false
+  },
+  "pa": {
+    "code": "pa",
+    "tag": "pa",
+    "name": "ਪੰਜਾਬੀ",
+    "rtl": false
+  },
+  "pl-PL": {
+    "code": "pl",
+    "tag": "pl-PL",
+    "name": "Polski (Polska)",
+    "rtl": false
+  },
+  "pl": {
+    "code": "pl",
+    "tag": "pl",
+    "name": "Polski",
+    "rtl": false
+  },
+  "pt-BR": {
+    "code": "pt",
+    "tag": "pt-BR",
+    "name": "Português do Brasil",
+    "rtl": false
+  },
+  "pt": {
+    "code": "pt",
+    "tag": "pt",
+    "name": "Português",
+    "rtl": false
+  },
+  "pt-PT": {
+    "code": "pt",
+    "tag": "pt-PT",
+    "name": "Português de Portugal",
+    "rtl": false
+  },
+  "ro": {
+    "code": "ro",
+    "tag": "ro",
+    "name": "Română",
+    "rtl": false
+  },
+  "ro-RO": {
+    "code": "ro",
+    "tag": "ro-RO",
+    "name": "Română (România)",
+    "rtl": false
+  },
+  "ru": {
+    "code": "ru",
+    "tag": "ru",
+    "name": "Русский",
+    "rtl": false
+  },
+  "ru-RU": {
+    "code": "ru",
+    "tag": "ru_RU",
+    "name": "Русский язык (Россия)",
+    "rtl": false
+  },
+  "sk": {
+    "code": "sk",
+    "tag": "sk",
+    "name": "Slovenčina",
+    "rtl": false
+  },
+  "sl": {
+    "code": "sl",
+    "tag": "sl",
+    "name": "Slovenščina",
+    "rtl": false
+  },
+  "sl_SI": {
+    "code": "sl",
+    "tag": "sl_SI",
+    "name": "Slovenščina (slovenija)",
+    "rtl": false
+  },
+  "sr": {
+    "code": "sr",
+    "tag": "sr",
+    "name": "Српски језик",
+    "rtl": false
+  },
+  "sv": {
+    "code": "sv",
+    "tag": "sv",
+    "name": "Svenska",
+    "rtl": false
+  },
+  "sw": {
+    "code": "sw",
+    "tag": "sw",
+    "name": "Kiswahili",
+    "rtl": false
+  },
+  "ta": {
+    "code": "ta",
+    "tag": "ta",
+    "name": "தமிழ்",
+    "rtl": false
+  },
+  "te-IN": {
+    "code": "te",
+    "tag": "te_IN",
+    "name": "తెలుగు (భారతదేశం)",
+    "rtl": false
+  },
+  "th": {
+    "code": "th",
+    "tag": "th",
+    "name": "ไทย",
+    "rtl": false
+  },
+  "tlh": {
+    "code": "tlh",
+    "tag": "tlh",
+    "name": "TlhIngan Hol",
+    "rtl": false
+  },
+  "tr": {
+    "code": "tr",
+    "tag": "tr",
+    "name": "Türkçe",
+    "rtl": false
+  },
+  "ug": {
+    "code": "ug",
+    "tag": "ug",
+    "name": "ئۇيغۇر تىلى",
+    "rtl": true
+  },
+  "uk": {
+    "code": "uk",
+    "tag": "uk",
+    "name": "українська мова",
+    "rtl": false
+  },
+  "uk-UA": {
+    "code": "uk",
+    "tag": "uk-UA",
+    "name": "Українська (Україна)",
+    "rtl": false
+  },
+  "uz-AR": {
+    "code": "uz",
+    "tag": "uz-AR",
+    "name": "O'zbek (arab)",
+    "rtl": true
+  },
+  "uz-LA": {
+    "code": "uz",
+    "tag": "uz-LA",
+    "name": "O'zbek (lotin)",
+    "rtl": false
+  },
+  "uz-UZ": {
+    "code": "uz",
+    "tag": "uz-UZ",
+    "name": "O'zbek (O'zbekiston)",
+    "rtl": false
+  },
+  "uz": {
+    "code": "uz",
+    "tag": "uz",
+    "name": "O'zbek",
+    "rtl": false
+  },
+  "ve-CC": {
+    "code": "ve",
+    "tag": "ve-CC",
+    "name": "Vèneto",
+    "rtl": false
+  },
+  "ve-PP": {
+    "code": "ve",
+    "tag": "ve-PP",
+    "name": "Vepsän kelʹ",
+    "rtl": false
+  },
+  "ve": {
+    "code": "ve",
+    "tag": "ve",
+    "name": "Tshivenḓa",
+    "rtl": false
+  },
+  "vi-VN": {
+    "code": "vi",
+    "tag": "vi-VN",
+    "name": "Tiếng Việt (Việt Nam)",
+    "rtl": false
+  },
+  "vi": {
+    "code": "vi",
+    "tag": "vi",
+    "name": "Tiếng Việt",
+    "rtl": false
+  },
+  "vl-SS": {
+    "code": "vl",
+    "tag": "vl-SS",
+    "name": "Vlaams",
+    "rtl": false
+  },
+  "vo": {
+    "code": "vo",
+    "tag": "vo",
+    "name": "Volapük",
+    "rtl": false
+  },
+  "wa-RR": {
+    "code": "wa",
+    "tag": "wa-RR",
+    "name": "Wáray-Wáray",
+    "rtl": false
+  },
+  "wa": {
+    "code": "wa",
+    "tag": "wa",
+    "name": "Walon",
+    "rtl": false
+  },
+  "wo": {
+    "code": "wo",
+    "tag": "wo",
+    "name": "ولوفل",
+    "rtl": true
+  },
+  "xh": {
+    "code": "xh",
+    "tag": "xh",
+    "name": "IsiXhosa",
+    "rtl": false
+  },
+  "yi": {
+    "code": "yi",
+    "tag": "yi",
+    "name": "ייִדיש, יידיש",
+    "rtl": true
+  },
+  "yo": {
+    "code": "yo",
+    "tag": "yo",
+    "name": "Èdè Yorùbá",
+    "rtl": false
+  },
+  "zgh": {
+    "code": "zgh",
+    "tag": "zgh",
+    "name": "ⵜⴰⵎⴰⵣⵉⵖⵜ ⵜⴰⵏⴰⵡⴰⵢⵜ",
+    "rtl": false
+  },
+  "yue_CN": {
+    "code": "yue",
+    "tag": "yue_CN",
+    "name": "廣東話",
+    "rtl": false
+  },
+  "zh-CN": {
+    "code": "zh",
+    "tag": "zh-CN",
+    "name": "简体中文",
+    "rtl": false
+  },
+  "zh-GB": {
+    "code": "zh",
+    "tag": "zh-GB",
+    "name": "简体中文 GB2312",
+    "rtl": false
+  },
+  "zh-Hans": {
+    "code": "zh",
+    "tag": "zh-Hans",
+    "name": "简化字",
+    "rtl": false
+  },
+  "zh-Hant": {
+    "code": "zh",
+    "tag": "zh-Hant",
+    "name": "正體字",
+    "rtl": false
+  },
+  "zh-HK": {
+    "code": "zh",
+    "tag": "zh-HK",
+    "name": "繁体中文（香港）",
+    "rtl": false
+  },
+  "zh-SG": {
+    "code": "zh",
+    "tag": "zh-SG",
+    "name": "中文 (新加坡)",
+    "rtl": false
+  },
+  "zh-TW": {
+    "code": "zh",
+    "tag": "zh-TW",
+    "name": "繁體中文（台灣）",
+    "rtl": false
+  },
+  "zu-ZA": {
+    "code": "zu",
+    "tag": "zu-ZA",
+    "name": "IsiZulu (Ningizimu Afrika)",
+    "rtl": false
+  },
+  "zu": {
+    "code": "zu",
+    "tag": "zu",
+    "name": "IsiZulu",
+    "rtl": false
+  }
+}

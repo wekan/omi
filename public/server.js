@@ -155,7 +155,7 @@ function checkBruteForce(username) {
   return false;
 }
 
-// Load users from phpusers.txt (format: username:password:otp)
+// Load users (format: username:password:otp:language)
 function loadUsers() {
   const users = {};
   if (fs.existsSync(USERS_FILE)) {
@@ -168,15 +168,52 @@ function loadUsers() {
         const username = parts[0].trim();
         const password = parts[1].trim();
         const otp = parts[2] ? parts[2].trim() : '';
-        users[username] = { password, otp };
+        const language = parts[3] ? parts[3].trim() : 'en';
+        users[username] = { password, otp, language };
       }
     }
   }
   return users;
 }
 
-// Generate random OTP secret (base32)
-function generateOTPSecret(length = 16) {
+// Get browser language from Accept-Language header
+function getBrowserLanguage(req) {
+  const acceptLanguage = req.headers['accept-language'] || 'en';
+  const languages = acceptLanguage.split(',');
+  const lang = languages[0].split(';')[0].trim();
+  // Normalize language code (en-US -> en)
+  if (lang.includes('-')) {
+    return lang.split('-')[0].toLowerCase();
+  }
+  return lang.toLowerCase();
+}
+
+// Load translation file
+function loadTranslations(language = 'en') {
+  const langFile = path.join(__dirname, 'i18n', `${language}.i18n.json`);
+  try {
+    if (fs.existsSync(langFile)) {
+      return JSON.parse(fs.readFileSync(langFile, 'utf-8'));
+    }
+  } catch (e) {
+    // Fallback to English if file doesn't exist or is invalid
+  }
+  // Load English as fallback
+  const fallbackFile = path.join(__dirname, 'i18n', 'en.i18n.json');
+  try {
+    return JSON.parse(fs.readFileSync(fallbackFile, 'utf-8'));
+  } catch (e) {
+    return {};
+  }
+}
+
+// Get translation
+function t(key, translations = {}) {
+  return translations[key] || key;
+}
+
+// Generate TOTP secret
+function generateSecret(length = 32) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   let secret = '';
   for (let i = 0; i < length; i++) {
@@ -502,9 +539,37 @@ async function commitFileToRepo(dbPath, filename, content, username, message, sq
   const safeMessage = escapeSqliteString(message);
   const safeUser = escapeSqliteString(username || 'system');
 
+  // Get all files from the latest commit to preserve them
+  const latestCommitSql = 'SELECT id FROM commits ORDER BY id DESC LIMIT 1';
+  const latestCommitOutput = await runSqliteQuery(sqliteCmd, dbPath, latestCommitSql);
+  const latestCommitId = latestCommitOutput.trim();
+  
+  let preserveFilesSql = '';
+  if (latestCommitId) {
+    // Get all files from latest commit except the one being updated
+    const filesSql = `SELECT filename, hash, datetime FROM files WHERE commit_id = ${latestCommitId} AND filename != '${safeFilename}'`;
+    const filesOutput = await runSqliteQuery(sqliteCmd, dbPath, filesSql);
+    
+    if (filesOutput.trim()) {
+      const existingFiles = filesOutput.trim().split('\n').map(line => {
+        const [fname, fhash, fdatetime] = line.split('\x1f');
+        return { filename: fname, hash: fhash, datetime: fdatetime };
+      });
+      
+      // Build SQL to re-insert existing files into new commit
+      for (const file of existingFiles) {
+        const safeFname = escapeSqliteString(file.filename);
+        const safeFhash = escapeSqliteString(file.hash);
+        const safeFdatetime = escapeSqliteString(file.datetime);
+        preserveFilesSql += `INSERT INTO files (filename, hash, datetime, commit_id) VALUES ('${safeFname}', '${safeFhash}', '${safeFdatetime}', (SELECT id FROM commits ORDER BY id DESC LIMIT 1)); `;
+      }
+    }
+  }
+
   const sql = `BEGIN; ` +
     `INSERT OR IGNORE INTO blobs (hash, data, size) VALUES ('${hash}', X'${hexData}', ${size}); ` +
     `INSERT INTO commits (message, datetime, user) VALUES ('${safeMessage}', '${datetime}', '${safeUser}'); ` +
+    preserveFilesSql +
     `INSERT INTO files (filename, hash, datetime, commit_id) VALUES ('${safeFilename}', '${hash}', '${datetime}', (SELECT id FROM commits ORDER BY id DESC LIMIT 1)); ` +
     `COMMIT;`;
 
@@ -515,8 +580,40 @@ async function deleteFileFromRepo(dbPath, filename, username, message, sqliteCmd
   const datetime = formatDateTime(new Date());
   const safeMessage = escapeSqliteString(message);
   const safeUser = escapeSqliteString(username || 'system');
+  const safeFilename = escapeSqliteString(filename);
 
-  const sql = `INSERT INTO commits (message, datetime, user) VALUES ('${safeMessage}', '${datetime}', '${safeUser}');`;
+  // Get all files from the latest commit to preserve them (except the deleted one)
+  const latestCommitSql = 'SELECT id FROM commits ORDER BY id DESC LIMIT 1';
+  const latestCommitOutput = await runSqliteQuery(sqliteCmd, dbPath, latestCommitSql);
+  const latestCommitId = latestCommitOutput.trim();
+  
+  let preserveFilesSql = '';
+  if (latestCommitId) {
+    // Get all files from latest commit except the one being deleted
+    const filesSql = `SELECT filename, hash, datetime FROM files WHERE commit_id = ${latestCommitId} AND filename != '${safeFilename}'`;
+    const filesOutput = await runSqliteQuery(sqliteCmd, dbPath, filesSql);
+    
+    if (filesOutput.trim()) {
+      const existingFiles = filesOutput.trim().split('\n').map(line => {
+        const [fname, fhash, fdatetime] = line.split('\x1f');
+        return { filename: fname, hash: fhash, datetime: fdatetime };
+      });
+      
+      // Build SQL to re-insert existing files into new commit
+      for (const file of existingFiles) {
+        const safeFname = escapeSqliteString(file.filename);
+        const safeFhash = escapeSqliteString(file.hash);
+        const safeFdatetime = escapeSqliteString(file.datetime);
+        preserveFilesSql += `INSERT INTO files (filename, hash, datetime, commit_id) VALUES ('${safeFname}', '${safeFhash}', '${safeFdatetime}', (SELECT id FROM commits ORDER BY id DESC LIMIT 1)); `;
+      }
+    }
+  }
+
+  const sql = `BEGIN; ` +
+    `INSERT INTO commits (message, datetime, user) VALUES ('${safeMessage}', '${datetime}', '${safeUser}'); ` +
+    preserveFilesSql +
+    `COMMIT;`;
+  
   await runSqliteCommand(sqliteCmd, dbPath, sql);
 }
 
@@ -923,7 +1020,8 @@ ${otpInput}
           checkBruteForce(username);
           error = 'User already exists';
         } else {
-          const line = `${username}:${password}:\n`;
+          const browserLanguage = getBrowserLanguage(req);
+          const line = `${username}:${password}::${browserLanguage}\n`;
           try {
             fs.appendFileSync(USERS_FILE, line);
             success = 'Account created! You can now sign in.';
@@ -991,6 +1089,80 @@ ${form}
     return;
   }
 
+  // Handle language selection
+  if (pathname === '/language') {
+    const username = req.session?.username;
+    if (!username) {
+      res.writeHead(302, { 'Location': '/sign-in' });
+      res.end();
+      return;
+    }
+
+    if (req.method === 'POST') {
+      const postData = await parseFormData(req);
+      const selectedLanguage = postData.language || 'en';
+      
+      // Update user's language preference
+      users[username].language = selectedLanguage;
+      
+      // Save updated users
+      const usersContent = Object.entries(users)
+        .map(([name, data]) => `${name}:${data.password}:${data.otp || ''}:${data.language || 'en'}`)
+        .join('\n');
+      fs.writeFileSync(usersPath, usersContent, { flag: 'w' });
+      
+      res.writeHead(302, { 'Location': '/language?success=1' });
+      res.end();
+      return;
+    }
+
+    const successMsg = req.url.includes('success') ? '<p style="color: green;">Language preference updated!</p>' : '';
+    const currentLanguage = users[username]?.language || 'en';
+    
+    // Load languages from languages.json
+    let languagesData = {};
+    try {
+      const languagesFile = fs.readFileSync(path.join(__dirname, 'languages.json'), 'utf8');
+      languagesData = JSON.parse(languagesFile);
+    } catch (e) {
+      console.error('Error loading languages.json:', e.message);
+    }
+    
+    // Check if current language is RTL
+    const isRTL = languagesData[currentLanguage]?.rtl === true;
+    const dirAttr = isRTL ? 'rtl' : 'ltr';
+
+    // Build form with radio buttons for all languages
+    let form = '<form method="POST"><table border="1" cellpadding="5">\n';
+    form += '<tr><td colspan="2"><b>Select Your Language:</b></td></tr>\n';
+    for (const [langCode, langInfo] of Object.entries(languagesData)) {
+      const isSelected = langCode === currentLanguage ? 'checked' : '';
+      const rtlIndicator = (langInfo.rtl === true) ? ' (RTL)' : '';
+      const langName = `${langInfo.name || langCode} (${langCode})${rtlIndicator}`;
+      form += `<tr><td><input type="radio" name="language" value="${langCode}" ${isSelected}></td><td>${langName}</td></tr>\n`;
+    }
+    form += '<tr><td colspan="2"><input type="submit" value="Save Language"></td></tr>\n';
+    form += '</table></form>\n';
+
+    const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html dir="${dirAttr}">
+<head>
+<title>Language Selection - Omi Server</title>
+</head>
+<body bgcolor="#f0f0f0" dir="${dirAttr}">
+<h1>Omi Server - Language Selection</h1>
+<table border="0" cellpadding="5">
+<tr><td><a href="/">[Home]</a> | <a href="/log">[Log]</a> | <a href="/language">[Language]</a></td></tr>
+</table>
+${successMsg}
+${form}
+</body>
+</html>`;
+
+    sendHtml(res, html);
+    return;
+  }
+
   // Handle settings
   if (pathname === '/settings' && !pathname.includes('/sign')) {
     if (!isLoggedIn(req)) {
@@ -1029,7 +1201,7 @@ ${form}
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1>Settings</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="/settings">[Settings]</a> | <a href="/people">[People]</a></p>
+<p><a href="/">[Home]</a> | <a href="/language">[Language]</a> | <a href="/settings">[Settings]</a> | <a href="/people">[People]</a></p>
 <hr>
 <form method="POST">
 <table border="1" cellpadding="5">
@@ -1454,7 +1626,7 @@ ${markdownToHtml(displayContent)}
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small>${username ? `<strong>${escapeHtml(username)}</strong> | <a href="/logout">[Logout]</a>` : '<a href="/sign-in">[Sign In]</a>'}</small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="/${escapeHtml(repoRoot)}">[Repository Root]</a></p>
+<p><a href="/">[Home]</a> | <a href="/language">[Language]</a> | <a href="/${escapeHtml(repoRoot)}">[Repository Root]</a></p>
 <h2>File: ${escapeHtml(fileEntry.filename)}</h2>
 <p><a href="?download=1">[Download]</a></p>
 ${fileActions}
