@@ -469,5 +469,5 @@ omi push
 
 ---
 
-**Other CLI Versions:** [CLI_BASH.md](CLI_BASH.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)  
+**Other CLI Versions:** [CLI_PYTHON3.md](CLI_PYTHON3.md) | [CLI_HAXE5.md](CLI_HAXE5.md) | [CLI_CSHARP.md](CLI_CSHARP.md) | [CLI_BASH.md](CLI_BASH.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md) | [CLI_LUA.md](CLI_LUA.md)  
 **See Also:** [WEB.md](WEB.md) | [SERVER.md](SERVER.md) | [FEATURES.md](FEATURES.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) | [README.md](README.md)

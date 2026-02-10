@@ -91,16 +91,98 @@ The Omi web interface is a PHP application that provides:
 5. Click [Save]
 6. New commit created automatically
 
-### Commit Information
-When you save a file:
-- **Message**: "Edited: filename"
-- **Author**: Your username
-- **Datetime**: Current timestamp
-- **Deduplication**: Identical content reuses existing blob
-
 ### Cancel Editing
 1. Click [Cancel] to discard changes
 2. Returns to viewing mode
+
+#### Markdown Files (.md)
+- **Markdown rendering** - Automatically convert markdown to HTML
+- **Preview styled** - Displays formatted text, headers, bold, italic, links, lists, code blocks
+- **Source view** - Shows original markdown when logged in
+- **Edit support** - Can edit markdown source (changes create new commit)
+
+#### SVG Files (.svg)
+- **Vector graphics support** - Display scalable SVG images
+- **Security scanning** - Automatically checks for dangerous JavaScript and XML entities
+- **Safety warning** - Shows alert if SVG contains suspicious content
+- **GIF fallback** - For browsers without native SVG support, automatically converts using ImageMagick
+- **Source available** - When logged in, can view and edit SVG source code
+
+#### Audio Files (.mp3, .ogg, .wav, .flac, etc.)
+- **Native HTML5 player** - Built-in audio controls
+- **No JavaScript required** - Works in HTML 3.2 browsers
+- **Standard controls** - Play, pause, volume, seek
+- **Fallback download** - For very old browsers, shows download link
+
+#### Video Files (.mp4, .webm, .ogv, .mov, etc.)
+- **Native HTML5 player** - Built-in video controls with full player UI
+- **No JavaScript required** - Works in HTML 3.2 compliant browsers
+- **Standard controls** - Play, pause, volume, fullscreen, seek
+- **Fallback download** - For unsupported formats, shows download link
+
+## File Upload
+
+### Upload a File
+1. Navigate to desired directory
+2. Scroll to "Upload New File" form (must be logged in)
+3. Enter filename (e.g., `document.txt`, `image.png`)
+4. Enter file content (paste for text, or upload button for images)
+5. Click [Upload]
+6. File added to repository with new commit
+
+### Commit Information
+When you upload a file:
+- **Message**: "Uploaded: filename"
+- **Author**: Your username
+- **Datetime**: Current timestamp
+- **Deduplication**: Identical content reuses existing blob (same file twice = 1 blob)
+
+### Supported Upload Types
+- Text files (.txt, .md, .html, .php, .sh, .bat, .asm, etc.)
+- Images (.jpg, .png, .gif, .bmp, .svg, etc.)
+- Archives (.zip, .rar, .7z, .tar, .gz, etc.)
+- Media (.mp3, .ogg, .wav, .mp4, .webm, .flv, etc.)
+- Any file type (binary safe)
+
+## File Download
+
+### Download a File
+1. Navigate to file in repository
+2. Click file name or link
+3. File details displayed
+4. Click [Download] button
+5. File downloaded to your computer
+
+### What Gets Downloaded
+- **Text files** - Original unchanged text
+- **Images** - Original image file in native format
+- **Archives** - Original archive file
+- **Media** - Original audio/video file
+- **Any file** - Byte-for-byte copy from repository
+
+### SHA256 Verification
+- File SHA256 hash displayed
+- Verify integrity after download if needed
+- Deduplication uses this hash
+
+## File Deletion
+
+### Delete a File
+1. Navigate to file in repository
+2. Must be logged in
+3. Click [Delete] button
+4. Confirmation page appears
+5. Review filename and confirm deletion
+6. Click [Confirm Delete]
+7. File marked as deleted (creates "Deleted" commit)
+
+### Commit Information
+When you delete a file:
+- **Message**: "Deleted: filename"
+- **Author**: Your username
+- **Datetime**: Current timestamp
+- **History preserved** - File still exists in commit history (can be recovered)
+- **No blob deletion** - File content remains in database (may be needed by other commits)
 
 ## Image Viewing
 
@@ -257,9 +339,13 @@ The web interface is HTML 3.2 compatible for maximum browser support:
 
 - **[README.md](README.md)** - Documentation index
 - **[FEATURES.md](FEATURES.md)** - Web interface features
+- **[CLI_PYTHON3.md](CLI_PYTHON3.md)** - CLI alternative (Python 3)
+- **[CLI_HAXE5.md](CLI_HAXE5.md)** - CLI alternative (Haxe 5)
+- **[CLI_CSHARP.md](CLI_CSHARP.md)** - CLI alternative (C# / Mono)
 - **[CLI_BASH.md](CLI_BASH.md)** - CLI alternative (Bash)
 - **[CLI_BAT.md](CLI_BAT.md)** - CLI alternative (FreeDOS)
 - **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI alternative (Amiga)
+- **[CLI_LUA.md](CLI_LUA.md)** - CLI alternative (Lua)
 - **[SERVER.md](SERVER.md)** - Web server configuration
 - **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Database design
 

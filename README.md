@@ -5,7 +5,11 @@
 ### Platforms Supported
 - **AmigaShell** (Amiga systems)
 - **FreeDOS** (.bat scripts)  
-- **Linux/Unix** (Bash)
+- **Linux/Unix/macOS** (Bash)
+- **Lua 5.1+** (Cross-platform scripting language)
+- **Python 3.6+** (Pure Python, no dependencies)
+- **Haxe 5.0+** (Multi-target compiled language)
+- **C# / Mono** (Compiled CLI with .NET compatibility)
 - **Web Browser** (PHP interface - HTML 3.2 compatible)
 
 ### Features
@@ -13,8 +17,11 @@
 ✅ File deduplication via SHA256 hashing
 ✅ SQLite-based storage
 ✅ Cross-platform CLI and web UI
-✅ Web-based file editing and image viewing
-✅ User account management
+✅ Web-based file management (upload, download, edit, delete)
+✅ Markdown rendering and SVG viewing
+✅ Audio/video player support
+✅ User account management with 2FA/TOTP
+✅ Brute force protection and API rate limiting
 ✅ HTML 3.2 compatible (works with IBrowse, Dillo, Elinks, w3m)
 
 ## Quick Start
@@ -45,9 +52,13 @@ Start with **[`docs/README.md`](docs/README.md)** for navigation and quick refer
 
 Key guides:
 - **[FEATURES.md](docs/FEATURES.md)** - Complete feature overview
+- **[CLI_PYTHON3.md](docs/CLI_PYTHON3.md)** - CLI for Python 3 (recommended)
+- **[CLI_HAXE5.md](docs/CLI_HAXE5.md)** - CLI for Haxe 5 (compiled, multi-target)
+- **[CLI_CSHARP.md](docs/CLI_CSHARP.md)** - CLI for C# / Mono (compiled, .NET)
 - **[CLI_BASH.md](docs/CLI_BASH.md)** - CLI for Linux/Unix/macOS
 - **[CLI_BAT.md](docs/CLI_BAT.md)** - CLI for FreeDOS/Windows
 - **[CLI_AMIGASHELL.md](docs/CLI_AMIGASHELL.md)** - CLI for Amiga
+- **[CLI_LUA.md](docs/CLI_LUA.md)** - CLI for Lua (cross-platform)
 - **[WEB.md](docs/WEB.md)** - Web interface guide
 - **[SERVER.md](docs/SERVER.md)** - Server setup
 - **[DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md)** - Database design

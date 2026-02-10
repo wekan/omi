@@ -13,9 +13,13 @@ Omi is a lightweight Git-like version control system for retro systems and moder
 | Document | Purpose | Audience |
 |----------|---------|----------|
 | **[FEATURES.md](FEATURES.md)** | Feature overview and capabilities | Everyone |
+| **[CLI_PYTHON3.md](CLI_PYTHON3.md)** | Command line for Python 3 (recommended) | Python developers |
+| **[CLI_CSHARP.md](CLI_CSHARP.md)** | Command line for C# / Mono (compiled) | .NET developers |
+| **[CLI_CSHARP.md](CLI_CSHARP.md)** | Command line for C# / Mono (compiled) | .NET developers |
 | **[CLI_BASH.md](CLI_BASH.md)** | Command line for Linux/Unix/macOS | Bash users |
 | **[CLI_BAT.md](CLI_BAT.md)** | Command line for FreeDOS/Windows CMD | DOS users |
 | **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** | Command line for Commodore Amiga | Amiga users |
+| **[CLI_LUA.md](CLI_LUA.md)** | Command line for Lua (cross-platform) | Lua developers |
 | **[WEB.md](WEB.md)** | Web interface and browser access | Web users |
 | **[SERVER.md](SERVER.md)** | Server setup and configuration | System admins |
 | **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** | Database structure and design | Developers |
@@ -23,6 +27,21 @@ Omi is a lightweight Git-like version control system for retro systems and moder
 ## CLI Documentation
 
 Choose the CLI guide for your platform:
+
+- **Python 3 (Recommended):** [CLI_PYTHON3.md](CLI_PYTHON3.md)
+  - Pure Python, no external dependencies
+  - Works on Windows, macOS, Linux
+  - Ideal for automation and CI/CD
+
+- **Haxe 5 (Multi-target Compiled):** [CLI_HAXE5.md](CLI_HAXE5.md)
+  - Typed language with compile-time safety
+  - Compiles to native binary, Python, JavaScript, C#
+  - High performance and cross-platform
+
+- **C# / Mono (Compiled):** [CLI_CSHARP.md](CLI_CSHARP.md)
+  - .NET language with full type system
+  - Compiles to IL bytecode with JIT
+  - Works on Linux, macOS, Windows, FreeBSD
 
 - **Bash (Linux/macOS/Unix):** [CLI_BASH.md](CLI_BASH.md)
   - Installation, commands, usage examples
@@ -38,6 +57,11 @@ Choose the CLI guide for your platform:
   - AmigaShell syntax
   - AmiSSL HTTPS support
   - Memory and hardware considerations
+
+- **Lua (Cross-platform):** [CLI_LUA.md](CLI_LUA.md)
+  - Lua 5.1+ required
+  - Works on any platform with Lua
+  - Development and embedded systems
 
 ## Key Features
 
@@ -128,12 +152,16 @@ Project files:
 
 | Platform | CLI Implementation | Web Access |
 |----------|-------------------|----------|
-| Linux | [CLI_BASH.md](CLI_BASH.md) ✅ | Yes |
-| macOS | [CLI_BASH.md](CLI_BASH.md) ✅ | Yes |
+| Linux | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ [CLI_HAXE5.md](CLI_HAXE5.md) ✅ [CLI_CSHARP.md](CLI_CSHARP.md) ✅ [CLI_BASH.md](CLI_BASH.md) ✅ [CLI_LUA.md](CLI_LUA.md) ✅ | Yes |
+| macOS | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ [CLI_HAXE5.md](CLI_HAXE5.md) ✅ [CLI_CSHARP.md](CLI_CSHARP.md) ✅ [CLI_BASH.md](CLI_BASH.md) ✅ [CLI_LUA.md](CLI_LUA.md) ✅ | Yes |
+| Windows | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ [CLI_HAXE5.md](CLI_HAXE5.md) ✅ [CLI_CSHARP.md](CLI_CSHARP.md) ✅ [CLI_BASH.md](CLI_BASH.md) via WSL | Yes |
 | FreeDOS | [CLI_BAT.md](CLI_BAT.md) ✅ | Yes (with Dillo) |
 | Commodore Amiga | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md) ✅ | Yes (with IBrowse) |
-| Windows | [CLI_BASH.md](CLI_BASH.md) or WSL | Yes |
-| Generic Unix | [CLI_BASH.md](CLI_BASH.md) ✅ | Yes |
+| Generic Unix | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ [CLI_HAXE5.md](CLI_HAXE5.md) ✅ [CLI_CSHARP.md](CLI_CSHARP.md) ✅ [CLI_BASH.md](CLI_BASH.md) ✅ [CLI_LUA.md](CLI_LUA.md) ✅ | Yes |
+| Python Environments | [CLI_PYTHON3.md](CLI_PYTHON3.md) ✅ | Yes |
+| Haxe Projects | [CLI_HAXE5.md](CLI_HAXE5.md) ✅ | Yes |
+| .NET Projects | [CLI_CSHARP.md](CLI_CSHARP.md) ✅ | Yes |
+| Lua Environments | [CLI_LUA.md](CLI_LUA.md) ✅ | Yes (if web access available) |
 
 ## Common Workflows
 
@@ -150,9 +178,11 @@ Project files:
 ### Web Workflow
 1. Visit `/` - Browse repositories
 2. Click repo name - Browse contents
-3. Click file - View content
-4. Click `[Edit]` - Edit text file
-5. Click `Save` - Create commit
+3. Click file - View content (text, image, markdown, SVG, audio, video)
+4. Click `[Edit]` - Edit text file (creates commit)
+5. Click `[Download]` - Download file to computer
+6. Click `[Delete]` - Remove file (creates "Deleted" commit)
+7. Click `[Upload]` - Add new file to repository
 
 ### Server Workflow
 1. Set up [SERVER.md](SERVER.md)
@@ -199,9 +229,12 @@ See [FEATURES.md](FEATURES.md) for complete security information.
 | File | Size | Purpose |
 |------|------|----------|
 | FEATURES.md | Brief | What can you do with Omi |
+| CLI_PYTHON3.md | Detailed | Python 3 CLI guide (recommended) |
+| CLI_CSHARP.md | Detailed | C# / Mono CLI guide (compiled) |
 | CLI_BASH.md | Detailed | Linux/Unix CLI guide |
 | CLI_BAT.md | Detailed | DOS/Windows CLI guide |
 | CLI_AMIGASHELL.md | Detailed | Amiga CLI guide |
+| CLI_LUA.md | Detailed | Lua CLI guide (cross-platform) |
 | WEB.md | Detailed | Web interface guide |
 | SERVER.md | Detailed | Server setup guide |
 | DATABASE_SCHEMA.md | Reference | Database technical details |

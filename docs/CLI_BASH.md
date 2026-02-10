@@ -38,7 +38,21 @@ CURL=curl               # Path to curl
 API_ENABLED=1
 API_RATE_LIMIT=60
 API_RATE_LIMIT_WINDOW=60
+USE_INTERNAL_HTTP=1     # Use /dev/tcp if available (1) or always curl (0)
+HTTP_TIMEOUT=30         # HTTP timeout in seconds
 ```
+
+**HTTP Configuration for Bash:**
+
+- **USE_INTERNAL_HTTP=1** (default)
+  - Attempts to use /dev/tcp for HTTP (bash builtin, no curl needed)
+  - Falls back to curl if /dev/tcp unavailable
+  - Works on most Linux/Unix systems
+  
+- **USE_INTERNAL_HTTP=0**
+  - Always uses external `curl` command
+  - Reliable on systems where /dev/tcp is restricted
+  - Requires curl installed
 
 3. Create first user in phpusers.txt:
 ```
@@ -478,5 +492,5 @@ Add multiple files:
 
 ---
 
-**Other CLI Versions:** [CLI_BAT.md](CLI_BAT.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)  
+**Other CLI Versions:** [CLI_PYTHON3.md](CLI_PYTHON3.md) | [CLI_HAXE5.md](CLI_HAXE5.md) | [CLI_CSHARP.md](CLI_CSHARP.md) | [CLI_BAT.md](CLI_BAT.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md) | [CLI_LUA.md](CLI_LUA.md)  
 **See Also:** [WEB.md](WEB.md) | [SERVER.md](SERVER.md) | [FEATURES.md](FEATURES.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) | [README.md](README.md)

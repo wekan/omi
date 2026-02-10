@@ -34,19 +34,41 @@ Omi is a lightweight Git-like version control system designed for retro systems 
 - **status** - Show current staging area and recent commits
 
 ### Platform Support
+- **Python 3.6+** - Pure Python (recommended)
+- **Haxe 5.0+** - Multi-target compiled language (native, Python, JS, C#)
+- **C# / Mono** - Compiled CLI with .NET compatibility
 - **AmigaShell** - Native script for Commodore Amiga systems
 - **FreeDOS Batch** - Compatible with FreeDOS and DOS variants
 - **Bash** - Unix/Linux shell script
+- **Lua 5.1+** - Cross-platform scripting language
 
 ## Web Interface (public/index.php)
 
-### Features
+### File Management
+- **File upload** - Upload files to repository with SHA256 deduplication
+- **File viewing** - Browse text, image, markdown, SVG, audio, and video files
+- **File editing** - Edit text files (creates new commit automatically)
+- **File download** - Download individual files to your computer
+- **File deletion** - Delete files and create "Deleted" commit (preserves history)
+
+### Media Support
+- **Text files** - .txt, .md (markdown), .html, .php displayed in monospace font
+- **Markdown rendering** - Convert markdown to HTML for viewing
+- **Image gallery** - .jpg, .png, .gif, .bmp display with thumbnails
+- **SVG files** - Vector graphics support with safety checks
+  - Detects dangerous JavaScript and XML entities
+  - Shows warning for suspicious SVG files
+  - Fallback to GIF conversion for older browsers using ImageMagick
+- **Audio files** - HTML5 audio player with native controls (.mp3, .ogg, .wav, etc.)
+- **Video files** - HTML5 video player with native controls (.mp4, .webm, .ogv, etc.)
+  - Fallback download link for unsupported formats
+  - No JavaScript required (native HTML controls)
+
+### Repository Features
 - **Repository browser** - List and navigate repositories
-- **File viewer** - View text files and embedded images
 - **Commit history** - Paginated view of repository commits (10 per page)
-- **Image gallery** - Display images from repositories with base64 encoding
 - **Download support** - Download .omi repository files directly
-- **HTML 3.2 compatible** - Works with vintage browsers (IBrowse, Dillo, Mosaic)
+- **HTML 3.2 compatible** - Works with vintage browsers (IBrowse, Dillo, Elinks, w3m)
 - **API endpoint** - JSON API for remote push/pull operations
 
 ### User Management (/people)
@@ -95,10 +117,11 @@ Omi is a lightweight Git-like version control system designed for retro systems 
 - **Automatic retry** - CLI can wait and retry automatically
 - **Cleanup** - Automatic removal of entries older than 1 hour
 
-### API Control
-- **Global disable** - Set `API_ENABLED=0` to disable API entirely
-- **Graceful handling** - CLI shows meaningful error messages
-- **Server status** - Returns 503 when API disabled
+### SVG Content Security
+- **JavaScript detection** - Blocks SVG files containing `<script>` tags and event handlers
+- **XML attack prevention** - Detects DOCTYPE, ENTITY declarations, and billion laughs attacks
+- **User warning** - Displays warning instead of rendering dangerous SVG files
+- **GIF fallback** - Automatically converts SVG to GIF for browsers without browser-native SVG support
 
 ## Network Features
 
@@ -196,9 +219,13 @@ Omi is a lightweight Git-like version control system designed for retro systems 
 ## See Also
 
 - **[README.md](README.md)** - Documentation index
+- **[CLI_PYTHON3.md](CLI_PYTHON3.md)** - CLI commands (Python 3)
+- **[CLI_HAXE5.md](CLI_HAXE5.md)** - CLI commands (Haxe 5)
+- **[CLI_CSHARP.md](CLI_CSHARP.md)** - CLI commands (C# / Mono)
 - **[CLI_BASH.md](CLI_BASH.md)** - CLI commands (Bash)
 - **[CLI_BAT.md](CLI_BAT.md)** - CLI commands (FreeDOS)
 - **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI commands (Amiga)
+- **[CLI_LUA.md](CLI_LUA.md)** - CLI commands (Lua)
 - **[WEB.md](WEB.md)** - Web interface
 - **[SERVER.md](SERVER.md)** - Server setup
 - **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Database design

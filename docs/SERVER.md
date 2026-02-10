@@ -337,7 +337,13 @@ ls -la settings.txt phpusers.txt repos/
 - **[README.md](README.md)** - Documentation index
 - **[WEB.md](WEB.md)** - Web interface guide
 - **[FEATURES.md](FEATURES.md)** - Feature overview
-- **[CLI_BASH.md](CLI_BASH.md)** - CLI usage
+- **[CLI_PYTHON3.md](CLI_PYTHON3.md)** - CLI usage (Python 3)
+- **[CLI_HAXE5.md](CLI_HAXE5.md)** - CLI usage (Haxe 5)
+- **[CLI_CSHARP.md](CLI_CSHARP.md)** - CLI usage (C# / Mono)
+- **[CLI_BASH.md](CLI_BASH.md)** - CLI usage (Bash)
+- **[CLI_BAT.md](CLI_BAT.md)** - CLI usage (FreeDOS)
+- **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI usage (Amiga)
+- **[CLI_LUA.md](CLI_LUA.md)** - CLI usage (Lua)
 - **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Database design
 
 ## Web Server Configurations

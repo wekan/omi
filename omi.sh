@@ -11,11 +11,15 @@ CURL=$(grep "^CURL=" settings.txt | cut -d'=' -f2)
 API_ENABLED=$(grep "^API_ENABLED=" settings.txt | cut -d'=' -f2)
 API_RATE_LIMIT=$(grep "^API_RATE_LIMIT=" settings.txt | cut -d'=' -f2)
 API_RATE_LIMIT_WINDOW=$(grep "^API_RATE_LIMIT_WINDOW=" settings.txt | cut -d'=' -f2)
+USE_INTERNAL_HTTP=$(grep "^USE_INTERNAL_HTTP=" settings.txt | cut -d'=' -f2)
+HTTP_TIMEOUT=$(grep "^HTTP_TIMEOUT=" settings.txt | cut -d'=' -f2)
 
 # Set defaults
 API_ENABLED=${API_ENABLED:-1}
 API_RATE_LIMIT=${API_RATE_LIMIT:-60}
 API_RATE_LIMIT_WINDOW=${API_RATE_LIMIT_WINDOW:-60}
+USE_INTERNAL_HTTP=${USE_INTERNAL_HTTP:-1}
+HTTP_TIMEOUT=${HTTP_TIMEOUT:-30}
 
 # Database file
 if [ ! -f .omi ]; then
