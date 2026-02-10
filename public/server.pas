@@ -25,6 +25,7 @@ program OmiServer;
 
 {$MODE OBJFPC}
 {$H+}
+{$CODEPAGE UTF8}
 
 uses
   {$IFDEF UNIX}
@@ -36,7 +37,7 @@ uses
 
 const
   VERSION = '1.0.0';
-  DEFAULT_PORT = 3000;
+  DEFAULT_PORT = 3001;
   SETTINGS_FILE = '../settings.txt';
   USERS_FILE = '../users.txt';
   USERS_BRUTEFORCE_FILE = '../usersbruteforcelocked.txt';
@@ -137,6 +138,7 @@ begin
   if FileExists(FilePath) then
   begin
     AssignFile(F, FilePath);
+    SetTextCodePage(F, CP_UTF8);
     Reset(F);
     try
       while not EOF(F) do
@@ -164,6 +166,7 @@ var
 begin
   FilePath := DataPath(USERS_FILE);
   AssignFile(F, FilePath);
+  SetTextCodePage(F, CP_UTF8);
   Rewrite(F);
   try
     for I := 0 to UsersMap.Count - 1 do
@@ -218,6 +221,8 @@ end;
 
 function GetBrowserLanguage(ARequest: TRequest): string;
 begin
+  // Language detection from Accept-Language header would go here
+  // For now, default to English
   Result := 'en';
 end;
 
@@ -234,6 +239,7 @@ begin
   if not FileExists(FilePath) then
     Exit;
   AssignFile(F, FilePath);
+  SetTextCodePage(F, CP_UTF8);
   Reset(F);
   try
     while not EOF(F) do
@@ -261,12 +267,8 @@ var
 begin
   Result := '';
   SessionId := GetCookieValue(ARequest, 'sessionId');
-  WriteLn('[Session] Cookie received: sessionId=', SessionId);
   if SessionId <> '' then
-  begin
     Result := Sessions.Values[SessionId];
-    WriteLn('[Session] Lookup result: ', Result);
-  end;
 end;
 
 function LoadSettingsMap: TStringList;
@@ -283,6 +285,7 @@ begin
   if not FileExists(FilePath) then
     Exit;
   AssignFile(F, FilePath);
+  SetTextCodePage(F, CP_UTF8);
   Reset(F);
   try
     while not EOF(F) do
@@ -313,6 +316,7 @@ begin
   Result := False;
   FilePath := DataPath(SETTINGS_FILE);
   AssignFile(F, FilePath);
+  SetTextCodePage(F, CP_UTF8);
   Rewrite(F);
   try
     for I := 0 to SettingsMap.Count - 1 do
@@ -351,23 +355,19 @@ function LoadLanguagesData: TJSONObject;
 var
   LangFile: string;
   Content: string;
-  Line: string;
-  F: TextFile;
+  Stream: TMemoryStream;
   JsonData: TJSONData;
 begin
   Result := TJSONObject.Create;
   LangFile := DataPath('languages.json');
   if not FileExists(LangFile) then
     Exit;
-  AssignFile(F, LangFile);
-  Reset(F);
+  Stream := TMemoryStream.Create;
   try
-    Content := '';
-    while not EOF(F) do
-    begin
-      ReadLn(F, Line);
-      Content := Content + Line + #10;
-    end;
+    Stream.LoadFromFile(LangFile);
+    SetLength(Content, Stream.Size);
+    if Stream.Size > 0 then
+      Stream.Read(Content[1], Stream.Size);
     JsonData := GetJSON(Content);
     if JsonData is TJSONObject then
     begin
@@ -375,7 +375,7 @@ begin
       Result := TJSONObject(JsonData);
     end;
   finally
-    CloseFile(F);
+    Stream.Free;
   end;
 end;
 
@@ -392,6 +392,7 @@ begin
   if FileExists(DataPath(SETTINGS_FILE)) then
   begin
     AssignFile(F, DataPath(SETTINGS_FILE));
+    SetTextCodePage(F, CP_UTF8);
     Reset(F);
     try
       while not EOF(F) do
@@ -429,6 +430,7 @@ begin
   if FileExists(DataPath(USERS_FILE)) then
   begin
     AssignFile(F, DataPath(USERS_FILE));
+    SetTextCodePage(F, CP_UTF8);
     Reset(F);
     try
       while not EOF(F) do
@@ -447,9 +449,8 @@ end;
 function LoadTranslations(Language: string): TJSONObject;
 var
   LangFile: string;
-  F: TextFile;
   Content: string;
-  Line: string;
+  Stream: TMemoryStream;
   JsonData: TJSONData;
 begin
   Result := nil;
@@ -460,15 +461,12 @@ begin
 
   if FileExists(LangFile) then
   begin
-    AssignFile(F, LangFile);
-    Reset(F);
+    Stream := TMemoryStream.Create;
     try
-      Content := '';
-      while not EOF(F) do
-      begin
-        Readln(F, Line);
-        Content := Content + Line + #10;
-      end;
+      Stream.LoadFromFile(LangFile);
+      SetLength(Content, Stream.Size);
+      if Stream.Size > 0 then
+        Stream.Read(Content[1], Stream.Size);
       try
         JsonData := GetJSON(Content);
         if JsonData is TJSONObject then
@@ -479,7 +477,7 @@ begin
         Result := TJSONObject.Create;
       end;
     finally
-      CloseFile(F);
+      Stream.Free;
     end;
   end
   else
@@ -554,7 +552,6 @@ begin
   Randomize;
   SessionId := Format('%s_%d_%d', [Username, Random(999999), GetTickCount64 mod 1000000]);
   Sessions.Values[SessionId] := Username;
-  WriteLn('[Session] Created: ', SessionId, ' -> ', Username);
   Result := SessionId;
 end;
 
@@ -1193,7 +1190,6 @@ begin
           else
           begin
             SessionId := CreateSession(Username);
-            WriteLn('[Login] Setting cookie: sessionId=', SessionId);
             AResponse.SetCustomHeader('Set-Cookie', 'sessionId=' + SessionId + '; Path=/; HttpOnly');
             AResponse.Code := 302;
             AResponse.Location := '/';
@@ -1221,7 +1217,7 @@ begin
 
     AResponse.Content := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
       '<html>' +
-      '<head><title>' + T('login', Translations) + ' - Omi Server</title></head>' +
+      '<head><meta charset="UTF-8"><title>' + T('login', Translations) + ' - Omi Server</title></head>' +
       '<body bgcolor="#f0f0f0">' +
       '<h1>Omi Server - ' + T('login', Translations) + '</h1>' +
       '<table border="0" cellpadding="5">' +
@@ -1362,7 +1358,7 @@ begin
           FileContent := GetFileContentByHash(DbPath, FileHash);
           AResponse.ContentType := 'text/html; charset=UTF-8';
           AResponse.Content := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
-            '<html><head><title>' + T('image', Translations) + ': ' + HtmlEncode(ImagePath) + ' - ' + HtmlEncode(ImageRepo) + '</title></head>' +
+            '<html><head><meta charset="UTF-8"><title>' + T('image', Translations) + ': ' + HtmlEncode(ImagePath) + ' - ' + HtmlEncode(ImageRepo) + '</title></head>' +
             '<body bgcolor="#f0f0f0">' +
             '<table width="100%" border="0" cellpadding="5">' +
             '<tr><td><h1>' + HtmlEncode(ImageRepo) + '</h1></td><td align="right"><small>' +
@@ -1398,7 +1394,7 @@ begin
       end;
 
       Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
-        '<html dir="' + DirAttr + '"><head><title>' + T('commit-history', Translations) + ' - ' + HtmlEncode(RepoName) + '</title></head>' +
+        '<html dir="' + DirAttr + '"><head><meta charset="UTF-8"><title>' + T('commit-history', Translations) + ' - ' + HtmlEncode(RepoName) + '</title></head>' +
         '<body bgcolor="#f0f0f0" dir="' + DirAttr + '">' +
         '<table width="100%" border="0" cellpadding="5">' +
         '<tr><td><h1>' + T('commit-history', Translations) + ' - ' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small>' +
@@ -1502,7 +1498,7 @@ begin
 
     Repos := GetReposList;
     Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
-      '<html dir="' + DirAttr + '"><head><title>Omi Server - ' + T('repositories', Translations) + '</title></head>' +
+      '<html dir="' + DirAttr + '"><head><meta charset="UTF-8"><title>Omi Server - ' + T('repositories', Translations) + '</title></head>' +
       '<body bgcolor="#f0f0f0" dir="' + DirAttr + '">' +
       '<table width="100%" border="0" cellpadding="5">' +
       '<tr><td><h1>Omi Server - ' + T('repositories', Translations) + '</h1></td><td align="right"><small>' +
@@ -1644,7 +1640,7 @@ begin
 
     Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
       '<html>' +
-      '<head><title>' + T('create-account', Translations) + ' - Omi Server</title></head>' +
+      '<head><meta charset="UTF-8"><title>' + T('create-account', Translations) + ' - Omi Server</title></head>' +
       '<body bgcolor="#f0f0f0">' +
       '<h1>Omi Server - ' + T('create-account', Translations) + '</h1>' +
       '<table border="0" cellpadding="5">' +
@@ -1729,7 +1725,7 @@ begin
         SettingsMap.Values['CURL'] := 'curl';
 
       Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
-        '<html><head><title>' + T('settings', Translations) + ' - Omi Server</title></head>' +
+        '<html><head><meta charset="UTF-8"><title>' + T('settings', Translations) + ' - Omi Server</title></head>' +
         '<body bgcolor="#f0f0f0">' +
         '<table width="100%" border="0" cellpadding="5">' +
         '<tr><td><h1>' + T('settings', Translations) + '</h1></td>' +
@@ -1839,7 +1835,7 @@ begin
 
       Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
         '<html>' +
-        '<head><title>' + T('language-selection', Translations) + ' - Omi Server</title></head>' +
+        '<head><meta charset="UTF-8"><title>' + T('language-selection', Translations) + ' - Omi Server</title></head>' +
         '<body bgcolor="#f0f0f0">' +
         '<table width="100%" border="0" cellpadding="5">' +
         '<tr><td><h1>Omi Server</h1></td><td align="right"><small><strong>' + HtmlEncode(Username) + '</strong> | <a href="/language">[' + T('language', Translations) + ']</a> | <a href="/logout">[' + T('logout', Translations) + ']</a></small></td></tr>' +
@@ -2050,7 +2046,7 @@ begin
     end;
 
     Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
-      '<html><head><title>' + T('people', Translations) + ' - Omi Server</title></head>' +
+      '<html><head><meta charset="UTF-8"><title>' + T('people', Translations) + ' - Omi Server</title></head>' +
       '<body bgcolor="#f0f0f0">' +
       '<table width="100%" border="0" cellpadding="5">' +
       '<tr><td><h1>' + T('user-management', Translations) + '</h1></td><td align="right"><small><strong>' + HtmlEncode(Username) + '</strong> | <a href="/language">[' + T('language', Translations) + ']</a> | <a href="/logout">[' + T('logout', Translations) + ']</a></small></td></tr>' +
@@ -2255,7 +2251,7 @@ begin
       end;
 
       Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
-        '<html><head><title>' + T('file', Translations) + ': ' + HtmlEncode(RepoPath) + ' - ' + HtmlEncode(RepoName) + '</title></head>' +
+        '<html><head><meta charset="UTF-8"><title>' + T('file', Translations) + ': ' + HtmlEncode(RepoPath) + ' - ' + HtmlEncode(RepoName) + '</title></head>' +
         '<body bgcolor="#f0f0f0">' +
         '<table width="100%" border="0" cellpadding="5">' +
         '<tr><td><h1>' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small>' +
