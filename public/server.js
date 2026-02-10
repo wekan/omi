@@ -1333,7 +1333,7 @@ ${form}
       }
 
       const isText = fileContent && isTextFile(fileContent);
-      const displayContent = isText ? escapeHtml(fileContent.toString('utf8')) : '';
+      const displayContent = isText ? fileContent.toString('utf8') : '';
       const actionMessageHtml = actionMessage
         ? `<p><font color="${actionMessageIsError ? 'red' : 'green'}"><strong>${escapeHtml(actionMessage)}</strong></font></p>`
         : '';
@@ -1348,6 +1348,21 @@ ${form}
     <input type="submit" value="Rename">
     </form>
     ` : '';
+      
+      // Determine content display based on file type
+      let contentHtml = '';
+      if (!isText) {
+        contentHtml = `<p><strong>Binary file (${fileContent ? fileContent.length : 0} bytes)</strong></p>`;
+      } else if (isMarkdownFile(fileEntry.filename)) {
+        // Render markdown
+        contentHtml = `<div style="font-family: Arial, sans-serif; line-height: 1.6;">
+${markdownToHtml(displayContent)}
+</div>`;
+      } else {
+        // Show raw text in pre tag
+        contentHtml = `<pre>${escapeHtml(displayContent)}</pre>`;
+      }
+      
       const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
@@ -1363,7 +1378,7 @@ ${form}
 ${fileActions}
 <hr>
 ${actionMessageHtml}
-${isText ? `<pre>${displayContent}</pre>` : `<p><strong>Binary file (${fileContent ? fileContent.length : 0} bytes)</strong></p>`}
+${contentHtml}
 <hr>
 <p><small>Omi Server</small></p>
 </body>
