@@ -692,7 +692,7 @@ function getMediaType(filename) {
 }
 
 // Simple markdown to HTML converter (basic support)
-function markdownToHtml(markdown) {
+function markdownToHtml(markdown, filePath = '', repoRoot = '') {
   let html = markdown.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   
   // Headers
@@ -707,7 +707,21 @@ function markdownToHtml(markdown) {
   html = html.replace(/_(.+?)_/g, '<i>$1</i>');
   
   // Images (process before links to avoid conflict)
-  html = html.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; height: auto; border: 1px solid #ccc; margin: 10px 0;">');
+  html = html.replace(/!\[(.*?)\]\((.*?)\)/g, (match, alt, src) => {
+    // If image path is relative (doesn't start with / or http), resolve it relative to current directory
+    let resolvedSrc = src;
+    if (!src.startsWith('/') && !src.startsWith('http://') && !src.startsWith('https://')) {
+      // Get directory of current file
+      const fileDir = filePath.includes('/') ? filePath.slice(0, filePath.lastIndexOf('/')) : '';
+      // Build URL path within the repo
+      if (repoRoot) {
+        resolvedSrc = fileDir ? `/${repoRoot}/${fileDir}/${src}` : `/${repoRoot}/${src}`;
+      } else {
+        resolvedSrc = fileDir ? `${fileDir}/${src}` : src;
+      }
+    }
+    return `<img src="${resolvedSrc}" alt="${alt}" style="max-width: 100%; height: auto; border: 1px solid #ccc; margin: 10px 0;">`;
+  });
   
   // Links
   html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>');
@@ -1667,9 +1681,9 @@ ${form}
 <p>Hash: ${escapeHtml(fileEntry.hash)}</p>`;
         }
       } else if (isMarkdownFile(fileEntry.filename)) {
-        // Render markdown
+        // Render markdown (pass file path and repo root for relative image resolution)
         contentHtml = `<div style="font-family: Arial, sans-serif; line-height: 1.6;">
-${markdownToHtml(displayContent)}
+${markdownToHtml(displayContent, fileEntry.filename, repoRoot)}
 </div>`;
       } else {
         // Show raw text in pre tag
