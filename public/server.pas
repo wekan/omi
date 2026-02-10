@@ -2459,50 +2459,67 @@ begin
           MarkdownHtml := MarkdownToHtml(FileContent);
           
           // Embed images in markdown as base64 data URIs
+          FileDir := ExtractFileDir(RepoPath);
           try
-            // Extract image paths using simple pattern matching
-            FileDir := ExtractFileDir(RepoPath);
-            // Keep replacing images one at a time to avoid position tracking issues
-            while True do
+            SrcEnd := 0;  // Loop counter  
+            while SrcEnd < 50 do
             begin
+              Inc(SrcEnd);
+              
+              // Find next <img src="..." tag
               ImgStart := Pos('<img src="', MarkdownHtml);
               if ImgStart = 0 then Break;
               
+              // Calculate position of the URL (after '<img src="')
               SrcStart := ImgStart + 10;
-              SrcEnd := Pos('"', Copy(MarkdownHtml, SrcStart, Length(MarkdownHtml)));
-              if SrcEnd = 0 then Break;
               
-              ImgUrl := Copy(MarkdownHtml, SrcStart, SrcEnd - 1);
+              // Find closing quote of src value
+              ImgEnd := Pos('"', Copy(MarkdownHtml, SrcStart, 500));
+              if ImgEnd <= 0 then Break;
               
-              // Skip external URLs
-              if (Pos('http://', ImgUrl) = 0) and (Pos('https://', ImgUrl) = 0) and (Pos('data:', ImgUrl) = 0) then
+              // Extract URL
+              ImgUrl := Copy(MarkdownHtml, SrcStart, ImgEnd - 1);
+              
+              // Skip if already embedded or external
+              if (Pos('data:', ImgUrl) > 0) or (Pos('http://', ImgUrl) > 0) or (Pos('https://', ImgUrl) > 0) then
+                Continue;
+              
+              // Resolve full path
+              if FileDir <> '.' then
+                ResolvedPath := FileDir + '/' + ImgUrl
+              else
+                ResolvedPath := ImgUrl;
+              
+              // First try with full path, then try just the filename
+              Query := 'SELECT hex(b.data) FROM files f JOIN blobs b ON f.hash=b.hash WHERE f.commit_id=(SELECT MAX(id) FROM commits) AND f.filename = ''' + SqlEscape(ResolvedPath) + ''';';
+              Output := Trim(ExecSqlOnDb(DbPath, Query));
+              
+              // If not found, try just the filename
+              if Output = '' then
               begin
-                // Resolve relative path
-                if FileDir <> '.' then
-                  ResolvedPath := FileDir + '/' + ImgUrl
-                else
-                  ResolvedPath := ImgUrl;
-                
-                // Query database for image
-                Query := 'SELECT hex(b.data) FROM files f JOIN blobs b ON f.hash=b.hash WHERE f.commit_id=(SELECT MAX(id) FROM commits) AND f.filename = ''' + SqlEscape(ResolvedPath) + ''';';
-                Output := ExecSqlOnDb(DbPath, Query);
-                
-                if Trim(Output) <> '' then
-                begin
-                  // Convert hex to base64 and create data URI
-                  ImgContent := HexToString(Output);
-                  Base64Img := Base64Encode(ImgContent);
-                  MimeType := GetMimeType(ResolvedPath);
-                  DataUri := 'data:' + MimeType + ';base64,' + Base64Img;
-                  MarkdownHtml := StringReplace(MarkdownHtml, 'src="' + ImgUrl + '"', 'src="' + DataUri + '"', [rfIgnoreCase]);
-                end;
+                Query := 'SELECT hex(b.data) FROM files f JOIN blobs b ON f.hash=b.hash WHERE f.commit_id=(SELECT MAX(id) FROM commits) AND f.filename LIKE ''%' + SqlEscape(ImgUrl) + ''';';
+                Output := Trim(ExecSqlOnDb(DbPath, Query));
               end;
               
-              // Replace this image with itself if not found, to avoid infinite loop
-              if Pos('<img src="', MarkdownHtml) = ImgStart then Break;
+              if Output = '' then
+                Continue;
+              
+              // Convert to base64
+              ImgContent := HexToString(Output);
+              Base64Img := Base64Encode(ImgContent);
+              MimeType := GetMimeType(ResolvedPath);
+              
+              if Base64Img = '' then
+                Continue;
+              
+              DataUri := 'data:' + MimeType + ';base64,' + Base64Img;
+              
+              // Use position-based replacement to be more reliable
+              // Build the replacement: everything before src value + new value + everything after
+              MarkdownHtml := Copy(MarkdownHtml, 1, SrcStart - 1) + DataUri + Copy(MarkdownHtml, SrcStart + ImgEnd - 1, Length(MarkdownHtml));
             end;
           except
-            // If image embedding fails, keep original URLs
+            // Proceed with original HTML if error occurs
           end;
           
           Html := Html + '<div style="font-family: Arial, sans-serif; line-height: 1.6;">' + MarkdownHtml + '</div>';
