@@ -576,6 +576,13 @@ function isSVGFile(filename) {
   return ext === '.svg';
 }
 
+// Check if filename is an image file
+function isImageFile(filename) {
+  const ext = path.extname(filename).toLowerCase().slice(1);
+  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'ico', 'tiff', 'tif'];
+  return imageExts.includes(ext);
+}
+
 // Get media type
 function getMediaType(filename) {
   const ext = path.extname(filename).toLowerCase().slice(1);
@@ -1399,7 +1406,35 @@ ${form}
 <input type="button" value="Cancel" onclick="window.location.href='?'">
 </form>`;
       } else if (!isText) {
-        contentHtml = `<p><strong>Binary file (${fileContent ? fileContent.length : 0} bytes)</strong></p>`;
+        // Check if it's an image file
+        if (isImageFile(fileEntry.filename)) {
+          // Display image file
+          const base64Data = fileContent.toString('base64');
+          const ext = path.extname(fileEntry.filename).toLowerCase().slice(1);
+          const mimeTypes = {
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'png': 'image/png',
+            'gif': 'image/gif',
+            'bmp': 'image/bmp',
+            'webp': 'image/webp',
+            'ico': 'image/x-icon',
+            'tiff': 'image/tiff',
+            'tif': 'image/tiff'
+          };
+          const mimeType = mimeTypes[ext] || 'image/jpeg';
+          contentHtml = `<p><strong>Binary file (${fileContent.length} bytes)</strong></p>
+<p>Hash: ${escapeHtml(fileEntry.hash)}</p>
+<hr>
+<p><b>Image File</b></p>
+<div style="border: 1px solid #ccc; padding: 10px; background-color: white; display: inline-block;">
+<img src="data:${mimeType};base64,${base64Data}" alt="${escapeHtml(path.basename(fileEntry.filename))}" style="max-width: 100%; height: auto; max-height: 500px;">
+</div>
+<p><small>Image file size: ${Number(fileContent.length).toLocaleString()} bytes</small></p>`;
+        } else {
+          contentHtml = `<p><strong>Binary file (${fileContent ? fileContent.length : 0} bytes)</strong></p>
+<p>Hash: ${escapeHtml(fileEntry.hash)}</p>`;
+        }
       } else if (isMarkdownFile(fileEntry.filename)) {
         // Render markdown
         contentHtml = `<div style="font-family: Arial, sans-serif; line-height: 1.6;">
@@ -1435,7 +1470,7 @@ ${contentHtml}
     }
 
     const organized = organizeFiles(files, repoPath);
-    const directoryTitle = repoPath ? escapeHtml(repoPath) : 'Root';
+    const directoryTitle = repoPath ? escapeHtml(repoPath) : '';
     const dirRows = organized.dirs.map(dir => `<tr>
   <td><a href="/${escapeHtml(repoRoot)}/${escapeHtml(dir.path)}">📁 ${escapeHtml(dir.name)}/</a></td>
   <td>-</td>
@@ -1509,13 +1544,13 @@ ${contentHtml}
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
-<title>${directoryTitle} - ${escapeHtml(repoName)}</title>
+<title>${directoryTitle || 'Root'} - ${escapeHtml(repoName)}</title>
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small>${username ? `<strong>${escapeHtml(username)}</strong> | <a href="/logout">[Logout]</a>` : '<a href="/sign-in">[Sign In]</a>'}</small></td></tr>
 </table>
-<p><a href="/">[Home]</a>${repoPath ? ` | <a href="/${escapeHtml(repoRoot)}">[Repository Root]</a>` : ''}</p>
+<p><a href="/">[Home]</a></p>
 <h2>Directory: /${directoryTitle}</h2>
 <hr>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
@@ -1525,6 +1560,12 @@ ${contentHtml}
 <th><font color="white">Modified</font></th>
 <th><font color="white">Actions</font></th>
 </tr>
+${repoPath ? `<tr>
+  <td><a href="/${escapeHtml(repoRoot)}${repoPath.includes('/') ? '/' + escapeHtml(repoPath.split('/').slice(0, -1).join('/')) : ''}">📁 ..</a></td>
+  <td>-</td>
+  <td>-</td>
+  <td>-</td>
+  </tr>` : ''}
 ${dirRows}
 ${fileRows}
 ${emptyRow}

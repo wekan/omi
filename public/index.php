@@ -588,6 +588,13 @@ function isSVGFile($filename) {
     return $ext === 'svg';
 }
 
+// Check if filename is an image file
+function isImageFile($filename) {
+    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    $imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'ico', 'tiff', 'tif'];
+    return in_array($ext, $imageExts);
+}
+
 // Check if filename is media file and return type
 function getMediaType($filename) {
     $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
@@ -1640,6 +1647,29 @@ if (isset($_GET['image'])) {
 <div style="font-family: Arial, sans-serif; line-height: 1.6;">
 <?php echo markdownToHtml($fileContent); ?>
 </div>
+<?php elseif (isImageFile($repoPath)): ?>
+<!-- Image display -->
+<p><b>Image File</b></p>
+<?php 
+    $base64Data = base64_encode($fileContent);
+    $ext = strtolower(pathinfo($repoPath, PATHINFO_EXTENSION));
+    $mimeTypes = [
+        'jpg' => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        'gif' => 'image/gif',
+        'bmp' => 'image/bmp',
+        'webp' => 'image/webp',
+        'ico' => 'image/x-icon',
+        'tiff' => 'image/tiff',
+        'tif' => 'image/tiff'
+    ];
+    $mimeType = $mimeTypes[$ext] ?? 'image/jpeg';
+?>
+<div style="border: 1px solid #ccc; padding: 10px; background-color: white; display: inline-block;">
+<img src="data:<?php echo $mimeType; ?>;base64,<?php echo $base64Data; ?>" alt="<?php echo htmlspecialchars(basename($repoPath)); ?>" style="max-width: 100%; height: auto; max-height: 500px;">
+</div>
+<p><small>Image file size: <?php echo number_format(strlen($fileContent)); ?> bytes</small></p>
 <?php elseif ($isSVG): ?>
 <!-- SVG rendering with security checks -->
 <?php 
@@ -1746,8 +1776,36 @@ if (isset($_GET['image'])) {
 <pre><?php echo htmlspecialchars($fileContent); ?></pre>
 <?php endif; ?>
 <?php else: ?>
+<?php if (isImageFile($repoPath)): ?>
+<!-- Image display for binary image files -->
 <p><strong>Binary file (<?php echo strlen($fileContent); ?> bytes)</strong></p>
 <p>Hash: <?php echo htmlspecialchars($fileHash); ?></p>
+<hr>
+<p><b>Image File</b></p>
+<?php 
+    $base64Data = base64_encode($fileContent);
+    $ext = strtolower(pathinfo($repoPath, PATHINFO_EXTENSION));
+    $mimeTypes = [
+        'jpg' => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        'gif' => 'image/gif',
+        'bmp' => 'image/bmp',
+        'webp' => 'image/webp',
+        'ico' => 'image/x-icon',
+        'tiff' => 'image/tiff',
+        'tif' => 'image/tiff'
+    ];
+    $mimeType = $mimeTypes[$ext] ?? 'image/jpeg';
+?>
+<div style="border: 1px solid #ccc; padding: 10px; background-color: white; display: inline-block;">
+<img src="data:<?php echo $mimeType; ?>;base64,<?php echo $base64Data; ?>" alt="<?php echo htmlspecialchars(basename($repoPath)); ?>" style="max-width: 100%; height: auto; max-height: 500px;">
+</div>
+<p><small>Image file size: <?php echo number_format(strlen($fileContent)); ?> bytes</small></p>
+<?php else: ?>
+<p><strong>Binary file (<?php echo strlen($fileContent); ?> bytes)</strong></p>
+<p>Hash: <?php echo htmlspecialchars($fileHash); ?></p>
+<?php endif; ?>
 <?php endif; ?>
 <?php endif; ?>
 <?php endif; ?>
@@ -1905,7 +1963,7 @@ if (isset($_GET['image'])) {
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="?log=<?php echo urlencode($repoName); ?>">[Log]</a> <?php if ($repoPath): ?>| <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[Repository Root]</a><?php endif; ?></p>
+<p><a href="/">[Home]</a> | <a href="?log=<?php echo urlencode($repoName); ?>">[Log]</a></p>
 <h2>Directory: /<?php echo htmlspecialchars($repoPath); ?></h2>
 <hr>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
@@ -1915,6 +1973,21 @@ if (isset($_GET['image'])) {
 <th><font color="white">Modified</font></th>
 <th><font color="white">Actions</font></th>
 </tr>
+<?php if ($repoPath): ?>
+<?php
+  // Calculate parent directory path
+  $parentPath = dirname($repoPath);
+  if ($parentPath === '.') $parentPath = '';
+  $parentUrl = '/' . htmlspecialchars(str_replace('.omi', '', $repoName));
+  if ($parentPath) $parentUrl .= '/' . htmlspecialchars($parentPath);
+?>
+<tr>
+<td><a href="<?php echo $parentUrl; ?>">📁 ..</a></td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<?php endif; ?>
 <?php if (!empty($organized['dirs'])): ?>
 <?php foreach ($organized['dirs'] as $dir): ?>
 <tr>
