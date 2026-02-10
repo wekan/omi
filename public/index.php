@@ -1222,10 +1222,6 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
 </div>
 <?php endif; ?>
 <?php endforeach; ?>
-</table>
-</form>
-</div>
-<?php endforeach; ?>
 
 <hr>
 <p><small>Omi Server</small></p>
@@ -1873,7 +1869,6 @@ if (isset($_GET['image'])) {
 </html>
     <?php
     exit;
-}
 
 // Handle POST request - Upload/Download with authentication
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
