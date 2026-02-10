@@ -1851,21 +1851,9 @@ ${contentHtml}
         if (isText) {
           editLink = `<form method="GET" action="${fileLinkPath}" style="display:inline"><input type="hidden" name="edit" value="1"><input type="submit" value="${t('edit', translations)}"></form>`;
         }
-        const deleteForm = `<form method="POST" style="display:inline">
-  <input type="hidden" name="action" value="delete_file">
-  <input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}">
-  <input type="submit" value="${t('delete', translations)}" onclick="return confirm('Delete file ${fileBasename}?')">
-  </form>`;
-        const renameForm = `<form method="POST" style="display:inline">
-  <input type="hidden" name="action" value="rename_file">
-  <input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}">
-  <input type="text" name="new_name" size="12" placeholder="${t('new-name', translations)}">
-  <input type="submit" value="${t('rename', translations)}">
-  </form>`;
-        actionsHtml = `<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-  <div>${editLink}${renameForm}</div>
-  <div>${deleteForm}</div>
-  </div>`;
+        const deleteForm = `<form method="POST" style="display:inline"><input type="hidden" name="action" value="delete_file"><input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}"><input type="submit" value="${t('delete', translations)}" onclick="return confirm('Delete file ${fileBasename}?')"></form>`;
+        const renameForm = `<form method="POST" style="display:inline"><input type="hidden" name="action" value="rename_file"><input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}"><input type="text" name="new_name" size="12" placeholder="${t('new-name', translations)}"><input type="submit" value="${t('rename', translations)}"></form>`;
+        actionsHtml = `<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;"><div>${editLink}${renameForm}</div><div>${deleteForm}</div></div>`;
       }
       
       return `<tr>
@@ -1928,7 +1916,7 @@ ${contentHtml}
 <th><font color="white">${t('actions', translations)}</font></th>
 </tr>
 ${repoPath ? `<tr>
-  <td><a href="/${escapeHtml(repoRoot)}${repoPath.includes('/') ? '/' + escapeHtml(repoPath.split('/').slice(0, -1).join('/')) : ''}">📁 ..</a></td>
+  <td><a href="/${escapeHtml(repoRoot)}${repoPath.includes('/') ? '/' + escapeHtml(repoPath.split('/').slice(0, -1).join('/')) : ''}">${t('directory', translations)} ..</a></td>
   <td>-</td>
   <td>-</td>
   <td>-</td>
