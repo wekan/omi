@@ -1913,7 +1913,59 @@ if (isset($_GET['image'])) {
 <?php if ($isMarkdown): ?>
 <!-- Markdown rendering -->
 <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-<?php echo markdownToHtml($fileContent); ?>
+<?php 
+  // Embed images in markdown as base64 data URIs
+  $markdownHtml = markdownToHtml($fileContent);
+  
+  // Extract image paths from markdown and load them from database
+  if (preg_match_all('/!\[(.*?)\]\((.*?)\)/', $fileContent, $matches)) {
+    try {
+      // Create PDO connection (db is the database path string)
+      $pdo = new PDO('sqlite:' . $db);
+      $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+      
+      foreach ($matches[2] as $imgPath) {
+        // Skip external URLs and absolute paths
+        if (strpos($imgPath, 'http://') === 0 || strpos($imgPath, 'https://') === 0 || strpos($imgPath, '/') === 0) {
+          continue;
+        }
+        
+        // Resolve relative path
+        $fileDir = dirname($repoPath);
+        $resolvedPath = ($fileDir !== '.') ? $fileDir . '/' . $imgPath : $imgPath;
+        
+        // Query database for image blob
+        $stmt = $pdo->prepare('SELECT f.hash FROM files f WHERE f.filename = ? AND f.commit_id = (SELECT MAX(id) FROM commits)');
+        $stmt->execute([$resolvedPath]);
+        $fileRow = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($fileRow) {
+          // Get blob data
+          $blobStmt = $pdo->prepare('SELECT data FROM blobs WHERE hash = ?');
+          $blobStmt->execute([$fileRow['hash']]);
+          $blobRow = $blobStmt->fetch(PDO::FETCH_ASSOC);
+          
+          if ($blobRow && $blobRow['data']) {
+            $ext = strtolower(pathinfo($resolvedPath, PATHINFO_EXTENSION));
+            $mimeTypes = array(
+              'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png',
+              'gif' => 'image/gif', 'bmp' => 'image/bmp', 'webp' => 'image/webp',
+              'ico' => 'image/x-icon', 'tiff' => 'image/tiff', 'tif' => 'image/tiff'
+            );
+            $mimeType = $mimeTypes[$ext] ?? 'image/jpeg';
+            $base64Data = base64_encode($blobRow['data']);
+            $dataUri = 'data:' . $mimeType . ';base64,' . $base64Data;
+            // Replace image src with data URI - maintain quote style used in markdown
+            $markdownHtml = str_replace('src="' . str_replace('"', '\\"', $imgPath) . '"', 'src="' . $dataUri . '"', $markdownHtml);
+          }
+        }
+      }
+    } catch (Exception $e) {
+      // Database error, just render with original image paths
+    }
+  }
+  echo $markdownHtml;
+?>
 </div>
 <?php elseif (isImageFile($repoPath)): ?>
 <!-- Image display -->
@@ -2269,7 +2321,7 @@ if (isset($_GET['image'])) {
 <?php if (!empty($organized['files'])): ?>
 <?php foreach ($organized['files'] as $file): ?>
 <tr>
-<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']); ?>[<?php echo htmlspecialchars(getFileTypeLabel($file['filename'])); ?>] <?php echo htmlspecialchars(basename($file['filename'])); ?></a></td>
+<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']); ?>">[<?php echo htmlspecialchars(getFileTypeLabel($file['filename'])); ?>] <?php echo htmlspecialchars(basename($file['filename'])); ?></a></td>
 <td><?php echo number_format($file['size']); ?></td>
 <td><?php echo htmlspecialchars($file['datetime']); ?></td>
 <td>
@@ -2277,7 +2329,8 @@ if (isset($_GET['image'])) {
 <?php
   // Check if file is text to show edit button
   $isTextFile = true;
-  // For now, we assume text files. In a real implementation, we'd check the file content
+  // Store organized data for later use
+  $organized = $organized ?? array('dirs' => array(), 'files' => array());
   $fileLink = '/' . htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']);
 ?>
 <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">

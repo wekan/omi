@@ -820,13 +820,13 @@ begin
   CleanRepoPath := RepoPath;
   if (CleanRepoPath <> '') and (CleanRepoPath[1] = '/') then
     CleanRepoPath := Copy(CleanRepoPath, 2, Length(CleanRepoPath));
+  
   if CleanRepoPath <> '' then
-    Prefix := CleanRepoPath + '/'
-  else
-    Prefix := '';
-
-  if Prefix <> '' then
-    Query := 'SELECT f.filename, f.hash, f.datetime, IFNULL(b.size,0) FROM files f LEFT JOIN blobs b ON f.hash=b.hash WHERE f.commit_id=' + IntToStr(LatestCommit) + ' AND f.filename LIKE ''' + SqlEscape(Prefix) + '%'' ORDER BY f.filename;'
+  begin
+    // Check if this is a file (exact match) or a directory (prefix match)
+    Prefix := CleanRepoPath + '/';
+    Query := 'SELECT f.filename, f.hash, f.datetime, IFNULL(b.size,0) FROM files f LEFT JOIN blobs b ON f.hash=b.hash WHERE f.commit_id=' + IntToStr(LatestCommit) + ' AND (f.filename = ''' + SqlEscape(CleanRepoPath) + ''' OR f.filename LIKE ''' + SqlEscape(Prefix) + '%'') ORDER BY f.filename;';
+  end
   else
     Query := 'SELECT f.filename, f.hash, f.datetime, IFNULL(b.size,0) FROM files f LEFT JOIN blobs b ON f.hash=b.hash WHERE f.commit_id=' + IntToStr(LatestCommit) + ' ORDER BY f.filename;';
 
@@ -1078,6 +1078,9 @@ var
   Line, Result1: string;
   InCodeBlock: Boolean;
   ProcessedLine: string;
+  ImgStart, AltStart, AltEnd, UrlStart, UrlEnd: Integer;
+  AltText, ImgUrl: string;
+  IsImage: Boolean;
 begin
   Result1 := '';
   InCodeBlock := False;
@@ -1087,6 +1090,7 @@ begin
   begin
     Line := Lines[I];
     ProcessedLine := Line;
+    IsImage := False;
     
     if Copy(Trim(ProcessedLine), 1, 3) = '```' then
     begin
@@ -1112,7 +1116,37 @@ begin
         ProcessedLine := '<li>' + Trim(Copy(ProcessedLine, 3, Length(ProcessedLine))) + '</li>'
       else if Trim(ProcessedLine) <> '' then
       begin
-        ProcessedLine := '<p>' + ProcessedLine + '</p>';
+        // Check for image syntax ![alt](url)
+        ImgStart := Pos('![', ProcessedLine);
+        if ImgStart > 0 then
+        begin
+          // Find the closing ] of the alt text
+          AltStart := ImgStart + 2;
+          AltEnd := Pos(']', Copy(ProcessedLine, AltStart, Length(ProcessedLine)));
+          if AltEnd > 0 then
+          begin
+            AltText := Copy(ProcessedLine, AltStart, AltEnd - 1);
+            // Check if there's an opening ( right after ]
+            if (AltStart + AltEnd) <= Length(ProcessedLine) then
+            begin
+              if ProcessedLine[AltStart + AltEnd] = '(' then
+              begin
+                // Find the closing )
+                UrlStart := AltStart + AltEnd + 1;
+                UrlEnd := Pos(')', Copy(ProcessedLine, UrlStart, Length(ProcessedLine)));
+                if UrlEnd > 0 then
+                begin
+                  ImgUrl := Copy(ProcessedLine, UrlStart, UrlEnd - 1);
+                  ProcessedLine := '<img src="' + ImgUrl + '" alt="' + AltText + '" style="max-width: 100%; height: auto; border: 1px solid #ccc; margin: 10px 0;">';
+                  IsImage := True;
+                end;
+              end;
+            end;
+          end;
+        end;
+        
+        if not IsImage then
+          ProcessedLine := '<p>' + ProcessedLine + '</p>';
       end;
     end;
     
@@ -2236,6 +2270,23 @@ var
   IsMarkdown: Boolean;
   IsImage: Boolean;
   DirHeader: string;
+  IsTextFile: Boolean;
+  LowerName: string;
+  EditButton: string;
+  ParentDirRow: string;
+  ParentUrl: string;
+  ImgStart: Integer;
+  ImgEnd: Integer;
+  SrcStart: Integer;
+  SrcEnd: Integer;
+  ImgUrl: string;
+  ResolvedPath: string;
+  Base64Img: string;
+  DataUri: string;
+  ImgContent: string;
+  Query: string;
+  Output: string;
+  FileDir: string;
 
   function RepoToRoot(const Name: string): string;
   begin
@@ -2406,6 +2457,54 @@ begin
         if IsMarkdown then
         begin
           MarkdownHtml := MarkdownToHtml(FileContent);
+          
+          // Embed images in markdown as base64 data URIs
+          try
+            // Extract image paths using simple pattern matching
+            FileDir := ExtractFileDir(RepoPath);
+            // Keep replacing images one at a time to avoid position tracking issues
+            while True do
+            begin
+              ImgStart := Pos('<img src="', MarkdownHtml);
+              if ImgStart = 0 then Break;
+              
+              SrcStart := ImgStart + 10;
+              SrcEnd := Pos('"', Copy(MarkdownHtml, SrcStart, Length(MarkdownHtml)));
+              if SrcEnd = 0 then Break;
+              
+              ImgUrl := Copy(MarkdownHtml, SrcStart, SrcEnd - 1);
+              
+              // Skip external URLs
+              if (Pos('http://', ImgUrl) = 0) and (Pos('https://', ImgUrl) = 0) and (Pos('data:', ImgUrl) = 0) then
+              begin
+                // Resolve relative path
+                if FileDir <> '.' then
+                  ResolvedPath := FileDir + '/' + ImgUrl
+                else
+                  ResolvedPath := ImgUrl;
+                
+                // Query database for image
+                Query := 'SELECT hex(b.data) FROM files f JOIN blobs b ON f.hash=b.hash WHERE f.commit_id=(SELECT MAX(id) FROM commits) AND f.filename = ''' + SqlEscape(ResolvedPath) + ''';';
+                Output := ExecSqlOnDb(DbPath, Query);
+                
+                if Trim(Output) <> '' then
+                begin
+                  // Convert hex to base64 and create data URI
+                  ImgContent := HexToString(Output);
+                  Base64Img := Base64Encode(ImgContent);
+                  MimeType := GetMimeType(ResolvedPath);
+                  DataUri := 'data:' + MimeType + ';base64,' + Base64Img;
+                  MarkdownHtml := StringReplace(MarkdownHtml, 'src="' + ImgUrl + '"', 'src="' + DataUri + '"', [rfIgnoreCase]);
+                end;
+              end;
+              
+              // Replace this image with itself if not found, to avoid infinite loop
+              if Pos('<img src="', MarkdownHtml) = ImgStart then Break;
+            end;
+          except
+            // If image embedding fails, keep original URLs
+          end;
+          
           Html := Html + '<div style="font-family: Arial, sans-serif; line-height: 1.6;">' + MarkdownHtml + '</div>';
         end
         else
