@@ -1462,7 +1462,7 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
 <?php foreach ($users as $u => $data): ?>
 <?php if ($u === getUsername()): ?>
 <div id="otp_<?php echo htmlspecialchars($u); ?>" style="display:none;border:1px solid #ccc;padding:10px;margin:10px 0">
-<h3><?php echo t('otp-for', $translations); ?>: <?php echo htmlspecialchars($u); ?></h3>
+<h3><?php echo t('otp-for-user', $translations); ?>: <?php echo htmlspecialchars($u); ?></h3>
 <?php if (empty($data['otp'])): ?>
 <form method="POST">
 <table border="0" cellpadding="5">
