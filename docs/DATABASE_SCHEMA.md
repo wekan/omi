@@ -136,7 +136,7 @@ For each file in staging:
     Get commit_id = last_insert_id()
   ↓
   Add file metadata:
-    INSERT INTO files: filename="README.md", hash="abc123...", 
+    INSERT INTO files: filename="README.md", hash="abc123...",
                        commit_id=1, datetime="..."
   ↓
   Delete from staging
@@ -145,7 +145,7 @@ For each file in staging:
 ### Viewing File History
 
 ```
-Query: SELECT * FROM files WHERE filename="README.md" 
+Query: SELECT * FROM files WHERE filename="README.md"
        ORDER BY commit_id DESC
 ↓
 Returns: All versions of README.md
@@ -186,7 +186,7 @@ files:
 ### List All Files in Latest Commit
 
 ```sql
-SELECT f.filename, b.size, f.datetime 
+SELECT f.filename, b.size, f.datetime
 FROM files f
 LEFT JOIN blobs b ON f.hash = b.hash
 LEFT JOIN commits c ON f.commit_id = c.id

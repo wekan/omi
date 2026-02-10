@@ -10,31 +10,233 @@ session_start();
 define('REPOS_DIR', __DIR__ . '/../repos');
 define('SETTINGS_FILE', __DIR__ . '/../settings.txt');
 define('USERS_FILE', __DIR__ . '/../phpusers.txt');
+define('LOCKED_USERS_FILE', __DIR__ . '/../phpusersbruteforcelocked.txt');
+define('FAILED_ATTEMPTS_FILE', __DIR__ . '/../phpusersfailedattempts.txt');
 
 // Ensure repos directory exists
 if (!is_dir(REPOS_DIR)) {
     mkdir(REPOS_DIR, 0755, true);
 }
 
-// Load users from phpusers.txt
+// Load settings from settings.txt
+function loadSettings() {
+    $settings = [];
+    if (file_exists(SETTINGS_FILE)) {
+        $lines = file(SETTINGS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $line) {
+            if (strpos($line, '=') !== false) {
+                list($key, $value) = explode('=', $line, 2);
+                $settings[trim($key)] = trim($value);
+            }
+        }
+    }
+    return $settings;
+}
+
+// Check if user is locked due to brute force
+function isUserLocked($username) {
+    if (!file_exists(LOCKED_USERS_FILE)) {
+        return false;
+    }
+    $locked = file(LOCKED_USERS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($locked as $line) {
+        $parts = explode(':', $line, 2);
+        if (trim($parts[0]) === $username) {
+            if (isset($parts[1])) {
+                $lockTime = intval($parts[1]);
+                $settings = loadSettings();
+                $users = loadUsers();
+                $isKnownUser = isset($users[$username]);
+                $lockPeriod = $isKnownUser ?
+                    intval($settings['ACCOUNTS_LOCKOUT_KNOWN_USERS_PERIOD'] ?? 60) :
+                    intval($settings['ACCOUNTS_LOCKOUT_UNKNOWN_USERS_LOCKOUT_PERIOD'] ?? 60);
+
+                if (time() - $lockTime < $lockPeriod) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// Get failed attempts for username
+function getFailedAttempts($username) {
+    if (!file_exists(FAILED_ATTEMPTS_FILE)) {
+        return [];
+    }
+    $attempts = [];
+    $lines = file(FAILED_ATTEMPTS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        $parts = explode(':', $line, 2);
+        if (count($parts) === 2 && trim($parts[0]) === $username) {
+            $attempts[] = intval($parts[1]);
+        }
+    }
+    return $attempts;
+}
+
+// Record failed attempt
+function recordFailedAttempt($username) {
+    $line = $username . ':' . time() . "\n";
+    file_put_contents(FAILED_ATTEMPTS_FILE, $line, FILE_APPEND | LOCK_EX);
+}
+
+// Clear failed attempts for user
+function clearFailedAttempts($username) {
+    if (!file_exists(FAILED_ATTEMPTS_FILE)) {
+        return;
+    }
+    $lines = file(FAILED_ATTEMPTS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $newContent = '';
+    foreach ($lines as $line) {
+        $parts = explode(':', $line, 2);
+        if (trim($parts[0]) !== $username) {
+            $newContent .= $line . "\n";
+        }
+    }
+    file_put_contents(FAILED_ATTEMPTS_FILE, $newContent, LOCK_EX);
+}
+
+// Lock user account
+function lockUser($username) {
+    $line = $username . ':' . time() . "\n";
+    file_put_contents(LOCKED_USERS_FILE, $line, FILE_APPEND | LOCK_EX);
+}
+
+// Check if brute force threshold reached
+function checkBruteForce($username) {
+    $settings = loadSettings();
+    $users = loadUsers();
+    $isKnownUser = isset($users[$username]);
+
+    $failuresThreshold = $isKnownUser ?
+        intval($settings['ACCOUNTS_LOCKOUT_KNOWN_USERS_FAILURES_BEFORE'] ?? 3) :
+        intval($settings['ACCOUNTS_LOCKOUT_UNKNOWN_USERS_FAILURES_BEFORE'] ?? 3);
+
+    $failureWindow = $isKnownUser ?
+        intval($settings['ACCOUNTS_LOCKOUT_KNOWN_USERS_FAILURE_WINDOW'] ?? 15) :
+        intval($settings['ACCOUNTS_LOCKOUT_UNKNOWN_USERS_FAILURE_WINDOW'] ?? 15);
+
+    $attempts = getFailedAttempts($username);
+    $recentAttempts = array_filter($attempts, function($timestamp) use ($failureWindow) {
+        return (time() - $timestamp) < $failureWindow;
+    });
+
+    if (count($recentAttempts) >= $failuresThreshold) {
+        lockUser($username);
+        clearFailedAttempts($username);
+        return true;
+    }
+
+    return false;
+}
+
+// Load users from phpusers.txt (format: username:password:otp)
 function loadUsers() {
     $users = [];
     if (file_exists(USERS_FILE)) {
         $lines = file(USERS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         foreach ($lines as $line) {
             if (strpos($line, ':') !== false) {
-                list($username, $password) = explode(':', $line, 2);
-                $users[trim($username)] = trim($password);
+                $parts = explode(':', $line, 3);
+                $username = trim($parts[0]);
+                $password = trim($parts[1]);
+                $otp = isset($parts[2]) ? trim($parts[2]) : '';
+                $users[$username] = ['password' => $password, 'otp' => $otp];
             }
         }
     }
     return $users;
 }
 
-// Simple authentication check
-function authenticate($username, $password) {
+// Generate random OTP secret (base32)
+function generateOTPSecret($length = 16) {
+    $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    $secret = '';
+    for ($i = 0; $i < $length; $i++) {
+        $secret .= $chars[random_int(0, 31)];
+    }
+    return $secret;
+}
+
+// Base32 decode for TOTP
+function base32Decode($secret) {
+    $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    $secret = strtoupper($secret);
+    $paddingCharCount = substr_count($secret, '=');
+    $allowedValues = [6, 4, 3, 1, 0];
+    if (!in_array($paddingCharCount, $allowedValues)) return false;
+    for ($i = 0; $i < 4; $i++) {
+        if ($paddingCharCount == $allowedValues[$i] &&
+            substr($secret, -($allowedValues[$i])) != str_repeat('=', $allowedValues[$i])) return false;
+    }
+    $secret = str_replace('=', '', $secret);
+    $secret = str_split($secret);
+    $binaryString = '';
+    for ($i = 0; $i < count($secret); $i = $i + 8) {
+        $x = '';
+        if (!in_array($secret[$i], str_split($chars))) return false;
+        for ($j = 0; $j < 8; $j++) {
+            $x .= str_pad(base_convert(@strpos($chars, @$secret[$i + $j]), 10, 2), 5, '0', STR_PAD_LEFT);
+        }
+        $eightBits = str_split($x, 8);
+        for ($z = 0; $z < count($eightBits); $z++) {
+            $binaryString .= (($y = chr(base_convert($eightBits[$z], 2, 10))) || ord($y) == 48) ? $y : '';
+        }
+    }
+    return $binaryString;
+}
+
+// Verify TOTP code
+function verifyTOTP($secret, $code, $window = 1) {
+    $secretKey = base32Decode($secret);
+    if (!$secretKey) return false;
+
+    $time = floor(time() / 30);
+
+    for ($i = -$window; $i <= $window; $i++) {
+        $testTime = $time + $i;
+        $timeBytes = pack('N*', 0) . pack('N*', $testTime);
+        $hash = hash_hmac('sha1', $timeBytes, $secretKey, true);
+        $offset = ord($hash[19]) & 0xf;
+        $otp = (
+            ((ord($hash[$offset+0]) & 0x7f) << 24) |
+            ((ord($hash[$offset+1]) & 0xff) << 16) |
+            ((ord($hash[$offset+2]) & 0xff) << 8) |
+            (ord($hash[$offset+3]) & 0xff)
+        ) % 1000000;
+        $otp = str_pad($otp, 6, '0', STR_PAD_LEFT);
+
+        if ($otp === $code) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Simple authentication check with OTP support
+function authenticate($username, $password, $otpCode = '') {
     $users = loadUsers();
-    return isset($users[$username]) && $users[$username] === $password;
+    if (!isset($users[$username])) return false;
+
+    $user = $users[$username];
+
+    // Check password
+    if ($user['password'] !== $password) return false;
+
+    // Check OTP if enabled for this user
+    if (!empty($user['otp'])) {
+        // Extract secret from otpauth:// URL
+        if (preg_match('/secret=([A-Z2-7]+)/', $user['otp'], $matches)) {
+            $secret = $matches[1];
+            if (empty($otpCode) || !verifyTOTP($secret, $otpCode)) {
+                return 'OTP_REQUIRED';
+            }
+        }
+    }
+
+    return true;
 }
 
 // Check if user is logged in
@@ -45,6 +247,34 @@ function isLoggedIn() {
 // Get logged-in username
 function getUsername() {
     return $_SESSION['username'] ?? null;
+}
+
+// Sanitize repository name to prevent directory traversal
+function sanitizeRepoName($name) {
+    // Remove any path traversal sequences
+    $name = str_replace(['../', '..\\', '\0'], '', $name);
+    // Get basename to remove any directory components
+    $name = basename($name);
+    // Only allow alphanumeric, dash, underscore, and dot
+    $name = preg_replace('/[^a-zA-Z0-9._-]/', '', $name);
+    return $name;
+}
+
+// Validate path is within REPOS_DIR
+function isPathSafe($path) {
+    $realReposDir = realpath(REPOS_DIR);
+    $realPath = realpath($path);
+    
+    // If path doesn't exist yet, check parent directory
+    if ($realPath === false) {
+        $realPath = realpath(dirname($path));
+        if ($realPath === false) {
+            return false;
+        }
+    }
+    
+    // Check if the real path starts with the repos directory
+    return strpos($realPath, $realReposDir) === 0;
 }
 
 // Get list of repositories
@@ -67,27 +297,28 @@ function parseRequestURI() {
     $uri = $_SERVER['REQUEST_URI'];
     $uri = parse_url($uri, PHP_URL_PATH);
     $uri = trim($uri, '/');
-    
+
     if (empty($uri)) {
         return ['type' => 'list'];
     }
-    
+
     $parts = explode('/', $uri);
-    $repoName = $parts[0];
-    
+    $repoName = sanitizeRepoName($parts[0]);
+
     // Check if it's a valid repo
     if (!preg_match('/\.omi$/', $repoName)) {
         $repoName .= '.omi';
     }
-    
+
     $repoPath = REPOS_DIR . '/' . $repoName;
-    
-    if (!file_exists($repoPath)) {
+
+    // Validate path is safe
+    if (!isPathSafe($repoPath) || !file_exists($repoPath)) {
         return ['type' => 'error', 'message' => 'Repository not found'];
     }
-    
+
     $path = isset($parts[1]) ? implode('/', array_slice($parts, 1)) : '';
-    
+
     return [
         'type' => 'browse',
         'repo' => $repoName,
@@ -101,23 +332,23 @@ function getLatestFiles($db, $path = '') {
     try {
         $pdo = new PDO('sqlite:' . $db);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        
+
         // Get latest commit
         $stmt = $pdo->query("SELECT id FROM commits ORDER BY id DESC LIMIT 1");
         $commit = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         if (!$commit) {
             return [];
         }
-        
+
         $commitId = $commit['id'];
-        
+
         // Get files from this commit
-        $sql = "SELECT f.filename, f.hash, f.datetime, b.size 
-                FROM files f 
-                LEFT JOIN blobs b ON f.hash = b.hash 
+        $sql = "SELECT f.filename, f.hash, f.datetime, b.size
+                FROM files f
+                LEFT JOIN blobs b ON f.hash = b.hash
                 WHERE f.commit_id = ?";
-        
+
         if ($path) {
             $sql .= " AND (f.filename LIKE ? OR f.filename = ?)";
             $stmt = $pdo->prepare($sql);
@@ -126,7 +357,7 @@ function getLatestFiles($db, $path = '') {
             $stmt = $pdo->prepare($sql);
             $stmt->execute([$commitId]);
         }
-        
+
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (Exception $e) {
         return [];
@@ -137,15 +368,15 @@ function getLatestFiles($db, $path = '') {
 function organizeFiles($files, $basePath = '') {
     $result = ['dirs' => [], 'files' => []];
     $baseDepth = empty($basePath) ? 0 : substr_count($basePath, '/') + 1;
-    
+
     foreach ($files as $file) {
         $filename = $file['filename'];
-        
+
         // Skip if not in current path
         if ($basePath && strpos($filename, $basePath . '/') !== 0 && $filename !== $basePath) {
             continue;
         }
-        
+
         // Remove base path
         if ($basePath) {
             if ($filename === $basePath) {
@@ -157,9 +388,9 @@ function organizeFiles($files, $basePath = '') {
         } else {
             $relativePath = $filename;
         }
-        
+
         $parts = explode('/', $relativePath);
-        
+
         if (count($parts) > 1) {
             // It's in a subdirectory
             $dirName = $parts[0];
@@ -175,7 +406,7 @@ function organizeFiles($files, $basePath = '') {
             $result['files'][] = $file;
         }
     }
-    
+
     return $result;
 }
 
@@ -184,11 +415,11 @@ function getFileContent($db, $hash) {
     try {
         $pdo = new PDO('sqlite:' . $db);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        
+
         $stmt = $pdo->prepare("SELECT data FROM blobs WHERE hash = ?");
         $stmt->execute([$hash]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         return $result ? $result['data'] : null;
     } catch (Exception $e) {
         return null;
@@ -198,12 +429,12 @@ function getFileContent($db, $hash) {
 // Check if content is text
 function isTextFile($content) {
     if (empty($content)) return true;
-    
+
     // Check for null bytes (binary indicator)
     if (strpos($content, "\0") !== false) {
         return false;
     }
-    
+
     return true;
 }
 
@@ -212,35 +443,35 @@ function commitFile($db, $filename, $content) {
     try {
         $pdo = new PDO('sqlite:' . $db);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        
+
         // Calculate hash
         $hash = hash('sha256', $content);
         $size = strlen($content);
-        
+
         // Check if blob already exists
         $stmt = $pdo->prepare("SELECT COUNT(*) as cnt FROM blobs WHERE hash = ?");
         $stmt->execute([$hash]);
         $blobExists = $stmt->fetch(PDO::FETCH_ASSOC)['cnt'] > 0;
-        
+
         // Insert blob if new
         if (!$blobExists) {
             $stmt = $pdo->prepare("INSERT INTO blobs (hash, data, size) VALUES (?, ?, ?)");
             $stmt->execute([$hash, $content, $size]);
         }
-        
+
         // Get current datetime
         $datetime = date('Y-m-d H:i:s');
-        
+
         // Create commit
         $stmt = $pdo->prepare("INSERT INTO commits (message, datetime, user) VALUES (?, ?, ?)");
         $stmt->execute(["Edited: $filename", $datetime, getUsername()]);
-        
+
         $commitId = $pdo->lastInsertId();
-        
+
         // Add file record
         $stmt = $pdo->prepare("INSERT INTO files (filename, hash, datetime, commit_id) VALUES (?, ?, ?, ?)");
         $stmt->execute([$filename, $hash, $datetime, $commitId]);
-        
+
         return true;
     } catch (Exception $e) {
         error_log("Error committing file: " . $e->getMessage());
@@ -260,17 +491,38 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-in') !== false) {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $username = $_POST['username'] ?? '';
         $password = $_POST['password'] ?? '';
-        
-        if (authenticate($username, $password)) {
-            $_SESSION['username'] = $username;
-            // Redirect to home
-            header('Location: /');
-            exit;
+        $otpCode = $_POST['otp'] ?? '';
+
+        // Check if user is locked
+        if (isUserLocked($username)) {
+            $error = 'Account is temporarily locked due to too many failed login attempts. Please try again later.';
         } else {
-            $error = 'Invalid username or password';
+            $authResult = authenticate($username, $password, $otpCode);
+
+            if ($authResult === true) {
+                // Clear failed attempts on successful login
+                clearFailedAttempts($username);
+                $_SESSION['username'] = $username;
+                // Redirect to home
+                header('Location: /');
+                exit;
+            } elseif ($authResult === 'OTP_REQUIRED') {
+                $error = 'OTP code required';
+                $show_otp = true;
+            } else {
+                // Record failed attempt
+                recordFailedAttempt($username);
+
+                // Check if threshold reached
+                if (checkBruteForce($username)) {
+                    $error = 'Too many failed login attempts. Account locked temporarily.';
+                } else {
+                    $error = 'Invalid username or password';
+                }
+            }
         }
     }
-    
+
     ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
@@ -287,8 +539,11 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-in') !== false) {
 <?php endif; ?>
 <form method="POST">
 <table border="1" cellpadding="5">
-<tr><td>Username:</td><td><input type="text" name="username" size="30" required></td></tr>
+<tr><td>Username:</td><td><input type="text" name="username" size="30" required value="<?php echo isset($_POST['username']) ? htmlspecialchars($_POST['username']) : ''; ?>"></td></tr>
 <tr><td>Password:</td><td><input type="password" name="password" size="30" required></td></tr>
+<?php if (isset($show_otp)): ?>
+<tr><td>OTP Code:</td><td><input type="text" name="otp" size="10" maxlength="6" required pattern="[0-9]{6}" placeholder="6-digit code"></td></tr>
+<?php endif; ?>
 <tr><td colspan="2"><input type="submit" value="Sign In"></td></tr>
 </table>
 </form>
@@ -303,13 +558,19 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-in') !== false) {
 if (strpos($_SERVER['REQUEST_URI'], '/sign-up') !== false) {
     $error = null;
     $success = null;
-    
+
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $username = $_POST['username'] ?? '';
         $password = $_POST['password'] ?? '';
         $password2 = $_POST['password2'] ?? '';
-        
-        if (empty($username) || empty($password)) {
+
+        // Check if IP or username is locked (brute force protection)
+        $ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $checkUsername = !empty($username) ? $username : 'signup_' . $ipAddress;
+
+        if (isUserLocked($checkUsername)) {
+            $error = 'Too many sign-up attempts. Please try again later.';
+        } elseif (empty($username) || empty($password)) {
             $error = 'Username and password are required';
         } elseif ($password !== $password2) {
             $error = 'Passwords do not match';
@@ -319,10 +580,13 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-up') !== false) {
             // Check if user exists
             $users = loadUsers();
             if (isset($users[$username])) {
+                // Record failed attempt for existing username
+                recordFailedAttempt($username);
+                checkBruteForce($username);
                 $error = 'User already exists';
             } else {
-                // Add new user
-                $line = $username . ':' . $password . "\n";
+                // Add new user (with empty OTP field)
+                $line = $username . ':' . $password . ':' . "\n";
                 if (file_put_contents(USERS_FILE, $line, FILE_APPEND | LOCK_EX)) {
                     $success = 'Account created! You can now sign in.';
                 } else {
@@ -331,7 +595,7 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-up') !== false) {
             }
         }
     }
-    
+
     ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
@@ -372,7 +636,7 @@ if (strpos($_SERVER['REQUEST_URI'], '/settings') !== false && strpos($_SERVER['R
         header('Location: /sign-in');
         exit;
     }
-    
+
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $settings = [];
         foreach (['SQLITE', 'USERNAME', 'PASSWORD', 'REPOS', 'CURL'] as $key) {
@@ -380,19 +644,19 @@ if (strpos($_SERVER['REQUEST_URI'], '/settings') !== false && strpos($_SERVER['R
                 $settings[$key] = $_POST[$key];
             }
         }
-        
+
         $content = '';
         foreach ($settings as $key => $value) {
             $content .= $key . '=' . $value . "\n";
         }
-        
+
         if (file_put_contents(SETTINGS_FILE, $content, LOCK_EX)) {
             $success = 'Settings updated successfully';
         } else {
             $error = 'Failed to save settings';
         }
     }
-    
+
     $settings = [];
     if (file_exists(SETTINGS_FILE)) {
         $lines = file(SETTINGS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
@@ -403,7 +667,7 @@ if (strpos($_SERVER['REQUEST_URI'], '/settings') !== false && strpos($_SERVER['R
             }
         }
     }
-    
+
     ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
@@ -442,23 +706,23 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
         header('Location: /sign-in');
         exit;
     }
-    
+
     $users = loadUsers();
-    
+
     // Handle user operations
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['action'] ?? '';
-        
+
         if ($action === 'add') {
             $newuser = $_POST['newuser'] ?? '';
             $newpass = $_POST['newpass'] ?? '';
-            
+
             if (!empty($newuser) && !empty($newpass)) {
                 if (!isset($users[$newuser])) {
-                    $users[$newuser] = $newpass;
+                    $users[$newuser] = ['password' => $newpass, 'otp' => ''];
                     $userContent = '';
-                    foreach ($users as $u => $p) {
-                        $userContent .= $u . ':' . $p . "\n";
+                    foreach ($users as $u => $data) {
+                        $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
                     }
                     if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
                         $success = 'User added successfully';
@@ -474,8 +738,8 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
             if (isset($users[$deluser])) {
                 unset($users[$deluser]);
                 $userContent = '';
-                foreach ($users as $u => $p) {
-                    $userContent .= $u . ':' . $p . "\n";
+                foreach ($users as $u => $data) {
+                    $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
                 }
                 if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
                     $success = 'User deleted successfully';
@@ -487,10 +751,10 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
             $upuser = $_POST['upuser'] ?? '';
             $uppass = $_POST['uppass'] ?? '';
             if (isset($users[$upuser]) && !empty($uppass)) {
-                $users[$upuser] = $uppass;
+                $users[$upuser]['password'] = $uppass;
                 $userContent = '';
-                foreach ($users as $u => $p) {
-                    $userContent .= $u . ':' . $p . "\n";
+                foreach ($users as $u => $data) {
+                    $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
                 }
                 if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
                     $success = 'User updated successfully';
@@ -498,11 +762,44 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
                     $error = 'Failed to update user';
                 }
             }
+        } elseif ($action === 'enable_otp') {
+            $otpuser = $_POST['otpuser'] ?? '';
+            $email = $_POST['email'] ?? '';
+            if (isset($users[$otpuser])) {
+                $secret = generateOTPSecret();
+                $emailPart = !empty($email) ? $email : $otpuser;
+                $otpauth = "otpauth://totp/Omi ($emailPart):$emailPart?secret=$secret&issuer=omi&digits=6&period=30";
+                $users[$otpuser]['otp'] = $otpauth;
+                $userContent = '';
+                foreach ($users as $u => $data) {
+                    $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
+                }
+                if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
+                    $success = 'OTP enabled successfully';
+                    $_SESSION['otp_setup'] = $otpauth;
+                } else {
+                    $error = 'Failed to enable OTP';
+                }
+            }
+        } elseif ($action === 'disable_otp') {
+            $otpuser = $_POST['otpuser'] ?? '';
+            if (isset($users[$otpuser])) {
+                $users[$otpuser]['otp'] = '';
+                $userContent = '';
+                foreach ($users as $u => $data) {
+                    $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
+                }
+                if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
+                    $success = 'OTP disabled successfully';
+                } else {
+                    $error = 'Failed to disable OTP';
+                }
+            }
         }
-        
+
         $users = loadUsers();
     }
-    
+
     ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
@@ -520,15 +817,20 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
 
 <h2>Manage Users</h2>
 <table border="1" cellpadding="5" width="100%">
-<tr bgcolor="#333333"><th><font color="white">Username</font></th><th><font color="white">Action</font></th></tr>
-<?php foreach ($users as $u => $p): ?>
-<tr><td><?php echo htmlspecialchars($u); ?></td><td>
+<tr bgcolor="#333333"><th><font color="white">Username</font></th><th><font color="white">OTP Status</font></th><th><font color="white">Action</font></th></tr>
+<?php foreach ($users as $u => $data): ?>
+<tr><td><?php echo htmlspecialchars($u); ?></td>
+<td><?php echo !empty($data['otp']) ? '<font color="green">✓ Enabled</font>' : '<font color="gray">Disabled</font>'; ?></td>
+<td>
 <form method="POST" style="display:inline">
 <input type="hidden" name="action" value="delete">
 <input type="hidden" name="deluser" value="<?php echo htmlspecialchars($u); ?>">
 <input type="submit" value="Delete" onclick="return confirm('Delete user <?php echo htmlspecialchars($u); ?>?')">
-</form> | 
+</form> |
 <a href="#" onclick="document.getElementById('edit_<?php echo htmlspecialchars($u); ?>').style.display='block'; return false;">[Edit]</a>
+<?php if ($u === getUsername()): ?>
+ | <a href="#" onclick="document.getElementById('otp_<?php echo htmlspecialchars($u); ?>').style.display='block'; return false;">[OTP]</a>
+<?php endif; ?>
 </td></tr>
 <?php endforeach; ?>
 </table>
@@ -543,13 +845,58 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
 </form>
 
 <h2>Edit User Password</h2>
-<?php foreach ($users as $u => $p): ?>
+<?php foreach ($users as $u => $data): ?>
 <div id="edit_<?php echo htmlspecialchars($u); ?>" style="display:none;border:1px solid #ccc;padding:10px;margin:10px 0">
 <form method="POST">
 <table border="0" cellpadding="5">
 <tr><td>User:</td><td><strong><?php echo htmlspecialchars($u); ?></strong></td></tr>
 <tr><td>New Password:</td><td><input type="password" name="uppass" size="30" required></td></tr>
 <tr><td colspan="2"><input type="hidden" name="action" value="update"><input type="hidden" name="upuser" value="<?php echo htmlspecialchars($u); ?>"><input type="submit" value="Update"> | <a href="#" onclick="document.getElementById('edit_<?php echo htmlspecialchars($u); ?>').style.display='none'; return false;">[Cancel]</a></td></tr>
+</table>
+</form>
+</div>
+<?php endforeach; ?>
+
+<h2>Manage OTP Authentication</h2>
+<?php if (isset($_SESSION['otp_setup'])): ?>
+<div style="border:2px solid green;padding:15px;margin:10px 0;background:#e8f5e9">
+<p><strong><font color="green">OTP Enabled Successfully!</font></strong></p>
+<p>Scan this URL with your authenticator app (e.g., NumberStation, Google Authenticator):</p>
+<p style="word-break:break-all;font-family:monospace;background:white;padding:10px;border:1px solid #ccc"><?php echo htmlspecialchars($_SESSION['otp_setup']); ?></p>
+<p><small>Save this URL securely. You won't see it again.</small></p>
+<p><a href="#" onclick="delete window.sessionStorage; location.reload(); return false;">[Close]</a></p>
+</div>
+<?php unset($_SESSION['otp_setup']); endif; ?>
+
+<?php foreach ($users as $u => $data): ?>
+<?php if ($u === getUsername()): ?>
+<div id="otp_<?php echo htmlspecialchars($u); ?>" style="display:none;border:1px solid #ccc;padding:10px;margin:10px 0">
+<h3>OTP for: <?php echo htmlspecialchars($u); ?></h3>
+<?php if (empty($data['otp'])): ?>
+<form method="POST">
+<table border="0" cellpadding="5">
+<tr><td>Email (optional):</td><td><input type="text" name="email" size="30" placeholder="<?php echo htmlspecialchars($u); ?>" value="<?php echo htmlspecialchars($u); ?>"></td></tr>
+<tr><td colspan="2"><small>This will be used as the account identifier in your authenticator app.</small></td></tr>
+<tr><td colspan="2">
+<input type="hidden" name="action" value="enable_otp">
+<input type="hidden" name="otpuser" value="<?php echo htmlspecialchars($u); ?>">
+<input type="submit" value="Enable OTP">
+</td></tr>
+</table>
+</form>
+<?php else: ?>
+<p><font color="green">✓ OTP is currently <strong>enabled</strong></font></p>
+<p><small>Your OTP URL is stored securely. Use your authenticator app to generate codes.</small></p>
+<form method="POST" style="display:inline">
+<input type="hidden" name="action" value="disable_otp">
+<input type="hidden" name="otpuser" value="<?php echo htmlspecialchars($u); ?>">
+<input type="submit" value="Disable OTP" onclick="return confirm('Are you sure you want to disable OTP?')">
+</form>
+<?php endif; ?>
+<p><a href="#" onclick="document.getElementById('otp_<?php echo htmlspecialchars($u); ?>').style.display='none'; return false;">[Close]</a></p>
+</div>
+<?php endif; ?>
+<?php endforeach; ?>
 </table>
 </form>
 </div>
@@ -565,38 +912,39 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
 
 // Handle commit log/history display
 if (isset($_GET['log'])) {
-    $reponame = $_GET['log'];
+    $reponame = sanitizeRepoName($_GET['log']);
     if (!preg_match('/\.omi$/', $reponame)) {
         $reponame .= '.omi';
     }
-    
+
     $repopath = REPOS_DIR . '/' . $reponame;
-    
-    if (!file_exists($repopath)) {
+
+    // Validate path is safe
+    if (!isPathSafe($repopath) || !file_exists($repopath)) {
         http_response_code(404);
         echo 'Repository not found';
         exit;
     }
-    
+
     $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
     $per_page = 10;
     $offset = ($page - 1) * $per_page;
-    
+
     try {
         $pdo = new PDO('sqlite:' . $repopath);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        
+
         // Get total commits
         $stmt = $pdo->query("SELECT COUNT(*) as total FROM commits");
         $total = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
         $total_pages = ceil($total / $per_page);
-        
+
         // Get commits for this page
         $stmt = $pdo->prepare("
-            SELECT 
-                c.id, 
-                c.message, 
-                c.datetime, 
+            SELECT
+                c.id,
+                c.message,
+                c.datetime,
                 c.user,
                 COUNT(f.id) as file_count
             FROM commits c
@@ -607,7 +955,7 @@ if (isset($_GET['log'])) {
         ");
         $stmt->execute([$per_page, $offset]);
         $commits = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+
         $username = getUsername();
         ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
@@ -670,34 +1018,38 @@ if (isset($_GET['log'])) {
 if (isset($_GET['image'])) {
     $imagefile = $_GET['image'];
     $username = getUsername();
-    
+
     // Validate and open image from repo
     $parts = explode('/', $imagefile);
-    $repoName = array_shift($parts);
+    $repoName = sanitizeRepoName(array_shift($parts));
     $imagePath = implode('/', $parts);
-    
+
+    // Remove any directory traversal attempts from image path
+    $imagePath = str_replace(['../', '..\\', '\0'], '', $imagePath);
+
     if (!preg_match('/\.omi$/', $repoName)) {
         $repoName .= '.omi';
     }
-    
+
     $repoPath = REPOS_DIR . '/' . $repoName;
-    
-    if (!file_exists($repoPath)) {
+
+    // Validate path is safe
+    if (!isPathSafe($repoPath) || !file_exists($repoPath)) {
         http_response_code(404);
         echo 'Image not found';
         exit;
     }
-    
+
     try {
         $pdo = new PDO('sqlite:' . $repoPath);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        
-        $stmt = $pdo->prepare("SELECT f.filename, b.data FROM files f 
-                             LEFT JOIN blobs b ON f.hash = b.hash 
+
+        $stmt = $pdo->prepare("SELECT f.filename, b.data FROM files f
+                             LEFT JOIN blobs b ON f.hash = b.hash
                              WHERE f.filename = ? ORDER BY f.commit_id DESC LIMIT 1");
         $stmt->execute([$imagePath]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         if ($result && $result['data']) {
             ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
@@ -734,10 +1086,11 @@ if (isset($_GET['image'])) {
 }
     // Handle download request
     if (isset($_GET['download'])) {
-        $filename = basename($_GET['download']);
+        $filename = sanitizeRepoName(basename($_GET['download']));
         $filepath = REPOS_DIR . '/' . $filename;
-        
-        if (file_exists($filepath) && pathinfo($filename, PATHINFO_EXTENSION) === 'omi') {
+
+        // Validate path is safe
+        if (isPathSafe($filepath) && file_exists($filepath) && pathinfo($filename, PATHINFO_EXTENSION) === 'omi') {
             header('Content-Type: application/octet-stream');
             header('Content-Disposition: attachment; filename="' . $filename . '"');
             header('Content-Length: ' . filesize($filepath));
@@ -749,47 +1102,47 @@ if (isset($_GET['image'])) {
             exit;
         }
     }
-    
+
     // Check if requesting JSON API
     if (isset($_GET['format']) && $_GET['format'] === 'json') {
         header('Content-Type: application/json');
         echo json_encode(['repos' => getReposList()]);
         exit;
     }
-    
+
     // Parse request URI
     $request = parseRequestURI();
-    
+
     if ($request['type'] === 'error') {
         http_response_code(404);
         echo '<html><body><h1>Error: ' . htmlspecialchars($request['message']) . '</h1></body></html>';
         exit;
     }
-    
+
     if ($request['type'] === 'browse') {
         // Browse repository
         $repoName = $request['repo'];
         $repoPath = $request['path'];
         $db = $request['db'];
-        
+
         $files = getLatestFiles($db, $repoPath);
-        
+
         // Check if it's a single file
         $isFile = false;
         $fileContent = null;
         $fileHash = null;
-        
+
         if (count($files) === 1 && $files[0]['filename'] === $repoPath) {
             $isFile = true;
             $fileHash = $files[0]['hash'];
             $fileContent = getFileContent($db, $fileHash);
         }
-        
+
         if ($isFile && $fileContent !== null) {
             // Display file content
             $isText = isTextFile($fileContent);
             $username = getUsername();
-            
+
             // Handle edit request
             if (isset($_POST['save_file']) && $isText && $username) {
                 $newContent = $_POST['file_content'] ?? '';
@@ -800,10 +1153,10 @@ if (isset($_GET['image'])) {
                     $error_msg = 'Failed to save file';
                 }
             }
-            
+
             // Check if in edit mode
             $in_edit = isset($_GET['edit']) && $_GET['edit'] === '1' && $username && $isText;
-            
+
             ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
@@ -846,11 +1199,11 @@ if (isset($_GET['image'])) {
             <?php
             exit;
         }
-        
+
         // Display directory listing
         $organized = organizeFiles($files, $repoPath);
         $username = getUsername();
-        
+
         ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
@@ -899,11 +1252,11 @@ if (isset($_GET['image'])) {
         <?php
         exit;
     }
-    
+
     // Default: Show repository list
     $repos = getReposList();
     $username = getUsername();
-    
+
     // HTML display - Repository list
     ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
@@ -979,28 +1332,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
     $action = $_POST['action'] ?? 'Upload';
-    
+
     // Authenticate
     if (!authenticate($username, $password)) {
         http_response_code(401);
         echo json_encode(['error' => 'Authentication failed']);
         exit;
     }
-    
+
     // Handle upload
     if ($action === 'Upload' && isset($_FILES['repo_file'])) {
         $repo_name = basename($_POST['repo_name'] ?? '');
-        
+
         // Validate repository name
         if (!preg_match('/^[a-zA-Z0-9_-]+\.omi$/', $repo_name)) {
             http_response_code(400);
             echo json_encode(['error' => 'Invalid repository name. Must end with .omi']);
             exit;
         }
-        
+
         $upload_file = $_FILES['repo_file'];
         $target_path = REPOS_DIR . '/' . $repo_name;
-        
+
         if ($upload_file['error'] === UPLOAD_ERR_OK) {
             if (move_uploaded_file($upload_file['tmp_name'], $target_path)) {
                 echo json_encode([
@@ -1018,12 +1371,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         exit;
     }
-    
+
     // Handle pull request (download specific repo)
     if ($action === 'pull') {
         $repo_name = basename($_POST['repo_name'] ?? '');
         $filepath = REPOS_DIR . '/' . $repo_name;
-        
+
         if (file_exists($filepath)) {
             header('Content-Type: application/octet-stream');
             header('Content-Disposition: attachment; filename="' . $repo_name . '"');
@@ -1036,7 +1389,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
     }
-    
+
     // Default response
     http_response_code(400);
     echo json_encode(['error' => 'Invalid action']);

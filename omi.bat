@@ -39,7 +39,7 @@ GOTO END
 :INIT_DB
   ECHO Initializing omi repository...
   ECHO OMI_DB=%OMI_DB% > .omi
-  
+
   REM Create database schema with deduplication support
   %SQLITE% %OMI_DB% "CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, data BLOB, size INTEGER);"
   %SQLITE% %OMI_DB% "CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, hash TEXT, datetime TEXT, commit_id INTEGER);"
@@ -48,14 +48,14 @@ GOTO END
   %SQLITE% %OMI_DB% "CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash);"
   %SQLITE% %OMI_DB% "CREATE INDEX IF NOT EXISTS idx_files_commit ON files(commit_id);"
   %SQLITE% %OMI_DB% "CREATE INDEX IF NOT EXISTS idx_blobs_hash ON blobs(hash);"
-  
+
   ECHO Repository initialized: %OMI_DB%
   GOTO END
 
 :CLONE_DB
   SET URL=%1
   ECHO Cloning from %URL%...
-  
+
   REM For local files, just copy
   IF EXIST "%URL%" (
     COPY "%URL%" "%OMI_DB%"
@@ -65,10 +65,10 @@ GOTO END
     REM Remote clone using curl
     FOR %%F IN ("%URL%") DO SET REPO_NAME=%%~nxF
     IF "%REPO_NAME%"==" " SET REPO_NAME=%OMI_DB%
-    
+
     ECHO Downloading %REPO_NAME% from %REPOS%...
     %CURL% -f -o "%REPO_NAME%" "%REPOS%/?download=%REPO_NAME%"
-    
+
     IF ERRORLEVEL 0 (
       ECHO Cloned to %REPO_NAME%
       ECHO OMI_DB=%REPO_NAME% > .omi
@@ -81,7 +81,7 @@ GOTO END
 :ADD_FILES
   SET ARG=%1
   ECHO Adding files to staging...
-  
+
   IF "%ARG%"=="--all" (
     REM Add all files in directory
     FOR %%F IN (*.*) DO (
@@ -99,20 +99,20 @@ GOTO END
 :ADD_ONE_FILE
   SET ADDFILE=%~1
   IF NOT EXIST "%ADDFILE%" GOTO :EOF
-  
+
   REM Calculate SHA256 hash
   %SQLITE% %OMI_DB% "SELECT lower(hex(sha256(readfile('%ADDFILE%'))));" > _hash.tmp
   SET /P HASH=<_hash.tmp
-  
+
   REM Get current datetime in SQLite format
   %SQLITE% %OMI_DB% "SELECT datetime('now');" > _date.tmp
   SET /P DATETIME=<_date.tmp
-  
+
   REM Add to staging area
   %SQLITE% %OMI_DB% "INSERT OR REPLACE INTO staging (filename, hash, datetime) VALUES ('%ADDFILE%', '%HASH%', '%DATETIME%');"
-  
+
   ECHO Staged: %ADDFILE% (hash: %HASH%)
-  
+
   DEL _hash.tmp _date.tmp
   GOTO :EOF
 
@@ -120,29 +120,29 @@ GOTO END
   REM Parse commit message from -m "message"
   SET MSG=%~2
   IF "%MSG%"=="" SET MSG=No message
-  
+
   ECHO Committing changes...
-  
+
   REM Get current datetime
   %SQLITE% %OMI_DB% "SELECT datetime('now');" > _date.tmp
   SET /P DATETIME=<_date.tmp
-  
+
   REM Get username
   SET USER=%USERNAME%
   IF "%USER%"=="" SET USER=unknown
-  
+
   REM Create commit record
   %SQLITE% %OMI_DB% "INSERT INTO commits (message, datetime, user) VALUES ('%MSG%', '%DATETIME%', '%USER%'); SELECT last_insert_rowid();" > _commitid.tmp
   SET /P COMMIT_ID=<_commitid.tmp
-  
+
   REM Process each staged file
   FOR /F "tokens=1,2,3" %%A IN ('%SQLITE% %OMI_DB% "SELECT filename, hash, datetime FROM staging;"') DO (
     CALL :COMMIT_ONE_FILE "%%A" "%%B" "%%C" "%COMMIT_ID%"
   )
-  
+
   REM Clear staging area
   %SQLITE% %OMI_DB% "DELETE FROM staging;"
-  
+
   ECHO Committed successfully (commit #%COMMIT_ID%)
   DEL _date.tmp _commitid.tmp
   GOTO END
@@ -152,11 +152,11 @@ GOTO END
   SET HASH=%~2
   SET FILEDATETIME=%~3
   SET CID=%~4
-  
+
   REM Check if blob with this hash already exists (deduplication)
   %SQLITE% %OMI_DB% "SELECT COUNT(*) FROM blobs WHERE hash='%HASH%';" > _count.tmp
   SET /P BLOB_EXISTS=<_count.tmp
-  
+
   IF "%BLOB_EXISTS%"=="0" (
     REM Blob doesn't exist, store it
     %SQLITE% %OMI_DB% "INSERT INTO blobs (hash, data, size) VALUES ('%HASH%', readfile('%FILENAME%'), length(readfile('%FILENAME%')));"
@@ -164,24 +164,24 @@ GOTO END
   ) ELSE (
     ECHO Blob already exists (deduplicated): %HASH%
   )
-  
+
   REM Add file record (always add metadata even if blob exists)
   %SQLITE% %OMI_DB% "INSERT INTO files (filename, hash, datetime, commit_id) VALUES ('%FILENAME%', '%HASH%', '%FILEDATETIME%', %CID%);"
-  
+
   DEL _count.tmp
   GOTO :EOF
 
 :PUSH_CHANGES
   ECHO Pushing %OMI_DB% to remote...
-  
+
   IF NOT EXIST "%OMI_DB%" (
     ECHO Error: Database file %OMI_DB% not found
     GOTO END
   )
-  
+
   REM Upload using curl
   %CURL% -f -X POST -F "username=%USERNAME%" -F "password=%PASSWORD%" -F "repo_name=%OMI_DB%" -F "repo_file=@%OMI_DB%" -F "action=Upload" "%REPOS%/"
-  
+
   IF ERRORLEVEL 0 (
     ECHO Successfully pushed to %REPOS%
   ) ELSE (
@@ -191,12 +191,12 @@ GOTO END
 
 :PULL_CHANGES
   ECHO Pulling %OMI_DB% from remote...
-  
+
   FOR %%F IN ("%OMI_DB%") DO SET REPO_NAME=%%~nxF
-  
+
   REM Download using curl with authentication
   %CURL% -f -X POST -d "username=%USERNAME%" -d "password=%PASSWORD%" -d "repo_name=%REPO_NAME%" -d "action=pull" -o "%OMI_DB%" "%REPOS%/"
-  
+
   IF ERRORLEVEL 0 (
     ECHO Successfully pulled from %REPOS%
   ) ELSE (

@@ -60,7 +60,7 @@ Skip END
 LAB INIT_DB
   Echo "Initializing omi repository..."
   Echo "OMI_DB=$OMI_DB" >.omi
-  
+
   ; Create database schema
   $SQLITE $OMI_DB "CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, data BLOB, size INTEGER);"
   $SQLITE $OMI_DB "CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, hash TEXT, datetime TEXT, commit_id INTEGER);"
@@ -68,7 +68,7 @@ LAB INIT_DB
   $SQLITE $OMI_DB "CREATE TABLE IF NOT EXISTS staging (filename TEXT PRIMARY KEY, hash TEXT, datetime TEXT);"
   $SQLITE $OMI_DB "CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash);"
   $SQLITE $OMI_DB "CREATE INDEX IF NOT EXISTS idx_files_commit ON files(commit_id);"
-  
+
   Echo "Repository initialized: $OMI_DB"
   Return
 
@@ -113,13 +113,13 @@ LAB ADD_ONE_FILE
     sha256 "$ADDFILE" >T:omi_hash
     ; Extract hash value (assumes sha256 outputs "HASH filename")
     Execute "Search T:omi_hash NONUM" >T:omi_hashval
-    
+
     ; Get current datetime
     Date >T:omi_date LFORMAT "%Y-%m-%d %H:%M:%S"
-    
+
     ; Add to staging
     $SQLITE $OMI_DB "INSERT OR REPLACE INTO staging (filename, hash, datetime) VALUES ('$ADDFILE', readfile('T:omi_hashval'), readfile('T:omi_date'));"
-    
+
     Echo "Staged: $ADDFILE"
     Delete T:omi_hash T:omi_hashval T:omi_date QUIET
   EndIf
@@ -128,38 +128,38 @@ LAB ADD_ONE_FILE
 LAB COMMIT_FILES
   ; Extract commit message from args (-m "message")
   Set MSG $OMI_ARGS
-  
+
   Echo "Committing changes..."
   Date >T:omi_date LFORMAT "%Y-%m-%d %H:%M:%S"
-  
+
   ; Create commit record
   $SQLITE $OMI_DB "INSERT INTO commits (message, datetime, user) VALUES ('$MSG', readfile('T:omi_date'), '$USER'); SELECT last_insert_rowid();" >T:omi_commitid
-  
+
   ; Process staged files
   $SQLITE $OMI_DB "SELECT filename, hash, datetime FROM staging;" >T:omi_staged
-  
+
   ; For each staged file, check if blob exists, add if not, then add file record
   ; This is simplified - real implementation would need iteration
   Execute T:omi_staged
-  
+
   ; Clear staging
   $SQLITE $OMI_DB "DELETE FROM staging;"
-  
+
   Echo "Committed successfully"
   Delete T:omi_date T:omi_commitid T:omi_staged QUIET
   Return
 
 LAB PUSH_CHANGES
   Echo "Pushing $OMI_DB to remote..."
-  
+
   If Not Exists "$OMI_DB"
     Echo "Error: Database file $OMI_DB not found"
     Return
   EndIf
-  
+
   ; Upload using curl
   $CURL -f -X POST -F "username=$USERNAME" -F "password=$PASSWORD" -F "repo_name=$OMI_DB" -F "repo_file=@$OMI_DB" -F "action=Upload" "$REPOS/"
-  
+
   If WARN
     Echo "Successfully pushed to $REPOS"
   Else
@@ -169,10 +169,10 @@ LAB PUSH_CHANGES
 
 LAB PULL_CHANGES
   Echo "Pulling $OMI_DB from remote..."
-  
+
   ; Download using curl with authentication
   $CURL -f -X POST -d "username=$USERNAME" -d "password=$PASSWORD" -d "repo_name=$OMI_DB" -d "action=pull" -o "$OMI_DB" "$REPOS/"
-  
+
   If WARN
     Echo "Successfully pulled from $REPOS"
   Else

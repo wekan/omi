@@ -4,12 +4,12 @@
 :80 {
     # Or use your domain:
     # omi.wekan.fi {
-    
+
     root * /home/wekan/repos/wekan/public
-    
+
     # Enable compression
     encode gzip
-    
+
     # Try files first, then rewrite to index.php
     @notFile {
         not path *.omi
@@ -18,19 +18,19 @@
             try_files {path} /index.php?{query}
         }
     }
-    
+
     # PHP handler
     php_fastcgi unix//run/php/php-fpm.sock
-    
+
     # Rewrite all requests to index.php for pretty URLs
     try_files {path} /index.php?{query}
-    
+
     # Security: Don't allow direct access to repos directory
     @repos {
         path /repos/*
     }
     respond @repos 403
-    
+
     # Logs
     log {
         output file /var/log/caddy/omi.log
@@ -43,7 +43,7 @@
 #     encode gzip
 #     php_fastcgi unix//run/php/php-fpm.sock
 #     try_files {path} /index.php?{query}
-#     
+#
 #     # Let's Encrypt automatic HTTPS
 #     tls your@email.com
 # }
