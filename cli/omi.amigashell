@@ -170,9 +170,9 @@ LAB PUSH_CHANGES
     Return
   EndIf
 
-  ; Check if user has 2FA enabled (simple check for phpusers.txt)
-  If Exists "phpusers.txt"
-    Search "phpusers.txt" "$USERNAME:" >T:omi_user
+  ; Check if user has 2FA enabled (simple check for users.txt)
+  If Exists "users.txt"
+    Search "users.txt" "$USERNAME:" >T:omi_user
     If Not WARN
       ; User entry found, check if has OTP (third field)
       ; For AmigaShell simplicity, just prompt for OTP
@@ -185,7 +185,7 @@ LAB PUSH_CHANGES
     EndIf
     Delete T:omi_user QUIET
   Else
-    ; No phpusers.txt, proceed without 2FA
+    ; No users.txt, proceed without 2FA
     $CURL -f -X POST -F "username=$USERNAME" -F "password=$PASSWORD" -F "repo_name=$OMI_DB" -F "repo_file=@$OMI_DB" -F "action=Upload" "$REPOS/"
   EndIf
 
@@ -205,9 +205,9 @@ LAB PULL_CHANGES
     Return
   EndIf
 
-  ; Check if user has 2FA enabled (simple check for phpusers.txt)
-  If Exists "phpusers.txt"
-    Search "phpusers.txt" "$USERNAME:" >T:omi_user
+  ; Check if user has 2FA enabled (simple check for users.txt)
+  If Exists "users.txt"
+    Search "users.txt" "$USERNAME:" >T:omi_user
     If Not WARN
       ; User entry found, check if has OTP (third field)
       ; For AmigaShell simplicity, just prompt for OTP
@@ -220,7 +220,7 @@ LAB PULL_CHANGES
     EndIf
     Delete T:omi_user QUIET
   Else
-    ; No phpusers.txt, proceed without 2FA
+    ; No users.txt, proceed without 2FA
     $CURL -f -X POST -d "username=$USERNAME" -d "password=$PASSWORD" -d "repo_name=$OMI_DB" -d "action=pull" -o "$OMI_DB" "$REPOS/"
   EndIf
 

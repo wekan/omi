@@ -97,11 +97,11 @@ local function prompt_for_otp()
 end
 
 local function has_2fa_enabled(db, username)
-  if not file_exists("phpusers.txt") then
+  if not file_exists("users.txt") then
     return false
   end
   
-  local file = io.open("phpusers.txt", "r")
+  local file = io.open("users.txt", "r")
   if not file then
     return false
   end

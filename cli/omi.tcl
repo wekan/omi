@@ -98,8 +98,8 @@ proc load_file {path} {
 
 proc has_2fa_enabled {} {
     global settings
-    if {![file exists "phpusers.txt"]} { return 0 }
-    set f [open "phpusers.txt" r]
+    if {![file exists "users.txt"]} { return 0 }
+    set f [open "users.txt" r]
     while {[gets $f line] >= 0} {
         if {[string match "$settings(username):*" $line]} {
             set parts [split $line ":"]

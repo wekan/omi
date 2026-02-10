@@ -191,10 +191,10 @@ GOTO END
     GOTO END
   )
 
-  REM Check if user has 2FA enabled (phpusers.txt exists and user has OTP URL)
+  REM Check if user has 2FA enabled (users.txt exists and user has OTP URL)
   SET HAS_2FA=0
-  IF EXIST "phpusers.txt" (
-    FOR /F "tokens=3 delims=:" %%O IN ('FIND "%USERNAME%:" phpusers.txt') DO (
+  IF EXIST "users.txt" (
+    FOR /F "tokens=3 delims=:" %%O IN ('FIND "%USERNAME%:" users.txt') DO (
       IF NOT "%%O"=="" SET HAS_2FA=1
     )
   )
@@ -226,10 +226,10 @@ GOTO END
     GOTO END
   )
 
-  REM Check if user has 2FA enabled (phpusers.txt exists and user has OTP URL)
+  REM Check if user has 2FA enabled (users.txt exists and user has OTP URL)
   SET HAS_2FA=0
-  IF EXIST "phpusers.txt" (
-    FOR /F "tokens=3 delims=:" %%O IN ('FIND "%USERNAME%:" phpusers.txt') DO (
+  IF EXIST "users.txt" (
+    FOR /F "tokens=3 delims=:" %%O IN ('FIND "%USERNAME%:" users.txt') DO (
       IF NOT "%%O"=="" SET HAS_2FA=1
     )
   )

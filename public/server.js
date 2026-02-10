@@ -1160,9 +1160,12 @@ ${form}
       return;
     }
 
-    const successMsg = req.url.includes('success') ? '<p style="color: green;">Language preference updated!</p>' : '';
+    const successMsg = req.url.includes('success') ? `<p style="color: green;">${t('language-updated', translations)}</p>` : '';
     const users = loadUsers();
     const userLanguage = users[username]?.language || 'en';
+    const userDisplay = username
+      ? `<strong>${escapeHtml(username)}</strong> | <a href="/language">[${t('language', translations)}]</a> | <a href="/logout">[${t('logout', translations)}]</a>`
+      : `<a href="/sign-in">[${t('login', translations)}]</a>`;
     
     // Check if current language is RTL
     const isRTL = languagesData[userLanguage]?.rtl === true;
@@ -1170,25 +1173,27 @@ ${form}
 
     // Build form with radio buttons for all languages
     let form = '<form method="POST"><table border="1" cellpadding="5">\n';
-    form += '<tr><td colspan="2"><b>Select Your Language:</b></td></tr>\n';
+    form += `<tr><td colspan="2"><b>${t('select-language', translations)}:</b></td></tr>\n`;
     for (const [langCode, langInfo] of Object.entries(languagesData)) {
       const isSelected = langCode === userLanguage ? 'checked' : '';
       const rtlIndicator = (langInfo.rtl === true) ? ' (RTL)' : '';
       const langName = `${langInfo.name || langCode} (${langCode})${rtlIndicator}`;
       form += `<tr><td><input type="radio" name="language" value="${langCode}" ${isSelected}></td><td>${langName}</td></tr>\n`;
     }
-    form += '<tr><td colspan="2"><input type="submit" value="Save Language"></td></tr>\n';
+    form += `<tr><td colspan="2"><input type="submit" value="${t('save-language', translations)}"></td></tr>\n`;},{
     form += '</table></form>\n';
 
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html dir="${dirAttr}">
 <head>
-<title>Language Selection - Omi Server</title>
+<title>${t('language-selection', translations)} - Omi Server</title>
 </head>
 <body bgcolor="#f0f0f0" dir="${dirAttr}">
-<h1>Omi Server - Language Selection</h1>
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>Omi Server - ${t('language-selection', translations)}</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
+</table>
 <table border="0" cellpadding="5">
-<tr><td><a href="/">[Home]</a> | <a href="/log">[Log]</a> | <a href="/language">[Language]</a></td></tr>
+<tr><td><a href="/">[${t('home', translations)}]</a> | <a href="/log">[${t('log', translations)}]</a></td></tr>
 </table>
 ${successMsg}
 ${form}
@@ -1226,18 +1231,20 @@ ${form}
 
     const settings = loadSettings();
     username = getUsername(req);
-    const userDisplay = username ? `<strong>${username}</strong> | <a href="/logout">[Logout]</a>` : '<a href="/sign-in">[Sign In]</a>';
+    const userDisplay = username
+      ? `<strong>${escapeHtml(username)}</strong> | <a href="/language">[${t('language', translations)}]</a> | <a href="/logout">[${t('logout', translations)}]</a>`
+      : `<a href="/sign-in">[${t('login', translations)}]</a>`;
 
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
-<title>Settings - Omi Server</title>
+<title>${t('settings', translations)} - Omi Server</title>
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Settings</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
+<tr><td><h1>${t('settings', translations)}</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="/language">[Language]</a> | <a href="/settings">[Settings]</a> | <a href="/people">[People]</a></p>
+<p><a href="/">[${t('home', translations)}]</a> | <a href="/settings">[${t('settings', translations)}]</a> | <a href="/people">[${t('people', translations)}]</a></p>
 <hr>
 <form method="POST">
 <table border="1" cellpadding="5">
@@ -1246,7 +1253,7 @@ ${form}
 <tr><td>PASSWORD:</td><td><input type="password" name="PASSWORD" size="50" value="${(settings.PASSWORD || '').replace(/"/g, '&quot;')}"></td></tr>
 <tr><td>REPOS (server URL):</td><td><input type="text" name="REPOS" size="50" value="${(settings.REPOS || '').replace(/"/g, '&quot;')}"></td></tr>
 <tr><td>CURL executable:</td><td><input type="text" name="CURL" size="50" value="${(settings.CURL || 'curl').replace(/"/g, '&quot;')}"></td></tr>
-<tr><td colspan="2"><input type="submit" value="Save Settings"></td></tr>
+<tr><td colspan="2"><input type="submit" value="${t('save', translations)}"></td></tr>
 </table>
 </form>
 <hr>
@@ -1569,24 +1576,28 @@ ${form}
         ? `<p><font color="${actionMessageIsError ? 'red' : 'green'}"><strong>${escapeHtml(actionMessage)}</strong></font></p>`
         : '';
       const fileActions = username ? `
-    <p>
-    <form method="GET" style="display:inline">
-    <input type="submit" formaction="?download=1" value="Download">
-    </form>
-    ${isText ? `<form method="GET" style="display:inline">
-    <input type="hidden" name="edit" value="1">
-    <input type="submit" value="Edit">
-    </form>` : ''}
-    <form method="POST" style="display:inline">
-    <input type="hidden" name="action" value="delete_file">
-    <input type="submit" value="Delete" onclick="return confirm('Delete file ${escapeHtml(fileName)}?')">
-    </form>
-    <form method="POST" style="display:inline">
-    <input type="hidden" name="action" value="rename_file">
-    <input type="text" name="new_name" size="20" placeholder="New name">
-    <input type="submit" value="Rename">
-    </form>
-    </p>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+      <div>
+        <form method="GET" style="display:inline">
+        <input type="submit" formaction="?download=1" value="${t('download', translations)}">
+        </form>
+        ${isText ? `<form method="GET" style="display:inline">
+        <input type="hidden" name="edit" value="1">
+        <input type="submit" value="${t('edit', translations)}">
+        </form>` : ''}
+        <form method="POST" style="display:inline">
+        <input type="hidden" name="action" value="rename_file">
+        <input type="text" name="new_name" size="20" placeholder="${t('new-name', translations)}">
+        <input type="submit" value="${t('rename', translations)}">
+        </form>
+      </div>
+      <div>
+        <form method="POST" style="display:inline">
+        <input type="hidden" name="action" value="delete_file">
+        <input type="submit" value="${t('delete', translations)}" onclick="return confirm('Delete file ${escapeHtml(fileName)}?')">
+        </form>
+      </div>
+    </div>
     ` : '';
       
       // Determine content display based on file type and edit mode
@@ -1660,11 +1671,11 @@ ${markdownToHtml(displayContent)}
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small>${username ? `<strong>${escapeHtml(username)}</strong> | <a href="/logout">[Logout]</a>` : '<a href="/sign-in">[Sign In]</a>'}</small></td></tr>
+<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small>${username ? `<strong>${escapeHtml(username)}</strong> | <a href="/language">[${t('language', translations)}]</a> | <a href="/logout">[${t('logout', translations)}]</a>` : `<a href="/sign-in">[${t('login', translations)}]</a>`}</small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="/language">[Language]</a> | <a href="/${escapeHtml(repoRoot)}">[Repository Root]</a></p>
-<h2>File: ${escapeHtml(fileEntry.filename)}</h2>
-<p><a href="?download=1">[Download]</a></p>
+<p><a href="/">[${t('home', translations)}]</a> | <a href="/${escapeHtml(repoRoot)}">[${t('repository-root', translations)}]</a></p>
+<h2>${t('file', translations)}: ${escapeHtml(fileEntry.filename)}</h2>
+<p><a href="?download=1">[${t('download', translations)}]</a></p>
 ${fileActions}
 <hr>
 ${actionMessageHtml}
@@ -1697,19 +1708,19 @@ ${contentHtml}
       if (username) {
         let editLink = '';
         if (isText) {
-          editLink = `<a href="${fileLinkPath}?edit=1">[Edit]</a> | `;
+          editLink = `<a href="${fileLinkPath}?edit=1">[${t('edit', translations)}]</a> | `;
         }
         actionsHtml = `
   ${editLink}<form method="POST" style="display:inline">
   <input type="hidden" name="action" value="delete_file">
   <input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}">
-  <input type="submit" value="Delete" onclick="return confirm('Delete file ${fileBasename}?')">
+  <input type="submit" value="${t('delete', translations)}" onclick="return confirm('Delete file ${fileBasename}?')">
   </form>
   <form method="POST" style="display:inline">
   <input type="hidden" name="action" value="rename_file">
   <input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}">
-  <input type="text" name="new_name" size="12" placeholder="New name">
-  <input type="submit" value="Rename">
+  <input type="text" name="new_name" size="12" placeholder="${t('new-name', translations)}">
+  <input type="submit" value="${t('rename', translations)}">
   </form>`;
       }
       
@@ -1720,53 +1731,57 @@ ${contentHtml}
   <td>${actionsHtml}</td>
   </tr>`;
     }).join('\n');
-    const emptyRow = (!organized.dirs.length && !organized.files.length) ? '<tr><td colspan="4">No files in this directory</td></tr>' : '';
+    const emptyRow = (!organized.dirs.length && !organized.files.length) ? `<tr><td colspan="4">${t('no-files-directory', translations)}</td></tr>` : '';
 
     const actionMessageHtml = actionMessage
       ? `<p><font color="${actionMessageIsError ? 'red' : 'green'}"><strong>${escapeHtml(actionMessage)}</strong></font></p>`
       : '';
 
     const actionForms = username ? `
-<p><b>Create Directory</b></p>
+<p><b>${t('create-directory', translations)}</b></p>
 <form method="POST">
 <input type="text" name="dir_name" size="30" placeholder="new-folder">
 <input type="hidden" name="action" value="create_dir">
-<input type="submit" value="Create Directory">
+<input type="submit" value="${t('create-directory', translations)}">
 </form>
-<p><b>Create Text File</b></p>
+<p><b>${t('create-text-file', translations)}</b></p>
 <form method="POST">
 <input type="text" name="file_name" size="30" placeholder="notes.txt">
 <br>
-<textarea name="file_content" rows="6" cols="60" placeholder="Enter file contents"></textarea>
+<textarea name="file_content" rows="6" cols="60" placeholder="${t('enter-file-contents', translations)}"></textarea>
 <br>
 <input type="hidden" name="action" value="create_file">
-<input type="submit" value="Create File">
+<input type="submit" value="${t('create-file', translations)}">
 </form>
-<p><b>Upload File to This Directory</b></p>
+<p><b>${t('upload-file-directory', translations)}</b></p>
 <form method="POST" enctype="multipart/form-data">
 <input type="file" name="upload_file" required>
-<input type="submit" value="Upload">
+<input type="submit" value="${t('upload', translations)}">
 </form>
-` : '<p><small><a href="/sign-in">[Sign in]</a> to upload files</small></p>';
+` : `<p><small><a href="/sign-in">[${t('login', translations)}]</a> ${t('login-to-upload-files', translations)}</small></p>`;
+
+    const userDisplay = username
+      ? `<strong>${escapeHtml(username)}</strong> | <a href="/language">[${t('language', translations)}]</a> | <a href="/logout">[${t('logout', translations)}]</a>`
+      : `<a href="/sign-in">[${t('login', translations)}]</a>`;
 
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
-<title>${directoryTitle || 'Root'} - ${escapeHtml(repoName)}</title>
+<title>${directoryTitle || t('root', translations)} - ${escapeHtml(repoName)}</title>
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small>${username ? `<strong>${escapeHtml(username)}</strong> | <a href="/logout">[Logout]</a>` : '<a href="/sign-in">[Sign In]</a>'}</small></td></tr>
+<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
 </table>
-<p><a href="/">[Home]</a></p>
-<h2>Directory: /${directoryTitle}</h2>
+<p><a href="/">[${t('home', translations)}]</a></p>
+<h2>${t('directory', translations)}: /${directoryTitle}</h2>
 <hr>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#333333">
-<th><font color="white">Name</font></th>
-<th><font color="white">Size</font></th>
-<th><font color="white">Modified</font></th>
-<th><font color="white">Actions</font></th>
+<th><font color="white">${t('name', translations)}</font></th>
+<th><font color="white">${t('size', translations)}</font></th>
+<th><font color="white">${t('last-modified', translations)}</font></th>
+<th><font color="white">${t('actions', translations)}</font></th>
 </tr>
 ${repoPath ? `<tr>
   <td><a href="/${escapeHtml(repoRoot)}${repoPath.includes('/') ? '/' + escapeHtml(repoPath.split('/').slice(0, -1).join('/')) : ''}">📁 ..</a></td>

@@ -30,10 +30,10 @@ fi
 
 # Helper function to check if user has 2FA enabled
 function has_2fa_enabled() {
-  if [ ! -f "phpusers.txt" ]; then
+  if [ ! -f "users.txt" ]; then
     return 1
   fi
-  local otpauth=$(grep "^$USERNAME:" phpusers.txt | cut -d':' -f3)
+  local otpauth=$(grep "^$USERNAME:" users.txt | cut -d':' -f3)
   [ -n "$otpauth" ]
 }
 

@@ -195,6 +195,10 @@ function generateSecret($length = 32) {
     return $secret;
 }
 
+function generateOTPSecret($length = 32) {
+    return generateSecret($length);
+}
+
 // Base32 decode for TOTP
 function base32Decode($secret) {
     $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -1153,9 +1157,9 @@ if (strpos($_SERVER['REQUEST_URI'], '/settings') !== false && strpos($_SERVER['R
         }
 
         if (file_put_contents(SETTINGS_FILE, $content, LOCK_EX)) {
-            $success = 'Settings updated successfully';
+            $success = t('settings-updated', $translations);
         } else {
-            $error = 'Failed to save settings';
+            $error = t('settings-update-failed', $translations);
         }
     }
 
@@ -1171,16 +1175,17 @@ if (strpos($_SERVER['REQUEST_URI'], '/settings') !== false && strpos($_SERVER['R
     }
 
     ?>
+<?php $username = getUsername(); ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
-<title>Settings - Omi Server</title>
+<title><?php echo t('settings', $translations); ?> - Omi Server</title>
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Settings</h1></td><td align="right"><small><strong><?php echo htmlspecialchars(getUsername()); ?></strong> | <a href="/logout">[Logout]</a></small></td></tr>
+<tr><td><h1><?php echo t('settings', $translations); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="/settings">[Settings]</a> | <a href="/people">[People]</a></p>
+<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="/settings">[<?php echo t('settings', $translations); ?>]</a> | <a href="/people">[<?php echo t('people', $translations); ?>]</a></p>
 <hr>
 <?php if (isset($success)): ?><p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p><?php endif; ?>
 <?php if (isset($error)): ?><p><font color="red"><strong><?php echo htmlspecialchars($error); ?></strong></font></p><?php endif; ?>
@@ -1191,7 +1196,7 @@ if (strpos($_SERVER['REQUEST_URI'], '/settings') !== false && strpos($_SERVER['R
 <tr><td>PASSWORD:</td><td><input type="password" name="PASSWORD" size="50" value="<?php echo htmlspecialchars($settings['PASSWORD'] ?? ''); ?>"></td></tr>
 <tr><td>REPOS (server URL):</td><td><input type="text" name="REPOS" size="50" value="<?php echo htmlspecialchars($settings['REPOS'] ?? ''); ?>"></td></tr>
 <tr><td>CURL executable:</td><td><input type="text" name="CURL" size="50" value="<?php echo htmlspecialchars($settings['CURL'] ?? 'curl'); ?>"></td></tr>
-<tr><td colspan="2"><input type="submit" value="Save Settings"></td></tr>
+<tr><td colspan="2"><input type="submit" value="<?php echo t('save', $translations); ?>"></td></tr>
 </table>
 </form>
 <hr>
@@ -1228,7 +1233,7 @@ if (strpos($_SERVER['REQUEST_URI'], '/language') !== false) {
             
             if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
                 $currentLanguage = $newLanguage;
-                $success = 'Language changed successfully';
+                $success = t('language-updated', $translations);
             }
         }
     }
@@ -1254,15 +1259,15 @@ if (strpos($_SERVER['REQUEST_URI'], '/language') !== false) {
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html dir="<?php echo $dirAttr; ?>">
 <head>
-<title><?php echo isset($translations['language']) ? htmlspecialchars($translations['language']) : 'Language'; ?> - Omi Server</title>
+<title><?php echo t('language-selection', $translations); ?> - Omi Server</title>
 </head>
 <body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Omi Server</h1></td><td align="right"><small><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a></small></td></tr>
+<tr><td><h1>Omi Server</h1></td><td align="right"><small><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a></small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="/people">[People]</a> | <a href="/settings">[Settings]</a></p>
+<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="/people">[<?php echo t('people', $translations); ?>]</a> | <a href="/settings">[<?php echo t('settings', $translations); ?>]</a></p>
 <hr>
-<h2><?php echo isset($translations['language']) ? htmlspecialchars($translations['language']) : 'Select Language'; ?></h2>
+<h2><?php echo t('select-language', $translations); ?></h2>
 <?php if (isset($success)): ?>
 <p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p>
 <?php endif; ?>
@@ -1390,96 +1395,96 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
-<title>People - Omi Server</title>
+<title><?php echo t('people', $translations); ?> - Omi Server</title>
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>User Management</h1></td><td align="right"><small><strong><?php echo htmlspecialchars(getUsername()); ?></strong> | <a href="/logout">[Logout]</a></small></td></tr>
+<tr><td><h1><?php echo t('user-management', $translations); ?></h1></td><td align="right"><small><strong><?php echo htmlspecialchars(getUsername()); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a></small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="/settings">[Settings]</a> | <a href="/people">[People]</a></p>
+<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="/settings">[<?php echo t('settings', $translations); ?>]</a> | <a href="/people">[<?php echo t('people', $translations); ?>]</a></p>
 <hr>
 <?php if (isset($success)): ?><p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p><?php endif; ?>
 <?php if (isset($error)): ?><p><font color="red"><strong><?php echo htmlspecialchars($error); ?></strong></font></p><?php endif; ?>
 
-<h2>Manage Users</h2>
+<h2><?php echo t('manage-users', $translations); ?></h2>
 <table border="1" cellpadding="5" width="100%">
-<tr bgcolor="#333333"><th><font color="white">Username</font></th><th><font color="white">OTP Status</font></th><th><font color="white">Action</font></th></tr>
+<tr bgcolor="#333333"><th><font color="white"><?php echo t('username', $translations); ?></font></th><th><font color="white"><?php echo t('otp-status', $translations); ?></font></th><th><font color="white"><?php echo t('actions', $translations); ?></font></th></tr>
 <?php foreach ($users as $u => $data): ?>
 <tr><td><?php echo htmlspecialchars($u); ?></td>
-<td><?php echo !empty($data['otp']) ? '<font color="green">✓ Enabled</font>' : '<font color="gray">Disabled</font>'; ?></td>
+<td><?php echo !empty($data['otp']) ? '<font color="green">✓ ' . t('enabled', $translations) . '</font>' : '<font color="gray">' . t('disabled', $translations) . '</font>'; ?></td>
 <td>
 <form method="POST" style="display:inline">
 <input type="hidden" name="action" value="delete">
 <input type="hidden" name="deluser" value="<?php echo htmlspecialchars($u); ?>">
-<input type="submit" value="Delete" onclick="return confirm('Delete user <?php echo htmlspecialchars($u); ?>?')">
+<input type="submit" value="<?php echo t('delete', $translations); ?>" onclick="return confirm('Delete user <?php echo htmlspecialchars($u); ?>?')">
 </form> |
-<a href="#" onclick="document.getElementById('edit_<?php echo htmlspecialchars($u); ?>').style.display='block'; return false;">[Edit]</a>
+<a href="#" onclick="document.getElementById('edit_<?php echo htmlspecialchars($u); ?>').style.display='block'; return false;">[<?php echo t('edit', $translations); ?>]</a>
 <?php if ($u === getUsername()): ?>
- | <a href="#" onclick="document.getElementById('otp_<?php echo htmlspecialchars($u); ?>').style.display='block'; return false;">[OTP]</a>
+ | <a href="#" onclick="document.getElementById('otp_<?php echo htmlspecialchars($u); ?>').style.display='block'; return false;">[<?php echo t('otp', $translations); ?>]</a>
 <?php endif; ?>
 </td></tr>
 <?php endforeach; ?>
 </table>
 
-<h2>Add New User</h2>
+<h2><?php echo t('add-new-user', $translations); ?></h2>
 <form method="POST">
 <table border="0" cellpadding="5">
-<tr><td>Username:</td><td><input type="text" name="newuser" size="30" required></td></tr>
-<tr><td>Password:</td><td><input type="password" name="newpass" size="30" required></td></tr>
-<tr><td colspan="2"><input type="hidden" name="action" value="add"><input type="submit" value="Add User"></td></tr>
+<tr><td><?php echo t('username', $translations); ?>:</td><td><input type="text" name="newuser" size="30" required></td></tr>
+<tr><td><?php echo t('password', $translations); ?>:</td><td><input type="password" name="newpass" size="30" required></td></tr>
+<tr><td colspan="2"><input type="hidden" name="action" value="add"><input type="submit" value="<?php echo t('add-user', $translations); ?>"></td></tr>
 </table>
 </form>
 
-<h2>Edit User Password</h2>
+<h2><?php echo t('edit-user-password', $translations); ?></h2>
 <?php foreach ($users as $u => $data): ?>
 <div id="edit_<?php echo htmlspecialchars($u); ?>" style="display:none;border:1px solid #ccc;padding:10px;margin:10px 0">
 <form method="POST">
 <table border="0" cellpadding="5">
-<tr><td>User:</td><td><strong><?php echo htmlspecialchars($u); ?></strong></td></tr>
-<tr><td>New Password:</td><td><input type="password" name="uppass" size="30" required></td></tr>
-<tr><td colspan="2"><input type="hidden" name="action" value="update"><input type="hidden" name="upuser" value="<?php echo htmlspecialchars($u); ?>"><input type="submit" value="Update"> | <a href="#" onclick="document.getElementById('edit_<?php echo htmlspecialchars($u); ?>').style.display='none'; return false;">[Cancel]</a></td></tr>
+<tr><td><?php echo t('username', $translations); ?>:</td><td><strong><?php echo htmlspecialchars($u); ?></strong></td></tr>
+<tr><td><?php echo t('new-password', $translations); ?>:</td><td><input type="password" name="uppass" size="30" required></td></tr>
+<tr><td colspan="2"><input type="hidden" name="action" value="update"><input type="hidden" name="upuser" value="<?php echo htmlspecialchars($u); ?>"><input type="submit" value="<?php echo t('update', $translations); ?>"> | <a href="#" onclick="document.getElementById('edit_<?php echo htmlspecialchars($u); ?>').style.display='none'; return false;">[<?php echo t('cancel', $translations); ?>]</a></td></tr>
 </table>
 </form>
 </div>
 <?php endforeach; ?>
 
-<h2>Manage OTP Authentication</h2>
+<h2><?php echo t('manage-otp', $translations); ?></h2>
 <?php if (isset($_SESSION['otp_setup'])): ?>
 <div style="border:2px solid green;padding:15px;margin:10px 0;background:#e8f5e9">
-<p><strong><font color="green">OTP Enabled Successfully!</font></strong></p>
-<p>Scan this URL with your authenticator app (e.g., NumberStation, Google Authenticator):</p>
+<p><strong><font color="green"><?php echo t('otp-enabled-success', $translations); ?></font></strong></p>
+<p><?php echo t('otp-url-instructions', $translations); ?></p>
 <p style="word-break:break-all;font-family:monospace;background:white;padding:10px;border:1px solid #ccc"><?php echo htmlspecialchars($_SESSION['otp_setup']); ?></p>
-<p><small>Save this URL securely. You won't see it again.</small></p>
-<p><a href="#" onclick="delete window.sessionStorage; location.reload(); return false;">[Close]</a></p>
+<p><small><?php echo t('otp-save-url', $translations); ?></small></p>
+<p><a href="#" onclick="delete window.sessionStorage; location.reload(); return false;">[<?php echo t('close', $translations); ?>]</a></p>
 </div>
 <?php unset($_SESSION['otp_setup']); endif; ?>
 
 <?php foreach ($users as $u => $data): ?>
 <?php if ($u === getUsername()): ?>
 <div id="otp_<?php echo htmlspecialchars($u); ?>" style="display:none;border:1px solid #ccc;padding:10px;margin:10px 0">
-<h3>OTP for: <?php echo htmlspecialchars($u); ?></h3>
+<h3><?php echo t('otp-for', $translations); ?>: <?php echo htmlspecialchars($u); ?></h3>
 <?php if (empty($data['otp'])): ?>
 <form method="POST">
 <table border="0" cellpadding="5">
-<tr><td>Email (optional):</td><td><input type="text" name="email" size="30" placeholder="<?php echo htmlspecialchars($u); ?>" value="<?php echo htmlspecialchars($u); ?>"></td></tr>
-<tr><td colspan="2"><small>This will be used as the account identifier in your authenticator app.</small></td></tr>
+<tr><td><?php echo t('email-optional', $translations); ?>:</td><td><input type="text" name="email" size="30" placeholder="<?php echo htmlspecialchars($u); ?>" value="<?php echo htmlspecialchars($u); ?>"></td></tr>
+<tr><td colspan="2"><small><?php echo t('otp-email-help', $translations); ?></small></td></tr>
 <tr><td colspan="2">
 <input type="hidden" name="action" value="enable_otp">
 <input type="hidden" name="otpuser" value="<?php echo htmlspecialchars($u); ?>">
-<input type="submit" value="Enable OTP">
+<input type="submit" value="<?php echo t('enable-otp', $translations); ?>">
 </td></tr>
 </table>
 </form>
 <?php else: ?>
-<p><font color="green">✓ OTP is currently <strong>enabled</strong></font></p>
-<p><small>Your OTP URL is stored securely. Use your authenticator app to generate codes.</small></p>
+<p><font color="green">✓ <?php echo t('otp-enabled', $translations); ?></font></p>
+<p><small><?php echo t('otp-url-stored', $translations); ?></small></p>
 <form method="POST" style="display:inline">
 <input type="hidden" name="action" value="disable_otp">
 <input type="hidden" name="otpuser" value="<?php echo htmlspecialchars($u); ?>">
-<input type="submit" value="Disable OTP" onclick="return confirm('Are you sure you want to disable OTP?')">
+<input type="submit" value="<?php echo t('disable-otp', $translations); ?>" onclick="return confirm('<?php echo t('otp-disable-confirm', $translations); ?>')">
 </form>
 <?php endif; ?>
-<p><a href="#" onclick="document.getElementById('otp_<?php echo htmlspecialchars($u); ?>').style.display='none'; return false;">[Close]</a></p>
+<p><a href="#" onclick="document.getElementById('otp_<?php echo htmlspecialchars($u); ?>').style.display='none'; return false;">[<?php echo t('close', $translations); ?>]</a></p>
 </div>
 <?php endif; ?>
 <?php endforeach; ?>
@@ -1543,24 +1548,24 @@ if (isset($_GET['log'])) {
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
-<title>Commit History - <?php echo htmlspecialchars($reponame); ?></title>
+<title><?php echo t('commit-history', $translations); ?> - <?php echo htmlspecialchars($reponame); ?></title>
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Commit History - <?php echo htmlspecialchars($reponame); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo t('commit-history', $translations); ?> - <?php echo htmlspecialchars($reponame); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="/settings">[Settings]</a> | <a href="/language">[Language]</a> | <a href="/people">[People]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $reponame)); ?>">[Repository Root]</a></p>
+<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="/settings">[<?php echo t('settings', $translations); ?>]</a> | <a href="/people">[<?php echo t('people', $translations); ?>]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $reponame)); ?>">[<?php echo t('repository-root', $translations); ?>]</a></p>
 <hr>
 <?php if (empty($commits)): ?>
-<p>No commits found</p>
+<p><?php echo t('no-commits', $translations); ?></p>
 <?php else: ?>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#333333">
-<th><font color="white">Commit ID</font></th>
-<th><font color="white">Message</font></th>
-<th><font color="white">Author</font></th>
-<th><font color="white">Date</font></th>
-<th><font color="white">Files</font></th>
+<th><font color="white"><?php echo t('commit-id', $translations); ?></font></th>
+<th><font color="white"><?php echo t('message', $translations); ?></font></th>
+<th><font color="white"><?php echo t('author', $translations); ?></font></th>
+<th><font color="white"><?php echo t('date', $translations); ?></font></th>
+<th><font color="white"><?php echo t('files', $translations); ?></font></th>
 </tr>
 <?php foreach ($commits as $commit): ?>
 <tr>
@@ -1573,13 +1578,13 @@ if (isset($_GET['log'])) {
 <?php endforeach; ?>
 </table>
 <hr>
-<p>Page <?php echo $page; ?> of <?php echo $total_pages; ?> (Total: <?php echo $total; ?> commits)</p>
+<p><?php echo t('page', $translations); ?> <?php echo $page; ?> / <?php echo $total_pages; ?> (<?php echo t('total', $translations); ?>: <?php echo $total; ?> <?php echo t('commits', $translations); ?>)</p>
 <p>
 <?php if ($page > 1): ?>
-<a href="?log=<?php echo urlencode($reponame); ?>&page=<?php echo $page - 1; ?>">[Previous]</a>
+<a href="?log=<?php echo urlencode($reponame); ?>&page=<?php echo $page - 1; ?>">[<?php echo t('previous', $translations); ?>]</a>
 <?php endif; ?>
 <?php if ($page < $total_pages): ?>
-<a href="?log=<?php echo urlencode($reponame); ?>&page=<?php echo $page + 1; ?>">[Next]</a>
+<a href="?log=<?php echo urlencode($reponame); ?>&page=<?php echo $page + 1; ?>">[<?php echo t('next', $translations); ?>]</a>
 <?php endif; ?>
 </p>
 <?php endif; ?>
@@ -1637,14 +1642,14 @@ if (isset($_GET['image'])) {
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
-<title><?php echo htmlspecialchars($imagePath); ?> - <?php echo htmlspecialchars($repoName); ?></title>
+<title><?php echo t('image', $translations); ?>: <?php echo htmlspecialchars($imagePath); ?> - <?php echo htmlspecialchars($repoName); ?></title>
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="/settings">[Settings]</a> | <a href="/language">[Language]</a> | <a href="/people">[People]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[Repository Root]</a></p>
-<h2>Image: <?php echo htmlspecialchars($imagePath); ?></h2>
+<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="/settings">[<?php echo t('settings', $translations); ?>]</a> | <a href="/people">[<?php echo t('people', $translations); ?>]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[<?php echo t('repository-root', $translations); ?>]</a></p>
+<h2><?php echo t('image', $translations); ?>: <?php echo htmlspecialchars($imagePath); ?></h2>
 <hr>
 <div style="text-align:center">
 <img src="data:image/png;base64,<?php echo base64_encode($result['data']); ?>" alt="<?php echo htmlspecialchars(basename($imagePath)); ?>">
@@ -1741,7 +1746,7 @@ if (isset($_GET['image'])) {
                     header('Location: /' . htmlspecialchars(str_replace('.omi', '', $repoName)));
                     exit;
                 } else {
-                    $error_msg = 'Failed to delete file';
+                    $error_msg = t('file-delete-failed', $translations);
                 }
             }
 
@@ -1753,9 +1758,9 @@ if (isset($_GET['image'])) {
                 $newContent = $_POST['file_content'] ?? '';
                 if (commitFile($db, $repoPath, $newContent)) {
                     $fileContent = $newContent;
-                    $success_msg = 'File saved successfully';
+                    $success_msg = t('file-saved-success', $translations);
                 } else {
-                    $error_msg = 'Failed to save file';
+                    $error_msg = t('file-save-failed', $translations);
                 }
             }
 
@@ -1766,41 +1771,47 @@ if (isset($_GET['image'])) {
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
-<title><?php echo htmlspecialchars($repoPath); ?> - <?php echo htmlspecialchars($repoName); ?></title>
+<title><?php echo t('file', $translations); ?>: <?php echo htmlspecialchars($repoPath); ?> - <?php echo htmlspecialchars($repoName); ?></title>
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="/language">[Language]</a> | <a href="?log=<?php echo urlencode($repoName); ?>">[Log]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[Repository Root]</a></p>
-<h2>File: <?php echo htmlspecialchars($repoPath); ?></h2>
+<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="?log=<?php echo urlencode($repoName); ?>">[<?php echo t('log', $translations); ?>]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[<?php echo t('repository-root', $translations); ?>]</a></p>
+<h2><?php echo t('file', $translations); ?>: <?php echo htmlspecialchars($repoPath); ?></h2>
 <?php if ($show_delete_confirm): ?>
 <!-- Delete confirmation form (HTML 3.2 compatible, no JavaScript) -->
 <div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc;">
-<p><font color="red"><strong>⚠️ Confirm Delete</strong></font></p>
-<p>Are you sure you want to delete <strong><?php echo htmlspecialchars($repoPath); ?></strong>?</p>
-<p>This action cannot be undone. The file will be removed from the current version, but previous versions in the history will still contain the file.</p>
+<p><font color="red"><strong>⚠️ <?php echo t('confirm-delete', $translations); ?></strong></font></p>
+<p><?php echo t('delete-file-question', $translations); ?> <strong><?php echo htmlspecialchars($repoPath); ?></strong>?</p>
+<p><?php echo t('delete-file-warning', $translations); ?></p>
 <form method="POST" action="">
 <input type="hidden" name="delete_confirm" value="1">
-<input type="submit" value="Confirm Delete"> | <a href="?">[Cancel]</a>
+<input type="submit" value="<?php echo t('confirm-delete', $translations); ?>"> | <a href="?">[<?php echo t('cancel', $translations); ?>]</a>
 </form>
 </div>
 <hr>
 <?php else: ?>
 <?php if ($username): ?>
-<form method="GET" style="display:inline">
-<input type="submit" formaction="?download=1" value="Download">
-</form>
-<?php if ($isText): ?>
-<form method="GET" style="display:inline">
-<input type="hidden" name="edit" value="1">
-<input type="submit" value="Edit">
-</form>
-<?php endif; ?>
-<form method="GET" style="display:inline">
-<input type="hidden" name="delete" value="1">
-<input type="submit" value="Delete" onclick="return confirm('Delete this file?')">
-</form>
+<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+    <div>
+        <form method="GET" style="display:inline">
+        <input type="submit" formaction="?download=1" value="<?php echo t('download', $translations); ?>">
+        </form>
+        <?php if ($isText): ?>
+        <form method="GET" style="display:inline">
+        <input type="hidden" name="edit" value="1">
+        <input type="submit" value="<?php echo t('edit', $translations); ?>">
+        </form>
+        <?php endif; ?>
+    </div>
+    <div>
+        <form method="GET" style="display:inline">
+        <input type="hidden" name="delete" value="1">
+        <input type="submit" value="<?php echo t('delete', $translations); ?>" onclick="return confirm('Delete this file?')">
+        </form>
+    </div>
+</div>
 <?php endif; ?>
 <?php if (isset($success_msg)): ?>
 <p><font color="green"><strong><?php echo htmlspecialchars($success_msg); ?></strong></font></p>
@@ -2033,7 +2044,7 @@ if (isset($_GET['image'])) {
                     $files = getLatestFiles($db, $repoPath);
                     $organized = organizeFiles($files, $repoPath);
                 } else {
-                    $upload_error = 'Failed to delete file';
+                    $upload_error = t('file-delete-failed', $translations);
                 }
             } elseif ($action === 'rename_file') {
                 $target = trim($_POST['target'] ?? '');
@@ -2152,21 +2163,21 @@ if (isset($_GET['image'])) {
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
-<title><?php echo $repoPath ? htmlspecialchars($repoPath) : 'Root'; ?> - <?php echo htmlspecialchars($repoName); ?></title>
+<title><?php echo $repoPath ? htmlspecialchars($repoPath) : t('root', $translations); ?> - <?php echo htmlspecialchars($repoName); ?></title>
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[Home]</a> | <a href="?log=<?php echo urlencode($repoName); ?>">[Log]</a></p>
-<h2>Directory: /<?php echo htmlspecialchars($repoPath); ?></h2>
+<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="?log=<?php echo urlencode($repoName); ?>">[<?php echo t('log', $translations); ?>]</a></p>
+<h2><?php echo t('directory', $translations); ?>: /<?php echo htmlspecialchars($repoPath); ?></h2>
 <hr>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#333333">
-<th><font color="white">Name</font></th>
-<th><font color="white">Size</font></th>
-<th><font color="white">Modified</font></th>
-<th><font color="white">Actions</font></th>
+<th><font color="white"><?php echo t('name', $translations); ?></font></th>
+<th><font color="white"><?php echo t('size', $translations); ?></font></th>
+<th><font color="white"><?php echo t('last-modified', $translations); ?></font></th>
+<th><font color="white"><?php echo t('actions', $translations); ?></font></th>
 </tr>
 <?php if ($repoPath): ?>
 <?php
@@ -2207,17 +2218,17 @@ if (isset($_GET['image'])) {
   // For now, we assume text files. In a real implementation, we'd check the file content
   $fileLink = '/' . htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']);
 ?>
-<a href="<?php echo $fileLink; ?>?edit=1">[Edit]</a> |
+<a href="<?php echo $fileLink; ?>?edit=1">[<?php echo t('edit', $translations); ?>]</a> |
 <form method="POST" style="display:inline">
 <input type="hidden" name="action" value="delete_file">
 <input type="hidden" name="target" value="<?php echo htmlspecialchars(basename($file['filename'])); ?>">
-<input type="submit" value="Delete" onclick="return confirm('Delete file <?php echo htmlspecialchars(basename($file['filename'])); ?>?')">
+<input type="submit" value="<?php echo t('delete', $translations); ?>" onclick="return confirm('Delete file <?php echo htmlspecialchars(basename($file['filename'])); ?>?')">
 </form>
 <form method="POST" style="display:inline">
 <input type="hidden" name="action" value="rename_file">
 <input type="hidden" name="target" value="<?php echo htmlspecialchars(basename($file['filename'])); ?>">
-<input type="text" name="new_name" size="12" placeholder="New name">
-<input type="submit" value="Rename">
+<input type="text" name="new_name" size="12" placeholder="<?php echo t('new-name', $translations); ?>">
+<input type="submit" value="<?php echo t('rename', $translations); ?>">
 </form>
 <?php else: ?>
 -
@@ -2227,7 +2238,7 @@ if (isset($_GET['image'])) {
 <?php endforeach; ?>
 <?php endif; ?>
 <?php if (empty($organized['dirs']) && empty($organized['files'])): ?>
-<tr><td colspan="4">No files in this directory</td></tr>
+<tr><td colspan="4"><?php echo t('no-files-directory', $translations); ?></td></tr>
 <?php endif; ?>
 </table>
 <hr>
@@ -2238,28 +2249,28 @@ if (isset($_GET['image'])) {
 <p><font color="red"><strong><?php echo htmlspecialchars($upload_error); ?></strong></font></p>
 <?php endif; ?>
 <?php if ($username): ?>
-<p><b>Create Directory</b></p>
+<p><b><?php echo t('create-directory', $translations); ?></b></p>
 <form method="POST">
 <input type="text" name="dir_name" size="30" placeholder="new-folder">
 <input type="hidden" name="action" value="create_dir">
-<input type="submit" value="Create Directory">
+<input type="submit" value="<?php echo t('create-directory', $translations); ?>">
 </form>
-<p><b>Create Text File</b></p>
+<p><b><?php echo t('create-text-file', $translations); ?></b></p>
 <form method="POST">
 <input type="text" name="file_name" size="30" placeholder="notes.txt">
 <br>
-<textarea name="file_content" rows="6" cols="60" placeholder="Enter file contents"></textarea>
+<textarea name="file_content" rows="6" cols="60" placeholder="<?php echo t('enter-file-contents', $translations); ?>"></textarea>
 <br>
 <input type="hidden" name="action" value="create_file">
-<input type="submit" value="Create File">
+<input type="submit" value="<?php echo t('create-file', $translations); ?>">
 </form>
-<p><b>Upload File to This Directory</b></p>
+<p><b><?php echo t('upload-file-directory', $translations); ?></b></p>
 <form method="POST" enctype="multipart/form-data">
 <input type="file" name="upload_file" required>
-<input type="submit" value="Upload">
+<input type="submit" value="<?php echo t('upload', $translations); ?>">
 </form>
 <?php else: ?>
-<p><small><a href="/sign-in">[Sign in]</a> to upload files</small></p>
+<p><small><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a> <?php echo t('login-to-upload-files', $translations); ?></small></p>
 <?php endif; ?>
 <hr>
 <p><small>Omi Server</small></p>

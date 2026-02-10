@@ -497,11 +497,11 @@ class OmiRepository:
     
     def _has_2fa_enabled(self):
         """Check if user has 2FA enabled"""
-        if not os.path.isfile("phpusers.txt"):
+        if not os.path.isfile("users.txt"):
             return False
         
         username = self.settings.get("USERNAME", "")
-        with open("phpusers.txt", "r") as f:
+        with open("users.txt", "r") as f:
             for line in f:
                 parts = line.strip().split(":")
                 if len(parts) >= 3 and parts[0] == username and parts[2]:

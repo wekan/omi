@@ -348,7 +348,7 @@ static int load_file(const char *path, u8 **out_data, size_t *out_len) {
 }
 
 static int has_2fa_enabled(const Settings *s) {
-    FILE *f = fopen("phpusers.txt", "r");
+    FILE *f = fopen("users.txt", "r");
     char line[MAX_LINE];
     size_t user_len;
 

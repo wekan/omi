@@ -381,11 +381,11 @@ class OmiRepository {
     }
 
     private function has2FAEnabled(): Bool {
-        if (!FileSystem.exists("phpusers.txt")) {
+        if (!FileSystem.exists("users.txt")) {
             return false;
         }
         
-        var content = File.getContent("phpusers.txt");
+        var content = File.getContent("users.txt");
         var lines = content.split("\n");
         
         for (line in lines) {
