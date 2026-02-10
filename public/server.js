@@ -1720,20 +1720,23 @@ ${contentHtml}
       if (username) {
         let editLink = '';
         if (isText) {
-          editLink = `<form method="GET" action="${fileLinkPath}" style="display:inline"><input type="hidden" name="edit" value="1"><input type="submit" value="${t('edit', translations)}"></form> `;
+          editLink = `<form method="GET" action="${fileLinkPath}" style="display:inline"><input type="hidden" name="edit" value="1"><input type="submit" value="${t('edit', translations)}"></form>`;
         }
-        actionsHtml = `
-  ${editLink}<form method="POST" style="display:inline">
+        const deleteForm = `<form method="POST" style="display:inline">
   <input type="hidden" name="action" value="delete_file">
   <input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}">
   <input type="submit" value="${t('delete', translations)}" onclick="return confirm('Delete file ${fileBasename}?')">
-  </form>
-  <form method="POST" style="display:inline">
+  </form>`;
+        const renameForm = `<form method="POST" style="display:inline">
   <input type="hidden" name="action" value="rename_file">
   <input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}">
   <input type="text" name="new_name" size="12" placeholder="${t('new-name', translations)}">
   <input type="submit" value="${t('rename', translations)}">
   </form>`;
+        actionsHtml = `<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+  <div>${editLink}${renameForm}</div>
+  <div>${deleteForm}</div>
+  </div>`;
       }
       
       return `<tr>
