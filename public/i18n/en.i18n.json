@@ -1664,9 +1664,13 @@
   "user-exists": "User already exists",
   "account-created": "Account created! You can now sign in.",
   "account-creation-failed": "Failed to create account",
-  "sqlite-executable": "SQLITE executable",
-  "repos-url": "REPOS (server URL)",
-  "curl-executable": "CURL executable",
-  "save-settings": "Save Settings",
-  "omi-server": "Omi Server"
+  "sign-in": "Sign In",
+  "sign-up": "Sign Up",
+  "confirm": "Confirm",
+  "error": "Error",
+  "file": "File",
+  "log": "Log",
+  "logout": "Logout",
+  "server": "Server",
+  "protocol": "Protocol"
 }
