@@ -890,6 +890,28 @@ async function handleRequest(req, res) {
   const pathname = url.pathname;
   const query = Object.fromEntries(url.searchParams.entries());
 
+  // Load translations based on user preference or browser language
+  let username = getUsername(req) || null;
+  let userLanguage = null;
+  let browserLanguage = null;
+
+  // If user is logged in, get their language preference
+  if (username) {
+    const users = loadUsers();
+    userLanguage = users[username]?.language || null;
+  }
+
+  // Detect browser language as fallback
+  if (!userLanguage) {
+    browserLanguage = getBrowserLanguage(req);
+  }
+
+  // Determine which language to load
+  const selectedLanguage = userLanguage || browserLanguage || 'en';
+
+  // Load translations
+  const translations = loadTranslations(selectedLanguage);
+
   // Handle logout
   if (pathname === '/logout') {
     const cookies = parseCookies(req.headers.cookie || '');
@@ -926,42 +948,44 @@ async function handleRequest(req, res) {
           res.end();
           return;
         } else if (authResult === 'OTP_REQUIRED') {
-          error = 'OTP code required';
+          error = t('otp-required', translations);
           show_otp = true;
         } else {
           recordFailedAttempt(username);
           if (checkBruteForce(username)) {
-            error = 'Too many failed login attempts. Account locked temporarily.';
+            error = t('account-locked', translations);
           } else {
-            error = 'Invalid username or password';
+            error = t('invalid-credentials', translations);
           }
         }
       }
 
       const usernameValue = username ? ` value="${username.replace(/"/g, '&quot;')}"` : '';
-      const otpInput = show_otp ? '<tr><td>OTP Code:</td><td><input type="text" name="otp" size="10" maxlength="6" required pattern="[0-9]{6}" placeholder="6-digit code"></td></tr>' : '';
-      const errorMsg = error ? `<p><font color="red"><strong>Error: ${error.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong></font></p>` : '';
+      const otpInput = show_otp ? `<tr><td>${t('otp', translations)}:</td><td><input type="text" name="otp" size="10" maxlength="6" required pattern="[0-9]{6}" placeholder="6-digit code"></td></tr>` : '';
+      const errorMsg = error ? `<p><font color="red"><strong>${t('error', translations)}: ${error.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong></font></p>` : '';
+      const isRTL = languagesData[selectedLanguage]?.rtl === true;
+      const dirAttr = isRTL ? 'rtl' : 'ltr';
 
       const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
-<html>
+<html dir="${dirAttr}">
 <head>
-<title>Sign In - Omi Server</title>
+<title>${t('sign-in', translations)} - Omi Server</title>
 </head>
-<body bgcolor="#f0f0f0">
-<h1>Omi Server - Sign In</h1>
+<body bgcolor="#f0f0f0" dir="${dirAttr}">
+<h1>Omi Server - ${t('sign-in', translations)}</h1>
 <table border="0" cellpadding="5">
-<tr><td colspan="2"><a href="/">[Home]</a></td></tr>
+<tr><td colspan="2"><a href="/">[${t('home', translations)}]</a></td></tr>
 </table>
 ${errorMsg}
 <form method="POST">
 <table border="1" cellpadding="5">
-<tr><td>Username:</td><td><input type="text" name="username" size="30" required${usernameValue}></td></tr>
-<tr><td>Password:</td><td><input type="password" name="password" size="30" required></td></tr>
+<tr><td>${t('username', translations)}:</td><td><input type="text" name="username" size="30" required${usernameValue}></td></tr>
+<tr><td>${t('password', translations)}:</td><td><input type="password" name="password" size="30" required></td></tr>
 ${otpInput}
-<tr><td colspan="2"><input type="submit" value="Sign In"></td></tr>
+<tr><td colspan="2"><input type="submit" value="${t('sign-in', translations)}"></td></tr>
 </table>
 </form>
-<p><a href="/sign-up">Create new account</a></p>
+<p><a href="/sign-up">${t('create-account', translations)}</a></p>
 </body>
 </html>`;
 
@@ -969,24 +993,27 @@ ${otpInput}
       return;
     }
 
+    const isRTL = languagesData[selectedLanguage]?.rtl === true;
+    const dirAttr = isRTL ? 'rtl' : 'ltr';
+    
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
-<html>
+<html dir="${dirAttr}">
 <head>
-<title>Sign In - Omi Server</title>
+<title>${t('sign-in', translations)} - Omi Server</title>
 </head>
-<body bgcolor="#f0f0f0">
-<h1>Omi Server - Sign In</h1>
+<body bgcolor="#f0f0f0" dir="${dirAttr}">
+<h1>Omi Server - ${t('sign-in', translations)}</h1>
 <table border="0" cellpadding="5">
-<tr><td colspan="2"><a href="/">[Home]</a></td></tr>
+<tr><td colspan="2"><a href="/">[${t('home', translations)}]</a></td></tr>
 </table>
 <form method="POST">
 <table border="1" cellpadding="5">
-<tr><td>Username:</td><td><input type="text" name="username" size="30" required></td></tr>
-<tr><td>Password:</td><td><input type="password" name="password" size="30" required></td></tr>
-<tr><td colspan="2"><input type="submit" value="Sign In"></td></tr>
+<tr><td>${t('username', translations)}:</td><td><input type="text" name="username" size="30" required></td></tr>
+<tr><td>${t('password', translations)}:</td><td><input type="password" name="password" size="30" required></td></tr>
+<tr><td colspan="2"><input type="submit" value="${t('sign-in', translations)}"></td></tr>
 </table>
 </form>
-<p><a href="/sign-up">Create new account</a></p>
+<p><a href="/sign-up">${t('create-account', translations)}</a></p>
 </body>
 </html>`;
 
@@ -1006,52 +1033,54 @@ ${otpInput}
       let success = null;
 
       if (isUserLocked(username)) {
-        error = 'Too many sign-up attempts. Please try again later.';
+        error = t('account-locked', translations);
       } else if (!username || !password) {
-        error = 'Username and password are required';
+        error = t('username-password-required', translations);
       } else if (password !== password2) {
-        error = 'Passwords do not match';
+        error = t('password-mismatch', translations);
       } else if (username.length < 3) {
-        error = 'Username must be at least 3 characters';
+        error = t('username-too-short', translations);
       } else {
         const users = loadUsers();
         if (username in users) {
           recordFailedAttempt(username);
           checkBruteForce(username);
-          error = 'User already exists';
+          error = t('user-exists', translations);
         } else {
           const browserLanguage = getBrowserLanguage(req);
           const line = `${username}:${password}::${browserLanguage}\n`;
           try {
             fs.appendFileSync(USERS_FILE, line);
-            success = 'Account created! You can now sign in.';
+            success = t('account-created', translations);
           } catch {
-            error = 'Failed to create account';
+            error = t('account-creation-failed', translations);
           }
         }
       }
 
-      const errorMsg = error ? `<p><font color="red"><strong>Error: ${error.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong></font></p>` : '';
-      const successMsg = success ? `<p><font color="green"><strong>${success}</strong></font></p><p><a href="/sign-in">Go to Sign In</a></p>` : '';
+      const errorMsg = error ? `<p><font color="red"><strong>${t('error', translations)}: ${error.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong></font></p>` : '';
+      const successMsg = success ? `<p><font color="green"><strong>${success}</strong></font></p><p><a href="/sign-in">${t('sign-in', translations)}</a></p>` : '';
+      const isRTL = languagesData[selectedLanguage]?.rtl === true;
+      const dirAttr = isRTL ? 'rtl' : 'ltr';
       const form = success ? '' : `<form method="POST">
 <table border="1" cellpadding="5">
-<tr><td>Username:</td><td><input type="text" name="username" size="30" required></td></tr>
-<tr><td>Password:</td><td><input type="password" name="password" size="30" required></td></tr>
-<tr><td>Confirm:</td><td><input type="password" name="password2" size="30" required></td></tr>
-<tr><td colspan="2"><input type="submit" value="Create Account"></td></tr>
+<tr><td>${t('username', translations)}:</td><td><input type="text" name="username" size="30" required></td></tr>
+<tr><td>${t('password', translations)}:</td><td><input type="password" name="password" size="30" required></td></tr>
+<tr><td>${t('confirm', translations)}:</td><td><input type="password" name="password2" size="30" required></td></tr>
+<tr><td colspan="2"><input type="submit" value="${t('sign-up', translations)}"></td></tr>
 </table>
 </form>
-<p><a href="/sign-in">Already have an account? Sign in</a></p>`;
+<p><a href="/sign-in">${t('already-account', translations)}</a></p>`;
 
       const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
-<html>
+<html dir="${dirAttr}">
 <head>
-<title>Sign Up - Omi Server</title>
+<title>${t('sign-up', translations)} - Omi Server</title>
 </head>
-<body bgcolor="#f0f0f0">
-<h1>Omi Server - Sign Up</h1>
+<body bgcolor="#f0f0f0" dir="${dirAttr}">
+<h1>Omi Server - ${t('sign-up', translations)}</h1>
 <table border="0" cellpadding="5">
-<tr><td colspan="2"><a href="/">[Home]</a></td></tr>
+<tr><td colspan="2"><a href="/">[${t('home', translations)}]</a></td></tr>
 </table>
 ${errorMsg}
 ${successMsg}
@@ -1063,25 +1092,28 @@ ${form}
       return;
     }
 
+    const isRTL = languagesData[selectedLanguage]?.rtl === true;
+    const dirAttr = isRTL ? 'rtl' : 'ltr';
+
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
-<html>
+<html dir="${dirAttr}">
 <head>
-<title>Sign Up - Omi Server</title>
+<title>${t('sign-up', translations)} - Omi Server</title>
 </head>
-<body bgcolor="#f0f0f0">
-<h1>Omi Server - Sign Up</h1>
+<body bgcolor="#f0f0f0" dir="${dirAttr}">
+<h1>Omi Server - ${t('sign-up', translations)}</h1>
 <table border="0" cellpadding="5">
-<tr><td colspan="2"><a href="/">[Home]</a></td></tr>
+<tr><td colspan="2"><a href="/">[${t('home', translations)}]</a></td></tr>
 </table>
 <form method="POST">
 <table border="1" cellpadding="5">
-<tr><td>Username:</td><td><input type="text" name="username" size="30" required></td></tr>
-<tr><td>Password:</td><td><input type="password" name="password" size="30" required></td></tr>
-<tr><td>Confirm:</td><td><input type="password" name="password2" size="30" required></td></tr>
-<tr><td colspan="2"><input type="submit" value="Create Account"></td></tr>
+<tr><td>${t('username', translations)}:</td><td><input type="text" name="username" size="30" required></td></tr>
+<tr><td>${t('password', translations)}:</td><td><input type="password" name="password" size="30" required></td></tr>
+<tr><td>${t('confirm', translations)}:</td><td><input type="password" name="password2" size="30" required></td></tr>
+<tr><td colspan="2"><input type="submit" value="${t('sign-up', translations)}"></td></tr>
 </table>
 </form>
-<p><a href="/sign-in">Already have an account? Sign in</a></p>
+<p><a href="/sign-in">${t('already-account', translations)}</a></p>
 </body>
 </html>`;
 
@@ -1091,7 +1123,7 @@ ${form}
 
   // Handle language selection
   if (pathname === '/language') {
-    const username = req.session?.username;
+    const username = getUsername(req);
     if (!username) {
       res.writeHead(302, { 'Location': '/sign-in' });
       res.end();
@@ -1102,14 +1134,17 @@ ${form}
       const postData = await parseFormData(req);
       const selectedLanguage = postData.language || 'en';
       
-      // Update user's language preference
-      users[username].language = selectedLanguage;
+      // Load users, update language, and save
+      let users = loadUsers();
+      if (users[username]) {
+        users[username].language = selectedLanguage;
+      }
       
       // Save updated users
       const usersContent = Object.entries(users)
         .map(([name, data]) => `${name}:${data.password}:${data.otp || ''}:${data.language || 'en'}`)
         .join('\n');
-      fs.writeFileSync(usersPath, usersContent, { flag: 'w' });
+      fs.writeFileSync(USERS_FILE, usersContent, 'utf-8');
       
       res.writeHead(302, { 'Location': '/language?success=1' });
       res.end();
@@ -1117,7 +1152,8 @@ ${form}
     }
 
     const successMsg = req.url.includes('success') ? '<p style="color: green;">Language preference updated!</p>' : '';
-    const currentLanguage = users[username]?.language || 'en';
+    const users = loadUsers();
+    const userLanguage = users[username]?.language || 'en';
     
     // Load languages from languages.json
     let languagesData = {};
@@ -1129,14 +1165,14 @@ ${form}
     }
     
     // Check if current language is RTL
-    const isRTL = languagesData[currentLanguage]?.rtl === true;
+    const isRTL = languagesData[userLanguage]?.rtl === true;
     const dirAttr = isRTL ? 'rtl' : 'ltr';
 
     // Build form with radio buttons for all languages
     let form = '<form method="POST"><table border="1" cellpadding="5">\n';
     form += '<tr><td colspan="2"><b>Select Your Language:</b></td></tr>\n';
     for (const [langCode, langInfo] of Object.entries(languagesData)) {
-      const isSelected = langCode === currentLanguage ? 'checked' : '';
+      const isSelected = langCode === userLanguage ? 'checked' : '';
       const rtlIndicator = (langInfo.rtl === true) ? ' (RTL)' : '';
       const langName = `${langInfo.name || langCode} (${langCode})${rtlIndicator}`;
       form += `<tr><td><input type="radio" name="language" value="${langCode}" ${isSelected}></td><td>${langName}</td></tr>\n`;

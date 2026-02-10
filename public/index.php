@@ -952,6 +952,27 @@ function deleteFile($db, $filename) {
         return false;
     }
 }
+// Load translations based on user preference or browser language
+$username = $_SESSION['username'] ?? null;
+$userLanguage = null;
+$browserLanguage = null;
+
+// If user is logged in, get their language preference
+if ($username) {
+    $users = loadUsers();
+    $userLanguage = $users[$username]['language'] ?? null;
+}
+
+// Detect browser language as fallback
+if (!$userLanguage) {
+    $browserLanguage = getBrowserLanguage();
+}
+
+// Determine which language to load
+$selectedLanguage = $userLanguage ?? $browserLanguage ?? 'en';
+
+// Load translations
+$translations = loadTranslations($selectedLanguage);
 
 // Handle /logout route
 if (strpos($_SERVER['REQUEST_URI'], '/logout') !== false) {
@@ -969,7 +990,7 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-in') !== false) {
 
         // Check if user is locked
         if (isUserLocked($username)) {
-            $error = 'Account is temporarily locked due to too many failed login attempts. Please try again later.';
+            $error = t('account-locked', $translations);
         } else {
             $authResult = authenticate($username, $password, $otpCode);
 
@@ -981,7 +1002,7 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-in') !== false) {
                 header('Location: /');
                 exit;
             } elseif ($authResult === 'OTP_REQUIRED') {
-                $error = 'OTP code required';
+                $error = t('otp-required', $translations);
                 $show_otp = true;
             } else {
                 // Record failed attempt
@@ -989,39 +1010,45 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-in') !== false) {
 
                 // Check if threshold reached
                 if (checkBruteForce($username)) {
-                    $error = 'Too many failed login attempts. Account locked temporarily.';
+                    $error = t('account-locked', $translations);
                 } else {
-                    $error = 'Invalid username or password';
+                    $error = t('invalid-credentials', $translations);
                 }
             }
         }
     }
+    
+    // Check if current language is RTL
+    $isRTL = isset($translations) && isset($selectedLanguage) ? 
+        (isset(json_decode(file_get_contents(__DIR__ . '/languages.json'), true)[$selectedLanguage]['rtl']) &&
+         json_decode(file_get_contents(__DIR__ . '/languages.json'), true)[$selectedLanguage]['rtl']) : false;
+    $dirAttr = $isRTL ? 'rtl' : 'ltr';
 
     ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
-<html>
+<html dir="<?php echo $dirAttr; ?>">
 <head>
-<title>Sign In - Omi Server</title>
+<title><?php echo t('sign-in', $translations); ?> - Omi Server</title>
 </head>
-<body bgcolor="#f0f0f0">
-<h1>Omi Server - Sign In</h1>
+<body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
+<h1>Omi Server - <?php echo t('sign-in', $translations); ?></h1>
 <table border="0" cellpadding="5">
-<tr><td colspan="2"><a href="/">[Home]</a></td></tr>
+<tr><td colspan="2"><a href="/">[<?php echo t('home', $translations); ?>]</a></td></tr>
 </table>
 <?php if (isset($error)): ?>
-<p><font color="red"><strong>Error: <?php echo htmlspecialchars($error); ?></strong></font></p>
+<p><font color="red"><strong><?php echo t('error', $translations); ?>: <?php echo htmlspecialchars($error); ?></strong></font></p>
 <?php endif; ?>
 <form method="POST">
 <table border="1" cellpadding="5">
-<tr><td>Username:</td><td><input type="text" name="username" size="30" required value="<?php echo isset($_POST['username']) ? htmlspecialchars($_POST['username']) : ''; ?>"></td></tr>
-<tr><td>Password:</td><td><input type="password" name="password" size="30" required></td></tr>
+<tr><td><?php echo t('username', $translations); ?>:</td><td><input type="text" name="username" size="30" required value="<?php echo isset($_POST['username']) ? htmlspecialchars($_POST['username']) : ''; ?>"></td></tr>
+<tr><td><?php echo t('password', $translations); ?>:</td><td><input type="password" name="password" size="30" required></td></tr>
 <?php if (isset($show_otp)): ?>
-<tr><td>OTP Code:</td><td><input type="text" name="otp" size="10" maxlength="6" required pattern="[0-9]{6}" placeholder="6-digit code"></td></tr>
+<tr><td><?php echo t('otp', $translations); ?>:</td><td><input type="text" name="otp" size="10" maxlength="6" required pattern="[0-9]{6}" placeholder="6-digit code"></td></tr>
 <?php endif; ?>
-<tr><td colspan="2"><input type="submit" value="Sign In"></td></tr>
+<tr><td colspan="2"><input type="submit" value="<?php echo t('sign-in', $translations); ?>"></td></tr>
 </table>
 </form>
-<p><a href="/sign-up">Create new account</a></p>
+<p><a href="/sign-up"><?php echo t('create-account', $translations); ?></a></p>
 </body>
 </html>
     <?php
@@ -1073,31 +1100,31 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-up') !== false) {
 
     ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
-<html>
+<html dir="<?php echo $dirAttr; ?>">
 <head>
-<title>Sign Up - Omi Server</title>
+<title><?php echo t('sign-up', $translations); ?> - Omi Server</title>
 </head>
-<body bgcolor="#f0f0f0">
-<h1>Omi Server - Sign Up</h1>
+<body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
+<h1>Omi Server - <?php echo t('sign-up', $translations); ?></h1>
 <table border="0" cellpadding="5">
-<tr><td colspan="2"><a href="/">[Home]</a></td></tr>
+<tr><td colspan="2"><a href="/">[<?php echo t('home', $translations); ?>]</a></td></tr>
 </table>
 <?php if (isset($error)): ?>
-<p><font color="red"><strong>Error: <?php echo htmlspecialchars($error); ?></strong></font></p>
+<p><font color="red"><strong><?php echo t('error', $translations); ?>: <?php echo htmlspecialchars($error); ?></strong></font></p>
 <?php endif; ?>
 <?php if (isset($success)): ?>
 <p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p>
-<p><a href="/sign-in">Go to Sign In</a></p>
+<p><a href="/sign-in"><?php echo t('sign-in', $translations); ?></a></p>
 <?php else: ?>
 <form method="POST">
 <table border="1" cellpadding="5">
-<tr><td>Username:</td><td><input type="text" name="username" size="30" required></td></tr>
-<tr><td>Password:</td><td><input type="password" name="password" size="30" required></td></tr>
-<tr><td>Confirm:</td><td><input type="password" name="password2" size="30" required></td></tr>
-<tr><td colspan="2"><input type="submit" value="Create Account"></td></tr>
+<tr><td><?php echo t('username', $translations); ?>:</td><td><input type="text" name="username" size="30" required></td></tr>
+<tr><td><?php echo t('password', $translations); ?>:</td><td><input type="password" name="password" size="30" required></td></tr>
+<tr><td><?php echo t('confirm', $translations); ?>:</td><td><input type="password" name="password2" size="30" required></td></tr>
+<tr><td colspan="2"><input type="submit" value="<?php echo t('sign-up', $translations); ?>"></td></tr>
 </table>
 </form>
-<p><a href="/sign-in">Already have an account? Sign in</a></p>
+<p><a href="/sign-in"><?php echo t('already-account', $translations); ?></a></p>
 <?php endif; ?>
 </body>
 </html>
@@ -2258,73 +2285,79 @@ if (isset($_GET['image'])) {
 
     $repos = getReposList();
     $username = getUsername();
+    
+    // Check RTL
+    $isRTL = isset($selectedLanguage) ? 
+        (isset(json_decode(file_get_contents(__DIR__ . '/languages.json'), true)[$selectedLanguage]['rtl']) &&
+         json_decode(file_get_contents(__DIR__ . '/languages.json'), true)[$selectedLanguage]['rtl']) : false;
+    $dirAttr = $isRTL ? 'rtl' : 'ltr';
 
     // HTML display - Repository list
     ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
-<html>
+<html dir="<?php echo $dirAttr; ?>">
 <head>
-<title>Omi Server - Repository List</title>
+<title>Omi Server - <?php echo t('repositories', $translations); ?></title>
 </head>
-<body bgcolor="#f0f0f0">
+<body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Omi Server - Repository List</h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[Language]</a> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
+<tr><td><h1>Omi Server - <?php echo t('repositories', $translations); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('sign-in', $translations); ?>]</a><?php endif; ?></small></td></tr>
 </table>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#e8f4f8">
 <td colspan="4">
-<strong>Server:</strong> <?php echo htmlspecialchars($_SERVER['HTTP_HOST']); ?><br>
-<strong>Protocol:</strong> <?php echo isset($_SERVER['HTTPS']) ? 'HTTPS' : 'HTTP'; ?><br>
-<strong>Repositories:</strong> <?php echo count($repos); ?>
+<strong><?php echo t('server', $translations); ?>:</strong> <?php echo htmlspecialchars($_SERVER['HTTP_HOST']); ?><br>
+<strong><?php echo t('protocol', $translations); ?>:</strong> <?php echo isset($_SERVER['HTTPS']) ? 'HTTPS' : 'HTTP'; ?><br>
+<strong><?php echo t('repositories', $translations); ?>:</strong> <?php echo count($repos); ?>
 </td>
 </tr>
 </table>
 <?php if ($repo_message): ?>
 <p><font color="<?php echo $repo_message_is_error ? 'red' : 'green'; ?>"><strong><?php echo htmlspecialchars($repo_message); ?></strong></font></p>
 <?php endif; ?>
-<h2>Available Repositories</h2>
+<h2><?php echo t('available-repositories', $translations); ?></h2>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#333333">
-<th><font color="white">Repository</font></th>
-<th><font color="white">Size (bytes)</font></th>
-<th><font color="white">Last Modified</font></th>
-<th><font color="white">Actions</font></th>
+<th><font color="white"><?php echo t('repository', $translations); ?></font></th>
+<th><font color="white"><?php echo t('size-bytes', $translations); ?></font></th>
+<th><font color="white"><?php echo t('last-modified', $translations); ?></font></th>
+<th><font color="white"><?php echo t('actions', $translations); ?></font></th>
 </tr>
 <?php if (empty($repos)): ?>
-<tr><td colspan="4">No repositories found</td></tr>
+<tr><td colspan="4"><?php echo t('no-repositories', $translations); ?></td></tr>
 <?php else: ?>
 <?php foreach ($repos as $repo): ?>
 <tr>
 <td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repo['name'])); ?>"><?php echo htmlspecialchars($repo['name']); ?></a></td>
 <td><?php echo number_format($repo['size']); ?></td>
 <td><?php echo htmlspecialchars(date('Y-m-d H:i:s', $repo['modified'])); ?></td>
-<td><a href="?download=<?php echo urlencode($repo['name']); ?>">Download</a> | <a href="?log=<?php echo urlencode($repo['name']); ?>">[Log]</a></td>
+<td><a href="?download=<?php echo urlencode($repo['name']); ?>"><?php echo t('download', $translations); ?></a> | <a href="?log=<?php echo urlencode($repo['name']); ?>">[<?php echo t('log', $translations); ?>]</a></td>
 </tr>
 <?php endforeach; ?>
 <?php endif; ?>
 </table>
 <?php if ($username): ?>
-<h2>Create New Repository</h2>
+<h2><?php echo t('create-repository', $translations); ?></h2>
 <form method="POST">
 <table border="0" cellpadding="5">
-<tr><td>Repository name:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
-<tr><td colspan="2"><input type="hidden" name="action" value="create_repo"><input type="submit" value="Create Repository"></td></tr>
+<tr><td><?php echo t('repository-name', $translations); ?>:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
+<tr><td colspan="2"><input type="hidden" name="action" value="create_repo"><input type="submit" value="<?php echo t('create-repository', $translations); ?>"></td></tr>
 </table>
 </form>
-<h2>Upload/Update Repository</h2>
+<h2><?php echo t('upload-repository', $translations); ?></h2>
 <form method="POST" enctype="multipart/form-data">
 <table border="0" cellpadding="5">
-<tr><td>Username:</td><td><input type="text" name="username" size="30"></td></tr>
-<tr><td>Password:</td><td><input type="password" name="password" size="30"></td></tr>
-<tr><td>Repository name:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
-<tr><td>File:</td><td><input type="file" name="repo_file"></td></tr>
-<tr><td colspan="2"><input type="submit" name="action" value="Upload"></td></tr>
+<tr><td><?php echo t('username', $translations); ?>:</td><td><input type="text" name="username" size="30"></td></tr>
+<tr><td><?php echo t('password', $translations); ?>:</td><td><input type="password" name="password" size="30"></td></tr>
+<tr><td><?php echo t('repository-name', $translations); ?>:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
+<tr><td><?php echo t('file', $translations); ?>:</td><td><input type="file" name="repo_file"></td></tr>
+<tr><td colspan="2"><input type="submit" name="action" value="<?php echo t('upload', $translations); ?>"></td></tr>
 </table>
 </form>
 <?php else: ?>
-<p><a href="/sign-in">[Sign In to upload repositories]</a></p>
+<p><a href="/sign-in">[<?php echo t('sign-in-to-upload', $translations); ?>]</a></p>
 <?php endif; ?>
-<h2>API Endpoints</h2>
+<h2><?php echo t('api-endpoints', $translations); ?></h2>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr><td><strong>List repos (JSON):</strong></td><td>GET /?format=json</td></tr>
 <tr><td><strong>Download repo:</strong></td><td>GET /?download=wekan.omi</td></tr>
