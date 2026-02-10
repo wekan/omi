@@ -2490,18 +2490,24 @@ begin
         RowActions := '-';
         if Username <> '' then
         begin
-          RowActions := '<form method="GET" action="' + EntryPath + '" style="display:inline">' +
+          RowActions := '<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">' +
+            '<div>' +
+            '<form method="GET" action="' + EntryPath + '" style="display:inline">' +
             '<input type="hidden" name="edit" value="1">' +
             '<input type="submit" value="' + T('edit', Translations) + '"></form> ' +
-            '<form method="POST" style="display:inline">' +
-            '<input type="hidden" name="action" value="delete_file">' +
-            '<input type="hidden" name="target" value="' + HtmlEncode(DisplayName) + '">' +
-            '<input type="submit" value="' + T('delete', Translations) + '"></form> ' +
             '<form method="POST" style="display:inline">' +
             '<input type="hidden" name="action" value="rename_file">' +
             '<input type="hidden" name="target" value="' + HtmlEncode(DisplayName) + '">' +
             '<input type="text" name="new_name" size="12" placeholder="' + T('new-name', Translations) + '">' +
-            '<input type="submit" value="' + T('rename', Translations) + '"></form>';
+            '<input type="submit" value="' + T('rename', Translations) + '"></form>' +
+            '</div>' +
+            '<div>' +
+            '<form method="POST" style="display:inline">' +
+            '<input type="hidden" name="action" value="delete_file">' +
+            '<input type="hidden" name="target" value="' + HtmlEncode(DisplayName) + '">' +
+            '<input type="submit" value="' + T('delete', Translations) + '"></form>' +
+            '</div>' +
+            '</div>';
         end;
         TableRows := TableRows + '<tr><td><a href="' + EntryPath + '">📄 ' + HtmlEncode(DisplayName) + '</a></td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
       end;

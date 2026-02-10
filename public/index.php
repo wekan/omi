@@ -2218,14 +2218,11 @@ if (isset($_GET['image'])) {
   // For now, we assume text files. In a real implementation, we'd check the file content
   $fileLink = '/' . htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']);
 ?>
+<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+<div>
 <form method="GET" action="<?php echo $fileLink; ?>" style="display:inline">
 <input type="hidden" name="edit" value="1">
 <input type="submit" value="<?php echo t('edit', $translations); ?>">
-</form>
-<form method="POST" style="display:inline">
-<input type="hidden" name="action" value="delete_file">
-<input type="hidden" name="target" value="<?php echo htmlspecialchars(basename($file['filename'])); ?>">
-<input type="submit" value="<?php echo t('delete', $translations); ?>" onclick="return confirm('Delete file <?php echo htmlspecialchars(basename($file['filename'])); ?>?')">
 </form>
 <form method="POST" style="display:inline">
 <input type="hidden" name="action" value="rename_file">
@@ -2233,6 +2230,15 @@ if (isset($_GET['image'])) {
 <input type="text" name="new_name" size="12" placeholder="<?php echo t('new-name', $translations); ?>">
 <input type="submit" value="<?php echo t('rename', $translations); ?>">
 </form>
+</div>
+<div>
+<form method="POST" style="display:inline">
+<input type="hidden" name="action" value="delete_file">
+<input type="hidden" name="target" value="<?php echo htmlspecialchars(basename($file['filename'])); ?>">
+<input type="submit" value="<?php echo t('delete', $translations); ?>" onclick="return confirm('Delete file <?php echo htmlspecialchars(basename($file['filename'])); ?>?')">
+</form>
+</div>
+</div>
 <?php else: ?>
 -
 <?php endif; ?>
