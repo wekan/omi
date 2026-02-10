@@ -912,6 +912,15 @@ async function handleRequest(req, res) {
   // Load translations
   const translations = loadTranslations(selectedLanguage);
 
+  // Load languages data for RTL detection
+  let languagesData = {};
+  try {
+    const languagesFile = fs.readFileSync(path.join(__dirname, 'languages.json'), 'utf8');
+    languagesData = JSON.parse(languagesFile);
+  } catch (e) {
+    console.error('Error loading languages.json:', e.message);
+  }
+
   // Handle logout
   if (pathname === '/logout') {
     const cookies = parseCookies(req.headers.cookie || '');
@@ -1123,7 +1132,7 @@ ${form}
 
   // Handle language selection
   if (pathname === '/language') {
-    const username = getUsername(req);
+    username = getUsername(req);
     if (!username) {
       res.writeHead(302, { 'Location': '/sign-in' });
       res.end();
@@ -1154,15 +1163,6 @@ ${form}
     const successMsg = req.url.includes('success') ? '<p style="color: green;">Language preference updated!</p>' : '';
     const users = loadUsers();
     const userLanguage = users[username]?.language || 'en';
-    
-    // Load languages from languages.json
-    let languagesData = {};
-    try {
-      const languagesFile = fs.readFileSync(path.join(__dirname, 'languages.json'), 'utf8');
-      languagesData = JSON.parse(languagesFile);
-    } catch (e) {
-      console.error('Error loading languages.json:', e.message);
-    }
     
     // Check if current language is RTL
     const isRTL = languagesData[userLanguage]?.rtl === true;
@@ -1225,7 +1225,7 @@ ${form}
     }
 
     const settings = loadSettings();
-    const username = getUsername(req);
+    username = getUsername(req);
     const userDisplay = username ? `<strong>${username}</strong> | <a href="/logout">[Logout]</a>` : '<a href="/sign-in">[Sign In]</a>';
 
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
@@ -1353,7 +1353,7 @@ ${form}
     const repoName = requestInfo.repo;
     const repoPath = requestInfo.path;
     const dbPath = requestInfo.db;
-    const username = getUsername(req);
+    username = getUsername(req);
     const repoRoot = repoName.replace(/\.omi$/, '');
 
     let actionMessage = null;
@@ -1791,7 +1791,7 @@ ${actionForms}
 
   // Default: Show repository list
   const repos = getReposList();
-  const username = getUsername(req);
+  username = getUsername(req);
   const userDisplay = username
     ? `<strong>${username}</strong> | <a href="/logout">[Logout]</a>`
     : `<a href="/sign-in">[Sign In]</a>`;
