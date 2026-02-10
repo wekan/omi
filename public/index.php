@@ -1028,10 +1028,10 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-in') !== false) {
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html dir="<?php echo $dirAttr; ?>">
 <head>
-<title><?php echo t('sign-in', $translations); ?> - Omi Server</title>
+<title><?php echo t('login', $translations); ?> - Omi Server</title>
 </head>
 <body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
-<h1>Omi Server - <?php echo t('sign-in', $translations); ?></h1>
+<h1>Omi Server - <?php echo t('login', $translations); ?></h1>
 <table border="0" cellpadding="5">
 <tr><td colspan="2"><a href="/">[<?php echo t('home', $translations); ?>]</a></td></tr>
 </table>
@@ -1045,7 +1045,7 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-in') !== false) {
 <?php if (isset($show_otp)): ?>
 <tr><td><?php echo t('otp', $translations); ?>:</td><td><input type="text" name="otp" size="10" maxlength="6" required pattern="[0-9]{6}" placeholder="6-digit code"></td></tr>
 <?php endif; ?>
-<tr><td colspan="2"><input type="submit" value="<?php echo t('sign-in', $translations); ?>"></td></tr>
+<tr><td colspan="2"><input type="submit" value="<?php echo t('login', $translations); ?>"></td></tr>
 </table>
 </form>
 <p><a href="/sign-up"><?php echo t('create-account', $translations); ?></a></p>
@@ -1102,10 +1102,10 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-up') !== false) {
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html dir="<?php echo $dirAttr; ?>">
 <head>
-<title><?php echo t('sign-up', $translations); ?> - Omi Server</title>
+<title><?php echo t('create-account', $translations); ?> - Omi Server</title>
 </head>
 <body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
-<h1>Omi Server - <?php echo t('sign-up', $translations); ?></h1>
+<h1>Omi Server - <?php echo t('create-account', $translations); ?></h1>
 <table border="0" cellpadding="5">
 <tr><td colspan="2"><a href="/">[<?php echo t('home', $translations); ?>]</a></td></tr>
 </table>
@@ -1114,14 +1114,14 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-up') !== false) {
 <?php endif; ?>
 <?php if (isset($success)): ?>
 <p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p>
-<p><a href="/sign-in"><?php echo t('sign-in', $translations); ?></a></p>
+<p><a href="/sign-in"><?php echo t('login', $translations); ?></a></p>
 <?php else: ?>
 <form method="POST">
 <table border="1" cellpadding="5">
 <tr><td><?php echo t('username', $translations); ?>:</td><td><input type="text" name="username" size="30" required></td></tr>
 <tr><td><?php echo t('password', $translations); ?>:</td><td><input type="password" name="password" size="30" required></td></tr>
 <tr><td><?php echo t('confirm', $translations); ?>:</td><td><input type="password" name="password2" size="30" required></td></tr>
-<tr><td colspan="2"><input type="submit" value="<?php echo t('sign-up', $translations); ?>"></td></tr>
+<tr><td colspan="2"><input type="submit" value="<?php echo t('create-account', $translations); ?>"></td></tr>
 </table>
 </form>
 <p><a href="/sign-in"><?php echo t('already-account', $translations); ?></a></p>
@@ -2301,7 +2301,7 @@ if (isset($_GET['image'])) {
 </head>
 <body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Omi Server - <?php echo t('repositories', $translations); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('sign-in', $translations); ?>]</a><?php endif; ?></small></td></tr>
+<tr><td><h1>Omi Server - <?php echo t('repositories', $translations); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a><?php endif; ?></small></td></tr>
 </table>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#e8f4f8">

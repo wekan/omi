@@ -978,10 +978,10 @@ async function handleRequest(req, res) {
       const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html dir="${dirAttr}">
 <head>
-<title>${t('sign-in', translations)} - Omi Server</title>
+<title>${t('login', translations)} - Omi Server</title>
 </head>
 <body bgcolor="#f0f0f0" dir="${dirAttr}">
-<h1>Omi Server - ${t('sign-in', translations)}</h1>
+<h1>Omi Server - ${t('login', translations)}</h1>
 <table border="0" cellpadding="5">
 <tr><td colspan="2"><a href="/">[${t('home', translations)}]</a></td></tr>
 </table>
@@ -991,7 +991,7 @@ ${errorMsg}
 <tr><td>${t('username', translations)}:</td><td><input type="text" name="username" size="30" required${usernameValue}></td></tr>
 <tr><td>${t('password', translations)}:</td><td><input type="password" name="password" size="30" required></td></tr>
 ${otpInput}
-<tr><td colspan="2"><input type="submit" value="${t('sign-in', translations)}"></td></tr>
+<tr><td colspan="2"><input type="submit" value="${t('login', translations)}"></td></tr>
 </table>
 </form>
 <p><a href="/sign-up">${t('create-account', translations)}</a></p>
@@ -1008,10 +1008,10 @@ ${otpInput}
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html dir="${dirAttr}">
 <head>
-<title>${t('sign-in', translations)} - Omi Server</title>
+<title>${t('login', translations)} - Omi Server</title>
 </head>
 <body bgcolor="#f0f0f0" dir="${dirAttr}">
-<h1>Omi Server - ${t('sign-in', translations)}</h1>
+<h1>Omi Server - ${t('login', translations)}</h1>
 <table border="0" cellpadding="5">
 <tr><td colspan="2"><a href="/">[${t('home', translations)}]</a></td></tr>
 </table>
@@ -1019,7 +1019,7 @@ ${otpInput}
 <table border="1" cellpadding="5">
 <tr><td>${t('username', translations)}:</td><td><input type="text" name="username" size="30" required></td></tr>
 <tr><td>${t('password', translations)}:</td><td><input type="password" name="password" size="30" required></td></tr>
-<tr><td colspan="2"><input type="submit" value="${t('sign-in', translations)}"></td></tr>
+<tr><td colspan="2"><input type="submit" value="${t('login', translations)}"></td></tr>
 </table>
 </form>
 <p><a href="/sign-up">${t('create-account', translations)}</a></p>
@@ -1068,7 +1068,7 @@ ${otpInput}
       }
 
       const errorMsg = error ? `<p><font color="red"><strong>${t('error', translations)}: ${error.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong></font></p>` : '';
-      const successMsg = success ? `<p><font color="green"><strong>${success}</strong></font></p><p><a href="/sign-in">${t('sign-in', translations)}</a></p>` : '';
+      const successMsg = success ? `<p><font color="green"><strong>${success}</strong></font></p><p><a href="/sign-in">${t('login', translations)}</a></p>` : '';
       const isRTL = languagesData[selectedLanguage]?.rtl === true;
       const dirAttr = isRTL ? 'rtl' : 'ltr';
       const form = success ? '' : `<form method="POST">
@@ -1076,7 +1076,7 @@ ${otpInput}
 <tr><td>${t('username', translations)}:</td><td><input type="text" name="username" size="30" required></td></tr>
 <tr><td>${t('password', translations)}:</td><td><input type="password" name="password" size="30" required></td></tr>
 <tr><td>${t('confirm', translations)}:</td><td><input type="password" name="password2" size="30" required></td></tr>
-<tr><td colspan="2"><input type="submit" value="${t('sign-up', translations)}"></td></tr>
+<tr><td colspan="2"><input type="submit" value="${t('create-account', translations)}"></td></tr>
 </table>
 </form>
 <p><a href="/sign-in">${t('already-account', translations)}</a></p>`;
@@ -1084,10 +1084,10 @@ ${otpInput}
       const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html dir="${dirAttr}">
 <head>
-<title>${t('sign-up', translations)} - Omi Server</title>
+<title>${t('create-account', translations)} - Omi Server</title>
 </head>
 <body bgcolor="#f0f0f0" dir="${dirAttr}">
-<h1>Omi Server - ${t('sign-up', translations)}</h1>
+<h1>Omi Server - ${t('create-account', translations)}</h1>
 <table border="0" cellpadding="5">
 <tr><td colspan="2"><a href="/">[${t('home', translations)}]</a></td></tr>
 </table>
@@ -1107,10 +1107,10 @@ ${form}
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html dir="${dirAttr}">
 <head>
-<title>${t('sign-up', translations)} - Omi Server</title>
+<title>${t('create-account', translations)} - Omi Server</title>
 </head>
 <body bgcolor="#f0f0f0" dir="${dirAttr}">
-<h1>Omi Server - ${t('sign-up', translations)}</h1>
+<h1>Omi Server - ${t('create-account', translations)}</h1>
 <table border="0" cellpadding="5">
 <tr><td colspan="2"><a href="/">[${t('home', translations)}]</a></td></tr>
 </table>
@@ -1119,7 +1119,7 @@ ${form}
 <tr><td>${t('username', translations)}:</td><td><input type="text" name="username" size="30" required></td></tr>
 <tr><td>${t('password', translations)}:</td><td><input type="password" name="password" size="30" required></td></tr>
 <tr><td>${t('confirm', translations)}:</td><td><input type="password" name="password2" size="30" required></td></tr>
-<tr><td colspan="2"><input type="submit" value="${t('sign-up', translations)}"></td></tr>
+<tr><td colspan="2"><input type="submit" value="${t('create-account', translations)}"></td></tr>
 </table>
 </form>
 <p><a href="/sign-in">${t('already-account', translations)}</a></p>
