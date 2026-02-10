@@ -374,6 +374,57 @@ function getReposList() {
     return $repos;
 }
 
+// Create an empty repository with the required schema
+function createEmptyRepository($repoName, $username, &$error) {
+    $repoName = sanitizeRepoName($repoName);
+    if ($repoName === '') {
+        $error = 'Repository name is required';
+        return false;
+    }
+    if (!preg_match('/\.omi$/', $repoName)) {
+        $repoName .= '.omi';
+    }
+    if (!preg_match('/^[a-zA-Z0-9._-]+\.omi$/', $repoName)) {
+        $error = 'Invalid repository name. Use letters, numbers, dot, dash, or underscore.';
+        return false;
+    }
+
+    $repoPath = REPOS_DIR . '/' . $repoName;
+    if (file_exists($repoPath)) {
+        $error = 'Repository already exists';
+        return false;
+    }
+
+    try {
+        $pdo = new PDO('sqlite:' . $repoPath);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+        $schema = [
+            'CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, data BLOB, size INTEGER)',
+            'CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY, filename TEXT, hash TEXT, datetime TEXT, commit_id INTEGER)',
+            'CREATE TABLE IF NOT EXISTS commits (id INTEGER PRIMARY KEY, message TEXT, datetime TEXT, user TEXT)',
+            'CREATE TABLE IF NOT EXISTS staging (filename TEXT PRIMARY KEY, hash TEXT, datetime TEXT)',
+            'CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash)',
+            'CREATE INDEX IF NOT EXISTS idx_files_commit ON files(commit_id)',
+            'CREATE INDEX IF NOT EXISTS idx_blobs_hash ON blobs(hash)'
+        ];
+
+        foreach ($schema as $sql) {
+            $pdo->exec($sql);
+        }
+
+        $stmt = $pdo->prepare('INSERT INTO commits (message, datetime, user) VALUES (?, ?, ?)');
+        $stmt->execute(['Initial commit', date('Y-m-d H:i:s'), $username ?: 'system']);
+        return true;
+    } catch (Exception $e) {
+        if (file_exists($repoPath)) {
+            @unlink($repoPath);
+        }
+        $error = 'Failed to create repository';
+        return false;
+    }
+}
+
 // Parse request URI for routing
 function parseRequestURI() {
     $uri = $_SERVER['REQUEST_URI'];
@@ -453,6 +504,7 @@ function organizeFiles($files, $basePath = '') {
 
     foreach ($files as $file) {
         $filename = $file['filename'];
+        $isDirMarker = preg_match('/(^|\/)\.omidir$/', $filename) === 1;
 
         // Skip if not in current path
         if ($basePath && strpos($filename, $basePath . '/') !== 0 && $filename !== $basePath) {
@@ -463,7 +515,9 @@ function organizeFiles($files, $basePath = '') {
         if ($basePath) {
             if ($filename === $basePath) {
                 // This is the file itself
-                $result['files'][] = $file;
+                if (!$isDirMarker) {
+                    $result['files'][] = $file;
+                }
                 continue;
             }
             $relativePath = substr($filename, strlen($basePath) + 1);
@@ -485,7 +539,9 @@ function organizeFiles($files, $basePath = '') {
             }
         } else {
             // It's a file in current directory
-            $result['files'][] = $file;
+            if (!$isDirMarker) {
+                $result['files'][] = $file;
+            }
         }
     }
 
@@ -1685,49 +1741,132 @@ if (isset($_GET['image'])) {
         $upload_msg = '';
         $upload_error = '';
 
-        // Handle file upload
-        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['upload_file']) && $username) {
-            $uploadFile = $_FILES['upload_file'];
-            
-            // Validate file
-            if ($uploadFile['error'] === UPLOAD_ERR_OK) {
-                $fileName = basename($uploadFile['name']);
-                // Sanitize filename - remove path traversal attempts
-                $fileName = str_replace(['../', '..\\', '/', '\\'], '_', $fileName);
-                
-                if (empty($fileName)) {
-                    $upload_error = 'Invalid filename';
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && $username) {
+            $action = $_POST['action'] ?? '';
+
+            if ($action === 'delete_file') {
+                $target = trim($_POST['target'] ?? '');
+                $target = str_replace(['../', '..\\', '/', '\\'], '_', $target);
+                $targetPath = $repoPath ? $repoPath . '/' . $target : $target;
+
+                if (empty($target)) {
+                    $upload_error = 'File name is required';
+                } elseif (deleteFile($db, $targetPath)) {
+                    $upload_msg = "File '$target' deleted";
+                    $files = getLatestFiles($db, $repoPath);
+                    $organized = organizeFiles($files, $repoPath);
                 } else {
-                    // Calculate full path for file in repo
-                    $fullPath = $repoPath ? $repoPath . '/' . $fileName : $fileName;
-                    
-                    // Read file content
-                    $fileContent = file_get_contents($uploadFile['tmp_name']);
-                    
-                    // Upload to database
-                    if (uploadFile($db, $fullPath, $fileContent)) {
-                        $upload_msg = "File '$fileName' uploaded successfully";
-                        // Refresh file listing
+                    $upload_error = 'Failed to delete file';
+                }
+            } elseif ($action === 'rename_file') {
+                $target = trim($_POST['target'] ?? '');
+                $newName = trim($_POST['new_name'] ?? '');
+                $target = str_replace(['../', '..\\', '/', '\\'], '_', $target);
+                $newName = str_replace(['../', '..\\', '/', '\\'], '_', $newName);
+
+                if (empty($target) || empty($newName)) {
+                    $upload_error = 'File name and new name are required';
+                } else {
+                    $targetPath = $repoPath ? $repoPath . '/' . $target : $target;
+                    $newPath = $repoPath ? $repoPath . '/' . $newName : $newName;
+                    $targetHash = null;
+                    foreach ($files as $entry) {
+                        if ($entry['filename'] === $targetPath) {
+                            $targetHash = $entry['hash'];
+                            break;
+                        }
+                    }
+
+                    if (!$targetHash) {
+                        $upload_error = 'File not found';
+                    } else {
+                        $fileContent = getFileContent($db, $targetHash);
+                        if (commitFile($db, $newPath, $fileContent) && deleteFile($db, $targetPath)) {
+                            $upload_msg = "File '$target' renamed to '$newName'";
+                            $files = getLatestFiles($db, $repoPath);
+                            $organized = organizeFiles($files, $repoPath);
+                        } else {
+                            $upload_error = 'Failed to rename file';
+                        }
+                    }
+                }
+            } elseif ($action === 'create_dir') {
+                $dirName = trim($_POST['dir_name'] ?? '');
+                $dirName = str_replace(['../', '..\\', '/', '\\'], '_', $dirName);
+
+                if (empty($dirName)) {
+                    $upload_error = 'Directory name is required';
+                } else {
+                    $dirPath = $repoPath ? $repoPath . '/' . $dirName : $dirName;
+                    $markerPath = $dirPath . '/.omidir';
+                    if (commitFile($db, $markerPath, '')) {
+                        $upload_msg = "Directory '$dirName' created";
                         $files = getLatestFiles($db, $repoPath);
                         $organized = organizeFiles($files, $repoPath);
                     } else {
-                        $upload_error = 'Failed to upload file to database';
+                        $upload_error = 'Failed to create directory';
                     }
                 }
-            } else {
-                switch ($uploadFile['error']) {
-                    case UPLOAD_ERR_INI_SIZE:
-                    case UPLOAD_ERR_FORM_SIZE:
-                        $upload_error = 'File is too large';
-                        break;
-                    case UPLOAD_ERR_PARTIAL:
-                        $upload_error = 'File upload was interrupted';
-                        break;
-                    case UPLOAD_ERR_NO_FILE:
-                        $upload_error = 'No file was selected';
-                        break;
-                    default:
-                        $upload_error = 'Upload failed with error code: ' . $uploadFile['error'];
+            } elseif ($action === 'create_file') {
+                $fileName = trim($_POST['file_name'] ?? '');
+                $fileName = str_replace(['../', '..\\', '/', '\\'], '_', $fileName);
+                $fileContent = $_POST['file_content'] ?? '';
+
+                if (empty($fileName)) {
+                    $upload_error = 'File name is required';
+                } else {
+                    $fullPath = $repoPath ? $repoPath . '/' . $fileName : $fileName;
+                    if (commitFile($db, $fullPath, $fileContent)) {
+                        $upload_msg = "File '$fileName' created";
+                        $files = getLatestFiles($db, $repoPath);
+                        $organized = organizeFiles($files, $repoPath);
+                    } else {
+                        $upload_error = 'Failed to create file';
+                    }
+                }
+            } elseif (isset($_FILES['upload_file'])) {
+                $uploadFile = $_FILES['upload_file'];
+
+                // Validate file
+                if ($uploadFile['error'] === UPLOAD_ERR_OK) {
+                    $fileName = basename($uploadFile['name']);
+                    // Sanitize filename - remove path traversal attempts
+                    $fileName = str_replace(['../', '..\\', '/', '\\'], '_', $fileName);
+
+                    if (empty($fileName)) {
+                        $upload_error = 'Invalid filename';
+                    } else {
+                        // Calculate full path for file in repo
+                        $fullPath = $repoPath ? $repoPath . '/' . $fileName : $fileName;
+
+                        // Read file content
+                        $fileContent = file_get_contents($uploadFile['tmp_name']);
+
+                        // Upload to database
+                        if (uploadFile($db, $fullPath, $fileContent)) {
+                            $upload_msg = "File '$fileName' uploaded successfully";
+                            // Refresh file listing
+                            $files = getLatestFiles($db, $repoPath);
+                            $organized = organizeFiles($files, $repoPath);
+                        } else {
+                            $upload_error = 'Failed to upload file to database';
+                        }
+                    }
+                } else {
+                    switch ($uploadFile['error']) {
+                        case UPLOAD_ERR_INI_SIZE:
+                        case UPLOAD_ERR_FORM_SIZE:
+                            $upload_error = 'File is too large';
+                            break;
+                        case UPLOAD_ERR_PARTIAL:
+                            $upload_error = 'File upload was interrupted';
+                            break;
+                        case UPLOAD_ERR_NO_FILE:
+                            $upload_error = 'No file was selected';
+                            break;
+                        default:
+                            $upload_error = 'Upload failed with error code: ' . $uploadFile['error'];
+                    }
                 }
             }
         }
@@ -1750,6 +1889,7 @@ if (isset($_GET['image'])) {
 <th><font color="white">Name</font></th>
 <th><font color="white">Size</font></th>
 <th><font color="white">Modified</font></th>
+<th><font color="white">Actions</font></th>
 </tr>
 <?php if (!empty($organized['dirs'])): ?>
 <?php foreach ($organized['dirs'] as $dir): ?>
@@ -1757,6 +1897,7 @@ if (isset($_GET['image'])) {
 <td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $dir['path']); ?>">📁 <?php echo htmlspecialchars($dir['name']); ?>/</a></td>
 <td>-</td>
 <td><?php echo htmlspecialchars($dir['datetime']); ?></td>
+<td>-</td>
 </tr>
 <?php endforeach; ?>
 <?php endif; ?>
@@ -1766,11 +1907,28 @@ if (isset($_GET['image'])) {
 <td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']); ?>">📄 <?php echo htmlspecialchars(basename($file['filename'])); ?></a></td>
 <td><?php echo number_format($file['size']); ?></td>
 <td><?php echo htmlspecialchars($file['datetime']); ?></td>
+<td>
+<?php if ($username): ?>
+<form method="POST" style="display:inline">
+<input type="hidden" name="action" value="delete_file">
+<input type="hidden" name="target" value="<?php echo htmlspecialchars(basename($file['filename'])); ?>">
+<input type="submit" value="Delete" onclick="return confirm('Delete file <?php echo htmlspecialchars(basename($file['filename'])); ?>?')">
+</form>
+<form method="POST" style="display:inline">
+<input type="hidden" name="action" value="rename_file">
+<input type="hidden" name="target" value="<?php echo htmlspecialchars(basename($file['filename'])); ?>">
+<input type="text" name="new_name" size="12" placeholder="New name">
+<input type="submit" value="Rename">
+</form>
+<?php else: ?>
+-
+<?php endif; ?>
+</td>
 </tr>
 <?php endforeach; ?>
 <?php endif; ?>
 <?php if (empty($organized['dirs']) && empty($organized['files'])): ?>
-<tr><td colspan="3">No files in this directory</td></tr>
+<tr><td colspan="4">No files in this directory</td></tr>
 <?php endif; ?>
 </table>
 <hr>
@@ -1781,6 +1939,21 @@ if (isset($_GET['image'])) {
 <p><font color="red"><strong><?php echo htmlspecialchars($upload_error); ?></strong></font></p>
 <?php endif; ?>
 <?php if ($username): ?>
+<p><b>Create Directory</b></p>
+<form method="POST">
+<input type="text" name="dir_name" size="30" placeholder="new-folder">
+<input type="hidden" name="action" value="create_dir">
+<input type="submit" value="Create Directory">
+</form>
+<p><b>Create Text File</b></p>
+<form method="POST">
+<input type="text" name="file_name" size="30" placeholder="notes.txt">
+<br>
+<textarea name="file_content" rows="6" cols="60" placeholder="Enter file contents"></textarea>
+<br>
+<input type="hidden" name="action" value="create_file">
+<input type="submit" value="Create File">
+</form>
 <p><b>Upload File to This Directory</b></p>
 <form method="POST" enctype="multipart/form-data">
 <input type="file" name="upload_file" required>
@@ -1798,6 +1971,19 @@ if (isset($_GET['image'])) {
     }
 
     // Default: Show repository list
+    $repo_message = null;
+    $repo_message_is_error = false;
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isLoggedIn() && ($_POST['action'] ?? '') === 'create_repo') {
+        $repo_error = null;
+        $repo_name = $_POST['repo_name'] ?? '';
+        if (createEmptyRepository($repo_name, getUsername(), $repo_error)) {
+            $repo_message = 'Repository created successfully';
+        } else {
+            $repo_message = $repo_error ?: 'Failed to create repository';
+            $repo_message_is_error = true;
+        }
+    }
+
     $repos = getReposList();
     $username = getUsername();
 
@@ -1821,6 +2007,9 @@ if (isset($_GET['image'])) {
 </td>
 </tr>
 </table>
+<?php if ($repo_message): ?>
+<p><font color="<?php echo $repo_message_is_error ? 'red' : 'green'; ?>"><strong><?php echo htmlspecialchars($repo_message); ?></strong></font></p>
+<?php endif; ?>
 <h2>Available Repositories</h2>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#333333">
@@ -1843,6 +2032,13 @@ if (isset($_GET['image'])) {
 <?php endif; ?>
 </table>
 <?php if ($username): ?>
+<h2>Create New Repository</h2>
+<form method="POST">
+<table border="0" cellpadding="5">
+<tr><td>Repository name:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
+<tr><td colspan="2"><input type="hidden" name="action" value="create_repo"><input type="submit" value="Create Repository"></td></tr>
+</table>
+</form>
 <h2>Upload/Update Repository</h2>
 <form method="POST" enctype="multipart/form-data">
 <table border="0" cellpadding="5">

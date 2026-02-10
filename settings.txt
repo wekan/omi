@@ -1,4 +1,4 @@
-SQLITE=sqlite
+SQLITE=sqlite3
 CURL=curl
 USERNAME=user
 PASSWORD=pass

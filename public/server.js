@@ -9,7 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { createHash, randomBytes } from 'crypto';
 import { createServer } from 'http';
-import { parse as parseUrl } from 'url';
+import { URL } from 'url';
 import { fileURLToPath } from 'url';
 
 // Get __dirname equivalent in ESM
@@ -308,11 +308,260 @@ function getReposList() {
   return repos;
 }
 
+function normalizeRepoName(name) {
+  let repoName = sanitizeRepoName(name || '');
+  if (!repoName) return '';
+  if (!repoName.endsWith('.omi')) repoName += '.omi';
+  return repoName;
+}
+
+function buildRepoSchemaSql(username) {
+  const commitUser = username || 'system';
+  return [
+    'CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, data BLOB, size INTEGER)',
+    'CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY, filename TEXT, hash TEXT, datetime TEXT, commit_id INTEGER)',
+    'CREATE TABLE IF NOT EXISTS commits (id INTEGER PRIMARY KEY, message TEXT, datetime TEXT, user TEXT)',
+    'CREATE TABLE IF NOT EXISTS staging (filename TEXT PRIMARY KEY, hash TEXT, datetime TEXT)',
+    'CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash)',
+    'CREATE INDEX IF NOT EXISTS idx_files_commit ON files(commit_id)',
+    'CREATE INDEX IF NOT EXISTS idx_blobs_hash ON blobs(hash)',
+    `INSERT INTO commits (message, datetime, user) VALUES ("Initial commit", strftime("%Y-%m-%d %H:%M:%S","now"), ${JSON.stringify(commitUser)})`
+  ].join('; ');
+}
+
+async function runSqliteCommand(sqliteCmd, dbPath, sql) {
+  if (typeof Deno !== 'undefined' && Deno.Command) {
+    const command = new Deno.Command(sqliteCmd, { args: [dbPath, sql] });
+    const result = await command.output();
+    if (!result.success) {
+      const message = new TextDecoder().decode(result.stderr || new Uint8Array());
+      throw new Error(message || 'sqlite command failed');
+    }
+    return;
+  }
+
+  const { execFileSync } = await import('child_process');
+  try {
+    execFileSync(sqliteCmd, [dbPath, sql], { stdio: 'ignore' });
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      throw new Error('SQLite CLI not found. Set SQLITE=sqlite3 in settings.txt or install sqlite3.');
+    }
+    throw error;
+  }
+}
+
+async function createEmptyRepository(repoName, username) {
+  const normalized = normalizeRepoName(repoName);
+  if (!normalized) {
+    return { ok: false, message: 'Repository name is required' };
+  }
+  if (!/^[a-zA-Z0-9._-]+\.omi$/.test(normalized)) {
+    return { ok: false, message: 'Invalid repository name. Use letters, numbers, dot, dash, or underscore.' };
+  }
+
+  const repoPath = path.join(REPOS_DIR, normalized);
+  if (fs.existsSync(repoPath)) {
+    return { ok: false, message: 'Repository already exists' };
+  }
+
+  const settings = loadSettings();
+  const sqliteCmd = settings.SQLITE || 'sqlite3';
+  const schemaSql = buildRepoSchemaSql(username);
+
+  try {
+    await runSqliteCommand(sqliteCmd, repoPath, schemaSql);
+    return { ok: true, message: 'Repository created successfully' };
+  } catch (error) {
+    if (fs.existsSync(repoPath)) {
+      try {
+        fs.unlinkSync(repoPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+    return { ok: false, message: 'Failed to create repository' };
+  }
+}
+
+function escapeSqliteString(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+function formatDateTime(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+async function runSqliteQuery(sqliteCmd, dbPath, sql) {
+  const separator = '\x1f';
+
+  if (typeof Deno !== 'undefined' && Deno.Command) {
+    const command = new Deno.Command(sqliteCmd, {
+      args: ['-separator', separator, '-noheader', dbPath, sql]
+    });
+    const result = await command.output();
+    if (!result.success) {
+      const message = new TextDecoder().decode(result.stderr || new Uint8Array());
+      throw new Error(message || 'sqlite query failed');
+    }
+    return new TextDecoder().decode(result.stdout || new Uint8Array());
+  }
+
+  const { execFileSync } = await import('child_process');
+  try {
+    return execFileSync(sqliteCmd, ['-separator', separator, '-noheader', dbPath, sql], { encoding: 'utf8' });
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      throw new Error('SQLite CLI not found. Set SQLITE=sqlite3 in settings.txt or install sqlite3.');
+    }
+    throw error;
+  }
+}
+
+async function getLatestFiles(dbPath, pathPrefix, sqliteCmd) {
+  const commitSql = 'SELECT id FROM commits ORDER BY id DESC LIMIT 1';
+  const commitOutput = await runSqliteQuery(sqliteCmd, dbPath, commitSql);
+  const commitId = commitOutput.trim();
+  if (!commitId) return [];
+
+  let sql = 'SELECT f.filename, f.hash, f.datetime, IFNULL(b.size, 0) FROM files f LEFT JOIN blobs b ON f.hash = b.hash WHERE f.commit_id = ' + commitId;
+  if (pathPrefix) {
+    const escapedPath = escapeSqliteString(pathPrefix);
+    sql += ` AND (f.filename LIKE '${escapedPath}/%' OR f.filename = '${escapedPath}')`;
+  }
+
+  const output = await runSqliteQuery(sqliteCmd, dbPath, sql);
+  if (!output.trim()) return [];
+
+  return output.trim().split('\n').map(line => {
+    const [filename, hash, datetime, size] = line.split('\x1f');
+    return {
+      filename,
+      hash,
+      datetime,
+      size: Number(size || 0)
+    };
+  });
+}
+
+function organizeFiles(files, basePath = '') {
+  const result = { dirs: {}, files: [] };
+
+  for (const file of files) {
+    const filename = file.filename;
+    const isDirMarker = /(^|\/)\.omidir$/.test(filename);
+
+    if (basePath && !filename.startsWith(basePath + '/') && filename !== basePath) {
+      continue;
+    }
+
+    if (basePath && filename === basePath) {
+      if (!isDirMarker) {
+        result.files.push(file);
+      }
+      continue;
+    }
+
+    const relativePath = basePath ? filename.slice(basePath.length + 1) : filename;
+    const parts = relativePath.split('/');
+
+    if (parts.length > 1) {
+      const dirName = parts[0];
+      if (!result.dirs[dirName]) {
+        result.dirs[dirName] = {
+          name: dirName,
+          path: basePath ? `${basePath}/${dirName}` : dirName,
+          datetime: file.datetime
+        };
+      }
+    } else if (!isDirMarker) {
+      result.files.push(file);
+    }
+  }
+
+  return { dirs: Object.values(result.dirs), files: result.files };
+}
+
+async function getFileContent(dbPath, hash, sqliteCmd) {
+  const sql = `SELECT hex(data) FROM blobs WHERE hash = '${escapeSqliteString(hash)}' LIMIT 1`;
+  const output = await runSqliteQuery(sqliteCmd, dbPath, sql);
+  const hexData = output.trim();
+  if (!hexData) return null;
+  return Buffer.from(hexData, 'hex');
+}
+
+async function commitFileToRepo(dbPath, filename, content, username, message, sqliteCmd) {
+  const dataBuffer = Buffer.isBuffer(content) ? content : Buffer.from(content || '', 'utf8');
+  const hash = createHash('sha256').update(dataBuffer).digest('hex');
+  const size = dataBuffer.length;
+  const hexData = dataBuffer.toString('hex');
+  const datetime = formatDateTime(new Date());
+
+  const safeFilename = escapeSqliteString(filename);
+  const safeMessage = escapeSqliteString(message);
+  const safeUser = escapeSqliteString(username || 'system');
+
+  const sql = `BEGIN; ` +
+    `INSERT OR IGNORE INTO blobs (hash, data, size) VALUES ('${hash}', X'${hexData}', ${size}); ` +
+    `INSERT INTO commits (message, datetime, user) VALUES ('${safeMessage}', '${datetime}', '${safeUser}'); ` +
+    `INSERT INTO files (filename, hash, datetime, commit_id) VALUES ('${safeFilename}', '${hash}', '${datetime}', (SELECT id FROM commits ORDER BY id DESC LIMIT 1)); ` +
+    `COMMIT;`;
+
+  await runSqliteCommand(sqliteCmd, dbPath, sql);
+}
+
+async function deleteFileFromRepo(dbPath, filename, username, message, sqliteCmd) {
+  const datetime = formatDateTime(new Date());
+  const safeMessage = escapeSqliteString(message);
+  const safeUser = escapeSqliteString(username || 'system');
+
+  const sql = `INSERT INTO commits (message, datetime, user) VALUES ('${safeMessage}', '${datetime}', '${safeUser}');`;
+  await runSqliteCommand(sqliteCmd, dbPath, sql);
+}
+
+function sanitizePathSegment(name) {
+  return String(name || '').replace(/\.\.\//g, '').replace(/\.\.\\/g, '').replace(/[\\/]/g, '_').replace(/\0/g, '').trim();
+}
+
+function parseRequestPath(pathname) {
+  const parts = pathname.split('/').filter(Boolean);
+  if (parts.length === 0) {
+    return { type: 'list' };
+  }
+
+  const repoPart = parts.shift();
+  let repoName = sanitizeRepoName(repoPart);
+  if (!repoName) {
+    return { type: 'error', message: 'Repository not found' };
+  }
+  if (!repoName.endsWith('.omi')) {
+    repoName += '.omi';
+  }
+
+  const repoPath = path.join(REPOS_DIR, repoName);
+  if (!isPathSafe(repoPath) || !fs.existsSync(repoPath)) {
+    return { type: 'error', message: 'Repository not found' };
+  }
+
+  const cleanParts = parts.map(sanitizePathSegment).filter(Boolean);
+  const repoSubpath = cleanParts.join('/');
+
+  return {
+    type: 'browse',
+    repo: repoName,
+    path: repoSubpath,
+    db: repoPath
+  };
+}
+
 // Check if content is text
 function isTextFile(content) {
   if (!content || content.length === 0) return true;
-  if (content.includes('\0')) return false;
-  return true;
+  if (Buffer.isBuffer(content)) {
+    return !content.includes(0);
+  }
+  return !content.includes('\0');
 }
 
 // Check if filename is markdown
@@ -519,11 +768,20 @@ function sendJson(res, data, statusCode = 200) {
   res.end(JSON.stringify(data));
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 // Request handler
 async function handleRequest(req, res) {
-  const url = parseUrl(req.url, true);
+  const baseUrl = `http://${req.headers.host || 'localhost'}`;
+  const url = new URL(req.url, baseUrl);
   const pathname = url.pathname;
-  const query = url.query;
+  const query = Object.fromEntries(url.searchParams.entries());
 
   // Handle logout
   if (pathname === '/logout') {
@@ -765,7 +1023,7 @@ ${form}
 <hr>
 <form method="POST">
 <table border="1" cellpadding="5">
-<tr><td>SQLITE executable:</td><td><input type="text" name="SQLITE" size="50" value="${(settings.SQLITE || 'sqlite').replace(/"/g, '&quot;')}"></td></tr>
+<tr><td>SQLITE executable:</td><td><input type="text" name="SQLITE" size="50" value="${(settings.SQLITE || 'sqlite3').replace(/"/g, '&quot;')}"></td></tr>
 <tr><td>USERNAME:</td><td><input type="text" name="USERNAME" size="50" value="${(settings.USERNAME || '').replace(/"/g, '&quot;')}"></td></tr>
 <tr><td>PASSWORD:</td><td><input type="password" name="PASSWORD" size="50" value="${(settings.PASSWORD || '').replace(/"/g, '&quot;')}"></td></tr>
 <tr><td>REPOS (server URL):</td><td><input type="text" name="REPOS" size="50" value="${(settings.REPOS || '').replace(/"/g, '&quot;')}"></td></tr>
@@ -782,10 +1040,423 @@ ${form}
     return;
   }
 
+  let repoMessage = null;
+  let repoMessageIsError = false;
+
+  if (pathname === '/' && req.method === 'POST') {
+    if (!isLoggedIn(req)) {
+      res.writeHead(302, { 'Location': '/sign-in' });
+      res.end();
+      return;
+    }
+
+    const contentType = req.headers['content-type'] || '';
+    let fields = {};
+    let files = {};
+    if (contentType.includes('multipart/form-data')) {
+      const form = await parseMultipartForm(req);
+      fields = form.fields || {};
+      files = form.files || {};
+    } else {
+      fields = await parseFormData(req);
+    }
+
+    if (fields.action === 'create_repo') {
+      const result = await createEmptyRepository(fields.repo_name || '', getUsername(req));
+      repoMessage = result.message;
+      repoMessageIsError = !result.ok;
+    } else if (fields.action === 'Upload') {
+      const uploadFile = files.repo_file;
+      const repoName = normalizeRepoName(fields.repo_name || (uploadFile ? uploadFile.filename : ''));
+
+      if (!repoName) {
+        repoMessage = 'Repository name is required';
+        repoMessageIsError = true;
+      } else if (!/^[a-zA-Z0-9._-]+\.omi$/.test(repoName)) {
+        repoMessage = 'Invalid repository name. Use letters, numbers, dot, dash, or underscore.';
+        repoMessageIsError = true;
+      } else if (!uploadFile || !uploadFile.data) {
+        repoMessage = 'No repository file selected';
+        repoMessageIsError = true;
+      } else {
+        const repoPath = path.join(REPOS_DIR, repoName);
+        if (!isPathSafe(repoPath)) {
+          repoMessage = 'Invalid repository path';
+          repoMessageIsError = true;
+        } else {
+          try {
+            fs.writeFileSync(repoPath, uploadFile.data);
+            repoMessage = `Repository ${repoName} uploaded successfully`;
+          } catch {
+            repoMessage = 'Failed to save repository';
+            repoMessageIsError = true;
+          }
+        }
+      }
+    }
+  }
+
+  if (pathname === '/' && query.download) {
+    const repoName = normalizeRepoName(query.download);
+    const repoPath = path.join(REPOS_DIR, repoName);
+
+    if (!repoName || !isPathSafe(repoPath) || !fs.existsSync(repoPath)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Repository not found');
+      return;
+    }
+
+    const stat = fs.statSync(repoPath);
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': `attachment; filename="${repoName}"`,
+      'Content-Length': stat.size
+    });
+    fs.createReadStream(repoPath).pipe(res);
+    return;
+  }
+
   // Check if requesting JSON API for repos list
   if (pathname === '/' && query.format === 'json') {
     const repos = getReposList();
     sendJson(res, { repos });
+    return;
+  }
+
+  const requestInfo = parseRequestPath(pathname);
+  if (requestInfo.type === 'error') {
+    sendHtml(res, `<html><body><h1>Error: ${escapeHtml(requestInfo.message)}</h1></body></html>`, 404);
+    return;
+  }
+
+  if (requestInfo.type === 'browse') {
+    const settings = loadSettings();
+    const sqliteCmd = settings.SQLITE || 'sqlite3';
+    const repoName = requestInfo.repo;
+    const repoPath = requestInfo.path;
+    const dbPath = requestInfo.db;
+    const username = getUsername(req);
+    const repoRoot = repoName.replace(/\.omi$/, '');
+
+    let actionMessage = null;
+    let actionMessageIsError = false;
+
+    if (req.method === 'POST' && username) {
+      const contentType = req.headers['content-type'] || '';
+      let fields = {};
+      let files = {};
+      if (contentType.includes('multipart/form-data')) {
+        const form = await parseMultipartForm(req);
+        fields = form.fields || {};
+        files = form.files || {};
+      } else {
+        fields = await parseFormData(req);
+      }
+
+      const action = fields.action || '';
+      if (action === 'delete_file') {
+        const targetName = sanitizePathSegment(fields.target || '');
+        if (!targetName) {
+          actionMessage = 'File name is required';
+          actionMessageIsError = true;
+        } else {
+          const targetPath = repoPath ? `${repoPath}/${targetName}` : targetName;
+          try {
+            const latestFiles = await getLatestFiles(dbPath, repoPath, sqliteCmd);
+            const targetEntry = latestFiles.find(file => file.filename === targetPath && !/(^|\/)\.omidir$/.test(file.filename));
+            if (!targetEntry) {
+              actionMessage = 'File not found';
+              actionMessageIsError = true;
+            } else {
+              await deleteFileFromRepo(dbPath, targetEntry.filename, username, `Deleted: ${path.basename(targetEntry.filename)}`, sqliteCmd);
+              actionMessage = `File '${targetName}' deleted`;
+            }
+          } catch {
+            actionMessage = 'Failed to delete file';
+            actionMessageIsError = true;
+          }
+        }
+      } else if (action === 'rename_file') {
+        const targetName = sanitizePathSegment(fields.target || '');
+        const newName = sanitizePathSegment(fields.new_name || '');
+        if (!targetName || !newName) {
+          actionMessage = 'File name and new name are required';
+          actionMessageIsError = true;
+        } else {
+          const targetPath = repoPath ? `${repoPath}/${targetName}` : targetName;
+          const newPath = repoPath ? `${repoPath}/${newName}` : newName;
+          try {
+            const latestFiles = await getLatestFiles(dbPath, repoPath, sqliteCmd);
+            const targetEntry = latestFiles.find(file => file.filename === targetPath && !/(^|\/)\.omidir$/.test(file.filename));
+            if (!targetEntry) {
+              actionMessage = 'File not found';
+              actionMessageIsError = true;
+            } else {
+              const fileContent = await getFileContent(dbPath, targetEntry.hash, sqliteCmd);
+              await commitFileToRepo(dbPath, newPath, fileContent || Buffer.alloc(0), username, `Renamed: ${path.basename(targetEntry.filename)} -> ${newName}`, sqliteCmd);
+              await deleteFileFromRepo(dbPath, targetEntry.filename, username, `Deleted: ${path.basename(targetEntry.filename)}`, sqliteCmd);
+              actionMessage = `File '${targetName}' renamed to '${newName}'`;
+            }
+          } catch {
+            actionMessage = 'Failed to rename file';
+            actionMessageIsError = true;
+          }
+        }
+      } else if (action === 'create_dir') {
+        const dirName = sanitizePathSegment(fields.dir_name || '');
+        if (!dirName) {
+          actionMessage = 'Directory name is required';
+          actionMessageIsError = true;
+        } else {
+          const dirPath = repoPath ? `${repoPath}/${dirName}` : dirName;
+          const markerPath = `${dirPath}/.omidir`;
+          try {
+            await commitFileToRepo(dbPath, markerPath, '', username, `Create directory: ${dirName}`, sqliteCmd);
+            actionMessage = `Directory '${dirName}' created`;
+          } catch {
+            actionMessage = 'Failed to create directory';
+            actionMessageIsError = true;
+          }
+        }
+      } else if (action === 'create_file') {
+        const fileName = sanitizePathSegment(fields.file_name || '');
+        const content = fields.file_content || '';
+        if (!fileName) {
+          actionMessage = 'File name is required';
+          actionMessageIsError = true;
+        } else {
+          const fullPath = repoPath ? `${repoPath}/${fileName}` : fileName;
+          try {
+            await commitFileToRepo(dbPath, fullPath, content, username, `Created file: ${fileName}`, sqliteCmd);
+            actionMessage = `File '${fileName}' created`;
+          } catch {
+            actionMessage = 'Failed to create file';
+            actionMessageIsError = true;
+          }
+        }
+      } else if (files.upload_file) {
+        const uploadFile = files.upload_file;
+        const fileName = sanitizePathSegment(uploadFile.filename || '');
+        if (!fileName || !uploadFile.data) {
+          actionMessage = 'No file selected';
+          actionMessageIsError = true;
+        } else {
+          const fullPath = repoPath ? `${repoPath}/${fileName}` : fileName;
+          try {
+            await commitFileToRepo(dbPath, fullPath, uploadFile.data, username, `Uploaded: ${fileName}`, sqliteCmd);
+            actionMessage = `File '${fileName}' uploaded successfully`;
+          } catch {
+            actionMessage = 'Failed to upload file';
+            actionMessageIsError = true;
+          }
+        }
+      }
+    }
+
+    let files = [];
+    try {
+      files = await getLatestFiles(dbPath, repoPath, sqliteCmd);
+    } catch (error) {
+      sendHtml(res, `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>SQLite Error - ${escapeHtml(repoName)}</title>
+</head>
+<body bgcolor="#f0f0f0">
+<h1>SQLite Error</h1>
+<p>${escapeHtml(error.message || 'SQLite error')}</p>
+<p>Set SQLITE in settings.txt to the sqlite3 binary, or install sqlite3.</p>
+</body>
+</html>`, 500);
+      return;
+    }
+    const isFile = files.length === 1 && files[0].filename === repoPath && !/(^|\/)\.omidir$/.test(files[0].filename);
+
+    if (isFile && req.method === 'POST' && username) {
+      const postData = await parseFormData(req);
+      const action = postData.action || '';
+      const fileEntry = files[0];
+
+      if (action === 'delete_file') {
+        try {
+          await deleteFileFromRepo(dbPath, fileEntry.filename, username, `Deleted: ${path.basename(fileEntry.filename)}`, sqliteCmd);
+          const parentPath = repoPath.includes('/') ? repoPath.slice(0, repoPath.lastIndexOf('/')) : '';
+          const redirectPath = parentPath ? `/${repoRoot}/${parentPath}` : `/${repoRoot}`;
+          res.writeHead(302, { Location: redirectPath });
+          res.end();
+          return;
+        } catch {
+          actionMessage = 'Failed to delete file';
+          actionMessageIsError = true;
+        }
+      }
+
+      if (action === 'rename_file') {
+        const newName = sanitizePathSegment(postData.new_name || '');
+        if (!newName) {
+          actionMessage = 'New file name is required';
+          actionMessageIsError = true;
+        } else {
+          const parentPath = repoPath.includes('/') ? repoPath.slice(0, repoPath.lastIndexOf('/')) : '';
+          const newPath = parentPath ? `${parentPath}/${newName}` : newName;
+          try {
+            const fileContent = await getFileContent(dbPath, fileEntry.hash, sqliteCmd);
+            await commitFileToRepo(dbPath, newPath, fileContent || Buffer.alloc(0), username, `Renamed: ${path.basename(fileEntry.filename)} -> ${newName}`, sqliteCmd);
+            await deleteFileFromRepo(dbPath, fileEntry.filename, username, `Deleted: ${path.basename(fileEntry.filename)}`, sqliteCmd);
+            const redirectPath = `/${repoRoot}/${newPath}`;
+            res.writeHead(302, { Location: redirectPath });
+            res.end();
+            return;
+          } catch {
+            actionMessage = 'Failed to rename file';
+            actionMessageIsError = true;
+          }
+        }
+      }
+
+      files = await getLatestFiles(dbPath, repoPath, sqliteCmd);
+    }
+
+    if (isFile) {
+      const fileEntry = files[0];
+      const fileContent = await getFileContent(dbPath, fileEntry.hash, sqliteCmd);
+      const fileName = path.basename(fileEntry.filename);
+
+      if (query.download === '1') {
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Disposition': `attachment; filename="${fileName}"`,
+          'Content-Length': fileContent ? fileContent.length : 0
+        });
+        res.end(fileContent || Buffer.alloc(0));
+        return;
+      }
+
+      const isText = fileContent && isTextFile(fileContent);
+      const displayContent = isText ? escapeHtml(fileContent.toString('utf8')) : '';
+      const actionMessageHtml = actionMessage
+        ? `<p><font color="${actionMessageIsError ? 'red' : 'green'}"><strong>${escapeHtml(actionMessage)}</strong></font></p>`
+        : '';
+      const fileActions = username ? `
+    <form method="POST" style="display:inline">
+    <input type="hidden" name="action" value="delete_file">
+    <input type="submit" value="Delete" onclick="return confirm('Delete file ${escapeHtml(fileName)}?')">
+    </form>
+    <form method="POST" style="display:inline">
+    <input type="hidden" name="action" value="rename_file">
+    <input type="text" name="new_name" size="20" placeholder="New name">
+    <input type="submit" value="Rename">
+    </form>
+    ` : '';
+      const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>${escapeHtml(fileEntry.filename)} - ${escapeHtml(repoName)}</title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small>${username ? `<strong>${escapeHtml(username)}</strong> | <a href="/logout">[Logout]</a>` : '<a href="/sign-in">[Sign In]</a>'}</small></td></tr>
+</table>
+<p><a href="/">[Home]</a> | <a href="/${escapeHtml(repoRoot)}">[Repository Root]</a></p>
+<h2>File: ${escapeHtml(fileEntry.filename)}</h2>
+<p><a href="?download=1">[Download]</a></p>
+${fileActions}
+<hr>
+${actionMessageHtml}
+${isText ? `<pre>${displayContent}</pre>` : `<p><strong>Binary file (${fileContent ? fileContent.length : 0} bytes)</strong></p>`}
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>`;
+      sendHtml(res, html);
+      return;
+    }
+
+    const organized = organizeFiles(files, repoPath);
+    const directoryTitle = repoPath ? escapeHtml(repoPath) : 'Root';
+    const dirRows = organized.dirs.map(dir => `<tr>
+  <td><a href="/${escapeHtml(repoRoot)}/${escapeHtml(dir.path)}">📁 ${escapeHtml(dir.name)}/</a></td>
+  <td>-</td>
+  <td>${escapeHtml(dir.datetime)}</td>
+  <td>-</td>
+  </tr>`).join('\n');
+    const fileRows = organized.files.map(file => `<tr>
+  <td><a href="/${escapeHtml(repoRoot)}/${escapeHtml(file.filename)}">📄 ${escapeHtml(path.basename(file.filename))}</a></td>
+  <td>${Number(file.size).toLocaleString()}</td>
+  <td>${escapeHtml(file.datetime)}</td>
+  <td>${username ? `
+  <form method="POST" style="display:inline">
+  <input type="hidden" name="action" value="delete_file">
+  <input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}">
+  <input type="submit" value="Delete" onclick="return confirm('Delete file ${escapeHtml(path.basename(file.filename))}?')">
+  </form>
+  <form method="POST" style="display:inline">
+  <input type="hidden" name="action" value="rename_file">
+  <input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}">
+  <input type="text" name="new_name" size="12" placeholder="New name">
+  <input type="submit" value="Rename">
+  </form>` : '-'}</td>
+  </tr>`).join('\n');
+    const emptyRow = (!organized.dirs.length && !organized.files.length) ? '<tr><td colspan="4">No files in this directory</td></tr>' : '';
+
+    const actionMessageHtml = actionMessage
+      ? `<p><font color="${actionMessageIsError ? 'red' : 'green'}"><strong>${escapeHtml(actionMessage)}</strong></font></p>`
+      : '';
+
+    const actionForms = username ? `
+<p><b>Create Directory</b></p>
+<form method="POST">
+<input type="text" name="dir_name" size="30" placeholder="new-folder">
+<input type="hidden" name="action" value="create_dir">
+<input type="submit" value="Create Directory">
+</form>
+<p><b>Create Text File</b></p>
+<form method="POST">
+<input type="text" name="file_name" size="30" placeholder="notes.txt">
+<br>
+<textarea name="file_content" rows="6" cols="60" placeholder="Enter file contents"></textarea>
+<br>
+<input type="hidden" name="action" value="create_file">
+<input type="submit" value="Create File">
+</form>
+<p><b>Upload File to This Directory</b></p>
+<form method="POST" enctype="multipart/form-data">
+<input type="file" name="upload_file" required>
+<input type="submit" value="Upload">
+</form>
+` : '<p><small><a href="/sign-in">[Sign in]</a> to upload files</small></p>';
+
+    const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>${directoryTitle} - ${escapeHtml(repoName)}</title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small>${username ? `<strong>${escapeHtml(username)}</strong> | <a href="/logout">[Logout]</a>` : '<a href="/sign-in">[Sign In]</a>'}</small></td></tr>
+</table>
+<p><a href="/">[Home]</a>${repoPath ? ` | <a href="/${escapeHtml(repoRoot)}">[Repository Root]</a>` : ''}</p>
+<h2>Directory: /${directoryTitle}</h2>
+<hr>
+<table border="1" width="100%" cellpadding="5" cellspacing="0">
+<tr bgcolor="#333333">
+<th><font color="white">Name</font></th>
+<th><font color="white">Size</font></th>
+<th><font color="white">Modified</font></th>
+<th><font color="white">Actions</font></th>
+</tr>
+${dirRows}
+${fileRows}
+${emptyRow}
+</table>
+<hr>
+${actionMessageHtml}
+${actionForms}
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>`;
+    sendHtml(res, html);
     return;
   }
 
@@ -821,6 +1492,7 @@ ${form}
 </td>
 </tr>
 </table>
+${repoMessage ? `<p><font color="${repoMessageIsError ? 'red' : 'green'}"><strong>${repoMessage.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong></font></p>` : ''}
 <h2>Available Repositories</h2>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#333333">
@@ -831,7 +1503,14 @@ ${form}
 </tr>
 ${reposTable}
 </table>
-${username ? `<h2>Upload Repository</h2>
+${username ? `<h2>Create New Repository</h2>
+<form method="POST">
+<table border="0" cellpadding="5">
+<tr><td>Repository name:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
+<tr><td colspan="2"><input type="hidden" name="action" value="create_repo"><input type="submit" value="Create Repository"></td></tr>
+</table>
+</form>
+<h2>Upload Repository</h2>
 <form method="POST" enctype="multipart/form-data">
 <table border="0" cellpadding="5">
 <tr><td>Repository name:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
