@@ -1,5 +1,8 @@
 # Omi - Features Overview
 
+> **Documentation Index:** See [README.md](README.md) for documentation overview  
+> **Quick Start:** See [README.md](README.md#installation-quick-reference)
+
 Omi is a lightweight Git-like version control system designed for retro systems and modern platforms with SQLite-based storage and SHA256 deduplication.
 
 ## Core Features
@@ -135,13 +138,14 @@ Omi is a lightweight Git-like version control system designed for retro systems 
 ## Documentation
 
 ### Included Documentation
-- **QUICK_START.md** - Getting started guide
-- **COMPLETE_GUIDE.md** - Full user manual
-- **CLI_GUIDE.md** - Command line interface reference
+- **README.md** - Documentation index and quick reference
+- **FEATURES.md** - This file (feature overview)
+- **CLI_BASH.md** - Command line for Linux/Unix/macOS
+- **CLI_BAT.md** - Command line for FreeDOS/Windows
+- **CLI_AMIGASHELL.md** - Command line for Commodore Amiga
+- **WEB.md** - Web interface documentation
+- **SERVER.md** - Server setup and configuration
 - **DATABASE_SCHEMA.md** - Database structure details
-- **SERVER_SETUP.md** - Installation and configuration
-- **WEB_INTERFACE.md** - Web UI documentation
-- **FEATURES.md** - This file
 
 ## Performance & Efficiency
 
@@ -186,3 +190,15 @@ Omi is a lightweight Git-like version control system designed for retro systems 
 - Conflict resolution
 - Clone operations
 - Remote synchronization improvements
+
+---
+
+## See Also
+
+- **[README.md](README.md)** - Documentation index
+- **[CLI_BASH.md](CLI_BASH.md)** - CLI commands (Bash)
+- **[CLI_BAT.md](CLI_BAT.md)** - CLI commands (FreeDOS)
+- **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI commands (Amiga)
+- **[WEB.md](WEB.md)** - Web interface
+- **[SERVER.md](SERVER.md)** - Server setup
+- **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Database design

@@ -520,6 +520,182 @@ function isTextFile($content) {
     return true;
 }
 
+// Check if filename is markdown
+function isMarkdownFile($filename) {
+    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    return $ext === 'md' || $ext === 'markdown';
+}
+
+// Check if filename is SVG
+function isSVGFile($filename) {
+    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    return $ext === 'svg';
+}
+
+// Check if filename is media file and return type
+function getMediaType($filename) {
+    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    $audioExts = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'];
+    $videoExts = ['mp4', 'webm', 'ogg', 'mkv', 'avi', 'mov', 'flv', 'wmv'];
+    
+    if (in_array($ext, $audioExts)) return 'audio';
+    if (in_array($ext, $videoExts)) return 'video';
+    return false;
+}
+
+// Simple markdown to HTML converter (basic support)
+function markdownToHtml($markdown) {
+    $html = htmlspecialchars($markdown);
+    
+    // Headers
+    $html = preg_replace('/^### (.*?)$/m', '<h3>$1</h3>', $html);
+    $html = preg_replace('/^## (.*?)$/m', '<h2>$1</h2>', $html);
+    $html = preg_replace('/^# (.*?)$/m', '<h1>$1</h1>', $html);
+    
+    // Bold and italic
+    $html = preg_replace('/\*\*(.*?)\*\*/', '<b>$1</b>', $html);
+    $html = preg_replace('/\*(.*?)\*/', '<i>$1</i>', $html);
+    $html = preg_replace('/__(.+?)__/', '<b>$1</b>', $html);
+    $html = preg_replace('/_(.+?)_/', '<i>$1</i>', $html);
+    
+    // Links
+    $html = preg_replace('/\[(.*?)\]\((.*?)\)/', '<a href="$2">$1</a>', $html);
+    
+    // Code blocks
+    $html = preg_replace_callback('/```(.*?)```/s', function($m) {
+        return '<pre>' . trim($m[1]) . '</pre>';
+    }, $html);
+    
+    // Inline code
+    $html = preg_replace('/`([^`]+)`/', '<code>$1</code>', $html);
+    
+    // Line breaks
+    $html = nl2br($html);
+    
+    return $html;
+}
+
+// Check if browser supports SVG
+function browserSupportsSVG() {
+    $accept = $_SERVER['HTTP_ACCEPT'] ?? '';
+    if (strpos($accept, 'image/svg+xml') !== false) {
+        return true;
+    }
+    
+    // Check User-Agent for known SVG-incapable browsers
+    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+    $oldBrowsers = ['MSIE 8', 'MSIE 7', 'MSIE 6', 'Netscape', 'Lynx'];
+    foreach ($oldBrowsers as $browser) {
+        if (stripos($userAgent, $browser) !== false) {
+            return false;
+        }
+    }
+    
+    // Default to support (most modern browsers)
+    return true;
+}
+
+// Convert SVG to GIF using ImageMagick
+function svgToGif($svgContent) {
+    // Check if ImageMagick is available
+    $whichConvert = shell_exec('which convert 2>/dev/null');
+    if (!$whichConvert) {
+        return null; // ImageMagick not available
+    }
+    
+    // Create temporary SVG file
+    $tempSvg = tempnam(sys_get_temp_dir(), 'omi_svg_');
+    $tempGif = $tempSvg . '.gif';
+    
+    try {
+        // Write SVG to temp file
+        file_put_contents($tempSvg, $svgContent);
+        
+        // Convert SVG to GIF using ImageMagick
+        $command = escapeshellcmd("convert -density 150 -background white svg:$tempSvg gif:$tempGif 2>&1");
+        $output = shell_exec($command);
+        
+        // Check if conversion was successful
+        if (!file_exists($tempGif)) {
+            unlink($tempSvg);
+            return null;
+        }
+        
+        // Read GIF data
+        $gifData = file_get_contents($tempGif);
+        
+        // Clean up temp files
+        unlink($tempSvg);
+        unlink($tempGif);
+        
+        return $gifData;
+    } catch (Exception $e) {
+        // Clean up on error
+        if (file_exists($tempSvg)) unlink($tempSvg);
+        if (isset($tempGif) && file_exists($tempGif)) unlink($tempGif);
+        return null;
+    }
+}
+
+// Check if SVG contains JavaScript (security risk)
+function svgContainsJavaScript($svgContent) {
+    // Check for script tags
+    if (stripos($svgContent, '<script') !== false) {
+        return true;
+    }
+    
+    // Check for event handlers (onclick, onload, etc.)
+    $eventPatterns = [
+        'onload', 'onerror', 'onmouseover', 'onmouseout', 'onclick',
+        'onmousemove', 'onmousedown', 'onmouseup', 'ondblclick',
+        'onfocus', 'onblur', 'onchange', 'onsubmit', 'onreset'
+    ];
+    
+    foreach ($eventPatterns as $event) {
+        if (stripos($svgContent, $event . '=') !== false) {
+            return true;
+        }
+    }
+    
+    // Check for javascript: protocol
+    if (stripos($svgContent, 'javascript:') !== false) {
+        return true;
+    }
+    
+    // Check for data: protocol with script content
+    if (stripos($svgContent, 'data:text/javascript') !== false) {
+        return true;
+    }
+    
+    return false;
+}
+
+// Check if SVG contains dangerous XML entities or loops
+function svgContainsXMLDanger($svgContent) {
+    // Check for DOCTYPE (can contain external entity declarations)
+    if (stripos($svgContent, '<!DOCTYPE') !== false) {
+        return true;
+    }
+    
+    // Check for ENTITY declarations
+    if (stripos($svgContent, '<!ENTITY') !== false) {
+        return true;
+    }
+    
+    // Check for recursive/billion laughs attack patterns
+    if (stripos($svgContent, '&lol') !== false || 
+        stripos($svgContent, '&x') !== false) {
+        return true;
+    }
+    
+    // Check for CDATA with suspiciously large content
+    if (preg_match('/<!\[CDATA\[.{10000,}/', $svgContent)) {
+        return true;
+    }
+    
+    return false;
+}
+
 // Add new file commit to database
 function commitFile($db, $filename, $content) {
     try {
@@ -557,6 +733,73 @@ function commitFile($db, $filename, $content) {
         return true;
     } catch (Exception $e) {
         error_log("Error committing file: " . $e->getMessage());
+        return false;
+    }
+}
+
+// Upload file to repository
+function uploadFile($db, $filename, $content) {
+    try {
+        $pdo = new PDO('sqlite:' . $db);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+        // Calculate hash
+        $hash = hash('sha256', $content);
+        $size = strlen($content);
+
+        // Check if blob already exists
+        $stmt = $pdo->prepare("SELECT COUNT(*) as cnt FROM blobs WHERE hash = ?");
+        $stmt->execute([$hash]);
+        $blobExists = $stmt->fetch(PDO::FETCH_ASSOC)['cnt'] > 0;
+
+        // Insert blob if new
+        if (!$blobExists) {
+            $stmt = $pdo->prepare("INSERT INTO blobs (hash, data, size) VALUES (?, ?, ?)");
+            $stmt->execute([$hash, $content, $size]);
+        }
+
+        // Get current datetime
+        $datetime = date('Y-m-d H:i:s');
+
+        // Create commit
+        $stmt = $pdo->prepare("INSERT INTO commits (message, datetime, user) VALUES (?, ?, ?)");
+        $stmt->execute(["Uploaded: $filename", $datetime, getUsername()]);
+
+        $commitId = $pdo->lastInsertId();
+
+        // Add file record
+        $stmt = $pdo->prepare("INSERT INTO files (filename, hash, datetime, commit_id) VALUES (?, ?, ?, ?)");
+        $stmt->execute([$filename, $hash, $datetime, $commitId]);
+
+        return true;
+    } catch (Exception $e) {
+        error_log("Error uploading file: " . $e->getMessage());
+        return false;
+    }
+}
+
+// Delete file from repository (creates new commit without file)
+function deleteFile($db, $filename) {
+    try {
+        $pdo = new PDO('sqlite:' . $db);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+        // Get current datetime
+        $datetime = date('Y-m-d H:i:s');
+
+        // Create commit
+        $stmt = $pdo->prepare("INSERT INTO commits (message, datetime, user) VALUES (?, ?, ?)");
+        $stmt->execute(["Deleted: $filename", $datetime, getUsername()]);
+
+        $commitId = $pdo->lastInsertId();
+
+        // Note: We don't need to insert a file record. 
+        // The file is "deleted" by not having a record in the latest commit.
+        // Previous commits still have the file record pointing to the blob.
+
+        return true;
+    } catch (Exception $e) {
+        error_log("Error deleting file: " . $e->getMessage());
         return false;
     }
 }
@@ -1225,6 +1468,29 @@ if (isset($_GET['image'])) {
             $isText = isTextFile($fileContent);
             $username = getUsername();
 
+            // Handle download request
+            if (isset($_GET['download']) && $_GET['download'] === '1') {
+                $filename = basename($repoPath);
+                header('Content-Type: application/octet-stream');
+                header('Content-Disposition: attachment; filename="' . addslashes($filename) . '"');
+                header('Content-Length: ' . strlen($fileContent));
+                echo $fileContent;
+                exit;
+            }
+
+            // Handle delete request (with confirmation)
+            if (isset($_POST['delete_confirm']) && $_POST['delete_confirm'] === '1' && $username) {
+                if (deleteFile($db, $repoPath)) {
+                    header('Location: /' . htmlspecialchars(str_replace('.omi', '', $repoName)));
+                    exit;
+                } else {
+                    $error_msg = 'Failed to delete file';
+                }
+            }
+
+            // Check if delete confirmation is being requested
+            $show_delete_confirm = isset($_GET['delete']) && $_GET['delete'] === '1' && $username;
+
             // Handle edit request
             if (isset($_POST['save_file']) && $isText && $username) {
                 $newContent = $_POST['file_content'] ?? '';
@@ -1251,6 +1517,28 @@ if (isset($_GET['image'])) {
 </table>
 <p><a href="/">[Home]</a> | <a href="?log=<?php echo urlencode($repoName); ?>">[Log]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[Repository Root]</a></p>
 <h2>File: <?php echo htmlspecialchars($repoPath); ?></h2>
+<?php if ($show_delete_confirm): ?>
+<!-- Delete confirmation form (HTML 3.2 compatible, no JavaScript) -->
+<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc;">
+<p><font color="red"><strong>⚠️ Confirm Delete</strong></font></p>
+<p>Are you sure you want to delete <strong><?php echo htmlspecialchars($repoPath); ?></strong>?</p>
+<p>This action cannot be undone. The file will be removed from the current version, but previous versions in the history will still contain the file.</p>
+<form method="POST" action="">
+<input type="hidden" name="delete_confirm" value="1">
+<input type="submit" value="Confirm Delete"> | <a href="?">[Cancel]</a>
+</form>
+</div>
+<hr>
+<?php else: ?>
+<?php if ($username): ?>
+<p>
+<a href="?download=1">[Download]</a>
+<?php if ($isText): ?>
+| <a href="?edit=1">[Edit]</a>
+<?php endif; ?>
+| <a href="?delete=1">[Delete]</a>
+</p>
+<?php endif; ?>
 <?php if (isset($success_msg)): ?>
 <p><font color="green"><strong><?php echo htmlspecialchars($success_msg); ?></strong></font></p>
 <?php endif; ?>
@@ -1265,13 +1553,126 @@ if (isset($_GET['image'])) {
 </form>
 <?php else: ?>
 <?php if ($isText): ?>
+<?php 
+    // Check file type and render appropriately
+    $isMarkdown = isMarkdownFile($repoPath);
+    $isSVG = isSVGFile($repoPath);
+    $mediaType = getMediaType($repoPath);
+?>
+<?php if ($isMarkdown): ?>
+<!-- Markdown rendering -->
+<div style="font-family: Arial, sans-serif; line-height: 1.6;">
+<?php echo markdownToHtml($fileContent); ?>
+</div>
+<?php elseif ($isSVG): ?>
+<!-- SVG rendering with security checks -->
+<?php 
+    // Check for security dangers in SVG
+    $hasJavaScript = svgContainsJavaScript($fileContent);
+    $hasXMLDanger = svgContainsXMLDanger($fileContent);
+    
+    if ($hasJavaScript) {
+        // JavaScript detected - dangerous
+?>
+<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc;">
+<p><font color="red"><strong>⚠️ Cannot show .svg file because it contains Javascript, it could be dangerous</strong></font></p>
+<p><small>SVG files can contain executable scripts. This file has been blocked for security reasons.</small></p>
+</div>
+<?php 
+    } elseif ($hasXMLDanger) {
+        // XML entity/loop danger detected
+?>
+<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc;">
+<p><font color="red"><strong>⚠️ Cannot show .svg file because it contains XML loop, it could be dangerous</strong></font></p>
+<p><small>SVG files can contain recursive XML entities that cause denial of service attacks. This file has been blocked for security reasons.</small></p>
+</div>
+<?php 
+    } else {
+        // SVG is safe, check browser support
+        $supportsSVG = browserSupportsSVG();
+        if ($supportsSVG) {
+            // Browser supports SVG, display directly
+?>
+<div style="border: 1px solid #ccc; padding: 10px; background-color: white;">
+<?php echo $fileContent; ?>
+</div>
+<p><small>SVG image rendered natively</small></p>
+<?php 
+        } else {
+            // Browser doesn't support SVG, try to convert to GIF
+            $gifData = svgToGif($fileContent);
+            if ($gifData) {
+                $base64Gif = base64_encode($gifData);
+?>
+<div style="border: 1px solid #ccc; padding: 10px; background-color: white;">
+<img src="data:image/gif;base64,<?php echo $base64Gif; ?>" alt="SVG Image (converted to GIF)" style="max-width: 100%; height: auto;">
+</div>
+<p><small>SVG image automatically converted to GIF for your browser</small></p>
+<?php 
+            } else {
+                // Conversion failed, show warning
+?>
+<div style="border: 2px solid #ffaa00; padding: 10px; background-color: #ffffcc;">
+<p><font color="#cc7700"><strong>⚠️ Cannot display SVG image</strong></font></p>
+<p><small>SVG support is not available in your browser. Consider using a modern browser like Firefox, Chrome, or Safari.</small></p>
+</div>
+<?php 
+            }
+        }
+    }
+?>
+<?php elseif ($mediaType === 'audio'): ?>
+<!-- Audio player -->
+<p><b>Audio File</b></p>
+<?php 
+    $base64Data = base64_encode($fileContent);
+    $ext = strtolower(pathinfo($repoPath, PATHINFO_EXTENSION));
+    $mimeTypes = [
+        'mp3' => 'audio/mpeg',
+        'wav' => 'audio/wav',
+        'ogg' => 'audio/ogg',
+        'flac' => 'audio/flac',
+        'm4a' => 'audio/mp4',
+        'aac' => 'audio/aac'
+    ];
+    $mimeType = $mimeTypes[$ext] ?? 'audio/mpeg';
+?>
+<audio controls style="width: 100%; max-width: 400px;">
+  <source src="data:<?php echo $mimeType; ?>;base64,<?php echo $base64Data; ?>" type="<?php echo $mimeType; ?>">
+  <p>Your browser does not support the audio element. <a href="?download=1">Download file</a> to play it with an external player.</p>
+</audio>
+<p><small>Modern browsers: use the audio player above with controls for play, pause, volume, and progress. HTML 3.2 browsers: <a href="?download=1">[Download]</a></small></p>
+<?php elseif ($mediaType === 'video'): ?>
+<!-- Video player -->
+<p><b>Video File</b></p>
+<?php 
+    $base64Data = base64_encode($fileContent);
+    $ext = strtolower(pathinfo($repoPath, PATHINFO_EXTENSION));
+    $mimeTypes = [
+        'mp4' => 'video/mp4',
+        'webm' => 'video/webm',
+        'ogg' => 'video/ogg',
+        'mkv' => 'video/x-matroska',
+        'avi' => 'video/x-msvideo',
+        'mov' => 'video/quicktime',
+        'flv' => 'video/x-flv',
+        'wmv' => 'video/x-ms-wmv'
+    ];
+    $mimeType = $mimeTypes[$ext] ?? 'video/mp4';
+?>
+<video controls style="width: 100%; max-width: 600px;">
+  <source src="data:<?php echo $mimeType; ?>;base64,<?php echo $base64Data; ?>" type="<?php echo $mimeType; ?>">
+  <p>Your browser does not support the video element. <a href="?download=1">Download file</a> to play it with an external player.</p>
+</video>
+<p><small>Modern browsers: use the video player above with controls for play, pause, volume, progress, and fullscreen. HTML 3.2 browsers: <a href="?download=1">[Download]</a></small></p>
+<?php else: ?>
+<!-- Plain text -->
 <pre><?php echo htmlspecialchars($fileContent); ?></pre>
-<?php if ($username): ?>
-<p><a href="?edit=1">[Edit]</a></p>
 <?php endif; ?>
 <?php else: ?>
 <p><strong>Binary file (<?php echo strlen($fileContent); ?> bytes)</strong></p>
 <p>Hash: <?php echo htmlspecialchars($fileHash); ?></p>
+<?php endif; ?>
 <?php endif; ?>
 <?php endif; ?>
 <hr>
@@ -1285,6 +1686,55 @@ if (isset($_GET['image'])) {
         // Display directory listing
         $organized = organizeFiles($files, $repoPath);
         $username = getUsername();
+        $upload_msg = '';
+        $upload_error = '';
+
+        // Handle file upload
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['upload_file']) && $username) {
+            $uploadFile = $_FILES['upload_file'];
+            
+            // Validate file
+            if ($uploadFile['error'] === UPLOAD_ERR_OK) {
+                $fileName = basename($uploadFile['name']);
+                // Sanitize filename - remove path traversal attempts
+                $fileName = str_replace(['../', '..\\', '/', '\\'], '_', $fileName);
+                
+                if (empty($fileName)) {
+                    $upload_error = 'Invalid filename';
+                } else {
+                    // Calculate full path for file in repo
+                    $fullPath = $repoPath ? $repoPath . '/' . $fileName : $fileName;
+                    
+                    // Read file content
+                    $fileContent = file_get_contents($uploadFile['tmp_name']);
+                    
+                    // Upload to database
+                    if (uploadFile($db, $fullPath, $fileContent)) {
+                        $upload_msg = "File '$fileName' uploaded successfully";
+                        // Refresh file listing
+                        $files = getLatestFiles($db, $repoPath);
+                        $organized = organizeFiles($files, $repoPath);
+                    } else {
+                        $upload_error = 'Failed to upload file to database';
+                    }
+                }
+            } else {
+                switch ($uploadFile['error']) {
+                    case UPLOAD_ERR_INI_SIZE:
+                    case UPLOAD_ERR_FORM_SIZE:
+                        $upload_error = 'File is too large';
+                        break;
+                    case UPLOAD_ERR_PARTIAL:
+                        $upload_error = 'File upload was interrupted';
+                        break;
+                    case UPLOAD_ERR_NO_FILE:
+                        $upload_error = 'No file was selected';
+                        break;
+                    default:
+                        $upload_error = 'Upload failed with error code: ' . $uploadFile['error'];
+                }
+            }
+        }
 
         ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
@@ -1327,6 +1777,22 @@ if (isset($_GET['image'])) {
 <tr><td colspan="3">No files in this directory</td></tr>
 <?php endif; ?>
 </table>
+<hr>
+<?php if (isset($upload_msg) && !empty($upload_msg)): ?>
+<p><font color="green"><strong><?php echo htmlspecialchars($upload_msg); ?></strong></font></p>
+<?php endif; ?>
+<?php if (isset($upload_error) && !empty($upload_error)): ?>
+<p><font color="red"><strong><?php echo htmlspecialchars($upload_error); ?></strong></font></p>
+<?php endif; ?>
+<?php if ($username): ?>
+<p><b>Upload File to This Directory</b></p>
+<form method="POST" enctype="multipart/form-data">
+<input type="file" name="upload_file" required>
+<input type="submit" value="Upload">
+</form>
+<?php else: ?>
+<p><small><a href="/sign-in">[Sign in]</a> to upload files</small></p>
+<?php endif; ?>
 <hr>
 <p><small>Omi Server</small></p>
 </body>

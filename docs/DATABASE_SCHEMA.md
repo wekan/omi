@@ -1,5 +1,8 @@
 # Database Schema Reference
 
+> **Documentation Index:** See [README.md](README.md) for documentation overview  
+> **For developers only** - See [FEATURES.md](FEATURES.md) for feature overview
+
 ## Overview
 
 Omi uses SQLite to store all repository data. Each .omi file is a SQLite database containing:
@@ -303,5 +306,17 @@ Add index on commits:
 ```sql
 CREATE INDEX idx_commits_date ON commits(datetime);
 ```
+
+---
+
+## See Also
+
+- **[README.md](README.md)** - Documentation index
+- **[FEATURES.md](FEATURES.md)** - Feature overview
+- **[CLI_BASH.md](CLI_BASH.md)** - CLI commands (Bash)
+- **[CLI_BAT.md](CLI_BAT.md)** - CLI commands (FreeDOS)
+- **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI commands (Amiga)
+- **[WEB.md](WEB.md)** - Web interface
+- **[SERVER.md](SERVER.md)** - Server setup
 
 This speeds up queries filtering by date range.

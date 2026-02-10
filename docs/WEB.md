@@ -1,5 +1,8 @@
 # Web Interface Guide
 
+> **Documentation Index:** See [README.md](README.md) for documentation overview  
+> **Quick Start:** See [README.md](README.md#installation-quick-reference)
+
 ## Overview
 
 The Omi web interface is a PHP application that provides:
@@ -247,5 +250,19 @@ The web interface is HTML 3.2 compatible for maximum browser support:
 - Credentials should use HTTPS in production
 - Settings.txt is protected from direct web access
 - phpusers.txt is protected from direct web access
+
+---
+
+## See Also
+
+- **[README.md](README.md)** - Documentation index
+- **[FEATURES.md](FEATURES.md)** - Web interface features
+- **[CLI_BASH.md](CLI_BASH.md)** - CLI alternative (Bash)
+- **[CLI_BAT.md](CLI_BAT.md)** - CLI alternative (FreeDOS)
+- **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI alternative (Amiga)
+- **[SERVER.md](SERVER.md)** - Web server configuration
+- **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Database design
+
+**Notes:**
 - Sessions are server-side (no client-side cookies)
 - Use strong passwords in production
