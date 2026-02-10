@@ -37,7 +37,7 @@ and makes it work faster at platforms where is limited CPU resources like Amiga.
 ### CLI (Bash)
 ```bash
 cd omi/cli
-./omi.sh init               # Initialize repository
+./omi.sh init              # Initialize repository
 ./omi.sh add --all         # Stage files
 ./omi.sh commit -m "msg"   # Create commit
 ./omi.sh push              # Upload to server
