@@ -1380,118 +1380,6 @@ ${form}
     let actionMessage = null;
     let actionMessageIsError = false;
 
-    if (req.method === 'POST' && username) {
-      const contentType = req.headers['content-type'] || '';
-      let fields = {};
-      let files = {};
-      if (contentType.includes('multipart/form-data')) {
-        const form = await parseMultipartForm(req);
-        fields = form.fields || {};
-        files = form.files || {};
-      } else {
-        fields = await parseFormData(req);
-      }
-
-      const action = fields.action || '';
-      if (action === 'delete_file') {
-        const targetName = sanitizePathSegment(fields.target || '');
-        if (!targetName) {
-          actionMessage = 'File name is required';
-          actionMessageIsError = true;
-        } else {
-          const targetPath = repoPath ? `${repoPath}/${targetName}` : targetName;
-          try {
-            const latestFiles = await getLatestFiles(dbPath, repoPath, sqliteCmd);
-            const targetEntry = latestFiles.find(file => file.filename === targetPath && !/(^|\/)\.omidir$/.test(file.filename));
-            if (!targetEntry) {
-              actionMessage = 'File not found';
-              actionMessageIsError = true;
-            } else {
-              await deleteFileFromRepo(dbPath, targetEntry.filename, username, `Deleted: ${path.basename(targetEntry.filename)}`, sqliteCmd);
-              actionMessage = `File '${targetName}' deleted`;
-            }
-          } catch {
-            actionMessage = 'Failed to delete file';
-            actionMessageIsError = true;
-          }
-        }
-      } else if (action === 'rename_file') {
-        const targetName = sanitizePathSegment(fields.target || '');
-        const newName = sanitizePathSegment(fields.new_name || '');
-        if (!targetName || !newName) {
-          actionMessage = 'File name and new name are required';
-          actionMessageIsError = true;
-        } else {
-          const targetPath = repoPath ? `${repoPath}/${targetName}` : targetName;
-          const newPath = repoPath ? `${repoPath}/${newName}` : newName;
-          try {
-            const latestFiles = await getLatestFiles(dbPath, repoPath, sqliteCmd);
-            const targetEntry = latestFiles.find(file => file.filename === targetPath && !/(^|\/)\.omidir$/.test(file.filename));
-            if (!targetEntry) {
-              actionMessage = 'File not found';
-              actionMessageIsError = true;
-            } else {
-              const fileContent = await getFileContent(dbPath, targetEntry.hash, sqliteCmd);
-              await commitFileToRepo(dbPath, newPath, fileContent || Buffer.alloc(0), username, `Renamed: ${path.basename(targetEntry.filename)} -> ${newName}`, sqliteCmd);
-              await deleteFileFromRepo(dbPath, targetEntry.filename, username, `Deleted: ${path.basename(targetEntry.filename)}`, sqliteCmd);
-              actionMessage = `File '${targetName}' renamed to '${newName}'`;
-            }
-          } catch {
-            actionMessage = 'Failed to rename file';
-            actionMessageIsError = true;
-          }
-        }
-      } else if (action === 'create_dir') {
-        const dirName = sanitizePathSegment(fields.dir_name || '');
-        if (!dirName) {
-          actionMessage = 'Directory name is required';
-          actionMessageIsError = true;
-        } else {
-          const dirPath = repoPath ? `${repoPath}/${dirName}` : dirName;
-          const markerPath = `${dirPath}/.omidir`;
-          try {
-            await commitFileToRepo(dbPath, markerPath, '', username, `Create directory: ${dirName}`, sqliteCmd);
-            actionMessage = `Directory '${dirName}' created`;
-          } catch {
-            actionMessage = 'Failed to create directory';
-            actionMessageIsError = true;
-          }
-        }
-      } else if (action === 'create_file') {
-        const fileName = sanitizePathSegment(fields.file_name || '');
-        const content = fields.file_content || '';
-        if (!fileName) {
-          actionMessage = 'File name is required';
-          actionMessageIsError = true;
-        } else {
-          const fullPath = repoPath ? `${repoPath}/${fileName}` : fileName;
-          try {
-            await commitFileToRepo(dbPath, fullPath, content, username, `Created file: ${fileName}`, sqliteCmd);
-            actionMessage = `File '${fileName}' created`;
-          } catch {
-            actionMessage = 'Failed to create file';
-            actionMessageIsError = true;
-          }
-        }
-      } else if (files.upload_file) {
-        const uploadFile = files.upload_file;
-        const fileName = sanitizePathSegment(uploadFile.filename || '');
-        if (!fileName || !uploadFile.data) {
-          actionMessage = 'No file selected';
-          actionMessageIsError = true;
-        } else {
-          const fullPath = repoPath ? `${repoPath}/${fileName}` : fileName;
-          try {
-            await commitFileToRepo(dbPath, fullPath, uploadFile.data, username, `Uploaded: ${fileName}`, sqliteCmd);
-            actionMessage = `File '${fileName}' uploaded successfully`;
-          } catch {
-            actionMessage = 'Failed to upload file';
-            actionMessageIsError = true;
-          }
-        }
-      }
-    }
-
     let files = [];
     try {
       files = await getLatestFiles(dbPath, repoPath, sqliteCmd);
@@ -1509,63 +1397,173 @@ ${form}
 </html>`, 500);
       return;
     }
-    const isFile = files.length === 1 && files[0].filename === repoPath && !/(^|\/)\.omidir$/.test(files[0].filename);
+    let isFile = files.length === 1 && files[0].filename === repoPath && !/(^|\/)\.omidir$/.test(files[0].filename);
 
-    if (isFile && req.method === 'POST' && username) {
-      const postData = await parseFormData(req);
-      const action = postData.action || '';
-      const fileEntry = files[0];
-
-      if (action === 'delete_file') {
-        try {
-          await deleteFileFromRepo(dbPath, fileEntry.filename, username, `Deleted: ${path.basename(fileEntry.filename)}`, sqliteCmd);
-          const parentPath = repoPath.includes('/') ? repoPath.slice(0, repoPath.lastIndexOf('/')) : '';
-          const redirectPath = parentPath ? `/${repoRoot}/${parentPath}` : `/${repoRoot}`;
-          res.writeHead(302, { Location: redirectPath });
-          res.end();
-          return;
-        } catch {
-          actionMessage = 'Failed to delete file';
-          actionMessageIsError = true;
-        }
+    if (req.method === 'POST' && username) {
+      const contentType = req.headers['content-type'] || '';
+      let fields = {};
+      let requestFiles = {};
+      if (contentType.includes('multipart/form-data')) {
+        const form = await parseMultipartForm(req);
+        fields = form.fields || {};
+        requestFiles = form.files || {};
+      } else {
+        fields = await parseFormData(req);
       }
 
-      if (action === 'rename_file') {
-        const newName = sanitizePathSegment(postData.new_name || '');
-        if (!newName) {
-          actionMessage = 'New file name is required';
-          actionMessageIsError = true;
-        } else {
-          const parentPath = repoPath.includes('/') ? repoPath.slice(0, repoPath.lastIndexOf('/')) : '';
-          const newPath = parentPath ? `${parentPath}/${newName}` : newName;
+      const action = fields.action || '';
+      
+      // File-specific operations
+      if (isFile) {
+        const fileEntry = files[0];
+        
+        if (action === 'delete_file') {
           try {
-            const fileContent = await getFileContent(dbPath, fileEntry.hash, sqliteCmd);
-            await commitFileToRepo(dbPath, newPath, fileContent || Buffer.alloc(0), username, `Renamed: ${path.basename(fileEntry.filename)} -> ${newName}`, sqliteCmd);
             await deleteFileFromRepo(dbPath, fileEntry.filename, username, `Deleted: ${path.basename(fileEntry.filename)}`, sqliteCmd);
-            const redirectPath = `/${repoRoot}/${newPath}`;
+            const parentPath = repoPath.includes('/') ? repoPath.slice(0, repoPath.lastIndexOf('/')) : '';
+            const redirectPath = parentPath ? `/${repoRoot}/${parentPath}` : `/${repoRoot}`;
             res.writeHead(302, { Location: redirectPath });
             res.end();
             return;
           } catch {
-            actionMessage = 'Failed to rename file';
+            actionMessage = 'Failed to delete file';
             actionMessageIsError = true;
+          }
+        } else if (action === 'rename_file') {
+          const newName = sanitizePathSegment(fields.new_name || '');
+          if (!newName) {
+            actionMessage = 'New file name is required';
+            actionMessageIsError = true;
+          } else {
+            const parentPath = repoPath.includes('/') ? repoPath.slice(0, repoPath.lastIndexOf('/')) : '';
+            const newPath = parentPath ? `${parentPath}/${newName}` : newName;
+            try {
+              const fileContent = await getFileContent(dbPath, fileEntry.hash, sqliteCmd);
+              await commitFileToRepo(dbPath, newPath, fileContent || Buffer.alloc(0), username, `Renamed: ${path.basename(fileEntry.filename)} -> ${newName}`, sqliteCmd);
+              await deleteFileFromRepo(dbPath, fileEntry.filename, username, `Deleted: ${path.basename(fileEntry.filename)}`, sqliteCmd);
+              const redirectPath = `/${repoRoot}/${newPath}`;
+              res.writeHead(302, { Location: redirectPath });
+              res.end();
+              return;
+            } catch {
+              actionMessage = 'Failed to rename file';
+              actionMessageIsError = true;
+            }
+          }
+        } else if (action === 'save_file') {
+          const newContent = fields.file_content || '';
+          try {
+            await commitFileToRepo(dbPath, fileEntry.filename, newContent, username, `Updated: ${path.basename(fileEntry.filename)}`, sqliteCmd);
+            actionMessage = 'File saved successfully';
+            actionMessageIsError = false;
+          } catch {
+            actionMessage = 'Failed to save file';
+            actionMessageIsError = true;
+          }
+          
+          files = await getLatestFiles(dbPath, repoPath, sqliteCmd);
+          isFile = files.length === 1 && files[0].filename === repoPath && !/(^|\/)\.omidir$/.test(files[0].filename);
+        }
+      } else {
+        // Directory-specific operations
+        if (action === 'delete_file') {
+          const targetName = sanitizePathSegment(fields.target || '');
+          if (!targetName) {
+            actionMessage = 'File name is required';
+            actionMessageIsError = true;
+          } else {
+            const targetPath = repoPath ? `${repoPath}/${targetName}` : targetName;
+            try {
+              const latestFiles = await getLatestFiles(dbPath, repoPath, sqliteCmd);
+              const targetEntry = latestFiles.find(file => file.filename === targetPath && !/(^|\/)\.omidir$/.test(file.filename));
+              if (!targetEntry) {
+                actionMessage = 'File not found';
+                actionMessageIsError = true;
+              } else {
+                await deleteFileFromRepo(dbPath, targetEntry.filename, username, `Deleted: ${path.basename(targetEntry.filename)}`, sqliteCmd);
+                actionMessage = `File '${targetName}' deleted`;
+              }
+            } catch {
+              actionMessage = 'Failed to delete file';
+              actionMessageIsError = true;
+            }
+          }
+        } else if (action === 'rename_file') {
+          const targetName = sanitizePathSegment(fields.target || '');
+          const newName = sanitizePathSegment(fields.new_name || '');
+          if (!targetName || !newName) {
+            actionMessage = 'File name and new name are required';
+            actionMessageIsError = true;
+          } else {
+            const targetPath = repoPath ? `${repoPath}/${targetName}` : targetName;
+            const newPath = repoPath ? `${repoPath}/${newName}` : newName;
+            try {
+              const latestFiles = await getLatestFiles(dbPath, repoPath, sqliteCmd);
+              const targetEntry = latestFiles.find(file => file.filename === targetPath && !/(^|\/)\.omidir$/.test(file.filename));
+              if (!targetEntry) {
+                actionMessage = 'File not found';
+                actionMessageIsError = true;
+              } else {
+                const fileContent = await getFileContent(dbPath, targetEntry.hash, sqliteCmd);
+                await commitFileToRepo(dbPath, newPath, fileContent || Buffer.alloc(0), username, `Renamed: ${path.basename(targetEntry.filename)} -> ${newName}`, sqliteCmd);
+                await deleteFileFromRepo(dbPath, targetEntry.filename, username, `Deleted: ${path.basename(targetEntry.filename)}`, sqliteCmd);
+                actionMessage = `File '${targetName}' renamed to '${newName}'`;
+              }
+            } catch {
+              actionMessage = 'Failed to rename file';
+              actionMessageIsError = true;
+            }
+          }
+        } else if (action === 'create_dir') {
+          const dirName = sanitizePathSegment(fields.dir_name || '');
+          if (!dirName) {
+            actionMessage = 'Directory name is required';
+            actionMessageIsError = true;
+          } else {
+            const dirPath = repoPath ? `${repoPath}/${dirName}` : dirName;
+            const markerPath = `${dirPath}/.omidir`;
+            try {
+              await commitFileToRepo(dbPath, markerPath, '', username, `Create directory: ${dirName}`, sqliteCmd);
+              actionMessage = `Directory '${dirName}' created`;
+            } catch {
+              actionMessage = 'Failed to create directory';
+              actionMessageIsError = true;
+            }
+          }
+        } else if (action === 'create_file') {
+          const fileName = sanitizePathSegment(fields.file_name || '');
+          const content = fields.file_content || '';
+          if (!fileName) {
+            actionMessage = 'File name is required';
+            actionMessageIsError = true;
+          } else {
+            const fullPath = repoPath ? `${repoPath}/${fileName}` : fileName;
+            try {
+              await commitFileToRepo(dbPath, fullPath, content, username, `Created file: ${fileName}`, sqliteCmd);
+              actionMessage = `File '${fileName}' created`;
+            } catch {
+              actionMessage = 'Failed to create file';
+              actionMessageIsError = true;
+            }
+          }
+        } else if (requestFiles.upload_file) {
+          const uploadFile = requestFiles.upload_file;
+          const fileName = sanitizePathSegment(uploadFile.filename || '');
+          if (!fileName || !uploadFile.data) {
+            actionMessage = 'No file selected';
+            actionMessageIsError = true;
+          } else {
+            const fullPath = repoPath ? `${repoPath}/${fileName}` : fileName;
+            try {
+              await commitFileToRepo(dbPath, fullPath, uploadFile.data, username, `Uploaded: ${fileName}`, sqliteCmd);
+              actionMessage = `File '${fileName}' uploaded successfully`;
+            } catch {
+              actionMessage = 'Failed to upload file';
+              actionMessageIsError = true;
+            }
           }
         }
       }
-
-      if (action === 'save_file') {
-        const newContent = postData.file_content || '';
-        try {
-          await commitFileToRepo(dbPath, fileEntry.filename, newContent, username, `Updated: ${path.basename(fileEntry.filename)}`, sqliteCmd);
-          actionMessage = 'File saved successfully';
-          actionMessageIsError = false;
-        } catch {
-          actionMessage = 'Failed to save file';
-          actionMessageIsError = true;
-        }
-      }
-
-      files = await getLatestFiles(dbPath, repoPath, sqliteCmd);
     }
 
     if (isFile) {
