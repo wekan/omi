@@ -2403,19 +2403,10 @@ begin
       else if IsText then
       begin
         IsMarkdown := IsMarkdownFile(RepoPath);
-        IsImage := IsImageFile(RepoPath);
         if IsMarkdown then
         begin
           MarkdownHtml := MarkdownToHtml(FileContent);
           Html := Html + '<div style="font-family: Arial, sans-serif; line-height: 1.6;">' + MarkdownHtml + '</div>';
-        end
-        else if IsImage then
-        begin
-          Base64Data := Base64Encode(FileContent);
-          MimeType := GetMimeType(RepoPath);
-          Html := Html + '<div style="border:1px solid #ccc; padding:10px; background-color:white; display:inline-block;">' +
-            '<img src="data:' + MimeType + ';base64,' + Base64Data + '" alt="' + HtmlEncode(ExtractFileName(RepoPath)) + '" style="max-width:100%; height:auto; max-height:500px;">' +
-            '</div>';
         end
         else
           Html := Html + '<pre>' + HtmlEncode(FileContent) + '</pre>';
@@ -2594,11 +2585,28 @@ begin
         RowActions := '-';
         if Username <> '' then
         begin
-          RowActions := '<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">' +
-            '<div>' +
-            '<form method="GET" action="' + EntryPath + '" style="display:inline">' +
+          // Only show edit button for text files (including markdown)
+        IsTextFile := not IsImageFile(DisplayName);
+        if not IsTextFile then
+        begin
+          // Check file extension for common text file types
+          LowerName := LowerCase(DisplayName);
+          IsTextFile := (Pos('.md', LowerName) > 0) or (Pos('.txt', LowerName) > 0) or 
+                        (Pos('.json', LowerName) > 0) or (Pos('.xml', LowerName) > 0) or
+                        (Pos('.html', LowerName) > 0) or (Pos('.css', LowerName) > 0) or
+                        (Pos('.js', LowerName) > 0) or (Pos('.py', LowerName) > 0) or
+                        (Pos('.php', LowerName) > 0) or (Pos('.sql', LowerName) > 0);
+        end;
+        EditButton := '';
+        if IsTextFile then
+        begin
+          EditButton := '<form method="GET" action="' + EntryPath + '" style="display:inline">' +
             '<input type="hidden" name="edit" value="1">' +
-            '<input type="submit" value="' + T('edit', Translations) + '"></form> ' +
+            '<input type="submit" value="' + T('edit', Translations) + '"></form>';
+        end;
+        RowActions := '<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">' +
+            '<div>' +
+            EditButton +
             '<form method="POST" style="display:inline">' +
             '<input type="hidden" name="action" value="rename_file">' +
             '<input type="hidden" name="target" value="' + HtmlEncode(DisplayName) + '">' +
@@ -2623,6 +2631,22 @@ begin
       if DirHeader = '' then
         DirHeader := T('root', Translations);
 
+      // Add parent directory link if not in root
+      ParentDirRow := '';
+      if RepoPath <> '' then
+      begin
+        ParentPath := ExtractFilePath(RepoPath);
+        if ParentPath <> RepoPath then
+        begin
+          if (Length(ParentPath) > 0) and (ParentPath[Length(ParentPath)] = '/') then
+            ParentPath := Copy(ParentPath, 1, Length(ParentPath) - 1);
+          ParentUrl := RepoToRoot(RepoName);
+          if ParentPath <> '' then
+            ParentUrl := ParentUrl + '/' + ParentPath;
+          ParentDirRow := '<tr><td><a href="' + ParentUrl + '">' + T('directory', Translations) + ' ..</a></td><td>-</td><td>-</td><td>-</td></tr>';
+        end;
+      end;
+
       Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
         '<html><head><title>' + HtmlEncode(RepoPath) + ' - ' + HtmlEncode(RepoName) + '</title></head>' +
         '<body bgcolor="#f0f0f0">' +
@@ -2635,6 +2659,7 @@ begin
         '<hr>' +
         '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
         '<tr bgcolor="#333333"><th><font color="white">' + T('name', Translations) + '</font></th><th><font color="white">' + T('size', Translations) + '</font></th><th><font color="white">' + T('last-modified', Translations) + '</font></th><th><font color="white">' + T('actions', Translations) + '</font></th></tr>' +
+        ParentDirRow +
         TableRows +
         '</table>' +
         '<hr>' +
