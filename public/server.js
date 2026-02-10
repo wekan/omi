@@ -791,11 +791,15 @@ async function parseFormData(req) {
 // Parse multipart form data
 async function parseMultipartForm(req) {
   return new Promise((resolve) => {
-    let data = '';
+    const chunks = [];
     req.on('data', chunk => {
-      data += chunk.toString();
+      chunks.push(chunk);
     });
     req.on('end', () => {
+      // Combine chunks into single buffer
+      const data = Buffer.concat(chunks);
+      const dataStr = data.toString('binary');
+      
       // Simple multipart parser (limited support)
       const result = { fields: {}, files: {} };
       const boundary = req.headers['content-type']?.split('boundary=')[1];
@@ -805,7 +809,8 @@ async function parseMultipartForm(req) {
         return;
       }
       
-      const parts = data.split(`--${boundary}`);
+      const boundaryPattern = `--${boundary}`;
+      const parts = dataStr.split(boundaryPattern);
       
       for (const part of parts) {
         if (!part.includes('Content-Disposition')) continue;
@@ -818,15 +823,24 @@ async function parseMultipartForm(req) {
         
         if (filenameMatcher) {
           const filename = filenameMatcher[1];
-          const fileDataMatch = part.match(/\r\n\r\n([\s\S]*?)\r\n--/);
-          if (fileDataMatch) {
-            result.files[name] = {
-              filename,
-              data: Buffer.from(fileDataMatch[1], 'binary')
-            };
+          // Find the start of file data (after headers)
+          const headerEndIndex = part.indexOf('\r\n\r\n');
+          if (headerEndIndex === -1) continue;
+          
+          const fileDataStart = headerEndIndex + 4; // Skip \r\n\r\n
+          // Find the end (before final \r\n--)
+          let fileDataEnd = part.length;
+          if (part.endsWith('\r\n')) {
+            fileDataEnd -= 2;
           }
+          
+          const fileDataStr = part.substring(fileDataStart, fileDataEnd);
+          result.files[name] = {
+            filename,
+            data: Buffer.from(fileDataStr, 'binary')
+          };
         } else {
-          const fieldDataMatch = part.match(/\r\n\r\n([\s\S]*?)\r\n--/);
+          const fieldDataMatch = part.match(/\r\n\r\n([\s\S]*?)(?:\r\n)?$/);
           if (fieldDataMatch) {
             result.fields[name] = fieldDataMatch[1].trim();
           }
