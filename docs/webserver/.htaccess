@@ -1,0 +1,39 @@
+# Apache .htaccess for Omi Server
+# Enables pretty URLs
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+    
+    # Don't rewrite for actual files and directories
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    
+    # Don't allow direct access to repos directory
+    RewriteRule ^repos/ - [F,L]
+    
+    # Don't rewrite for .omi files in download mode
+    RewriteCond %{QUERY_STRING} download=
+    RewriteRule .* - [L]
+    
+    # Rewrite everything else to index.php
+    RewriteRule ^(.*)$ index.php [QSA,L]
+</IfModule>
+
+# Security settings
+<Files "settings.txt">
+    Order allow,deny
+    Deny from all
+</Files>
+
+<FilesMatch "^\.">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# PHP settings (optional)
+<IfModule mod_php.c>
+    php_value upload_max_filesize 100M
+    php_value post_max_size 100M
+    php_value max_execution_time 300
+</IfModule>

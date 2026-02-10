@@ -1,39 +1,113 @@
-## Version Control that uses AmigaShell/FreeDOS .bat/Bash scripts
+## Omi - Optimized Micro Index Version Control
 
-- Omi = Omni (all) or "Optimized Micro Index"
-- Stores files to SQLite BLOBs without compression
-- Simpler than Fossil SCM
+**Omi** is a lightweight, cross-platform version control system that stores complete repository history in a single SQLite database file (.omi).
 
-## Uses commands like Git
+### Platforms Supported
+- **AmigaShell** (Amiga systems)
+- **FreeDOS** (.bat scripts)  
+- **Linux/Unix** (Bash)
+- **Web Browser** (PHP interface - HTML 3.2 compatible)
 
-Download `wekan.omi` SQLite database that includes all contents of repo:
+### Features
+✅ Git-like commands (`init`, `clone`, `add`, `commit`, `push`, `pull`)
+✅ File deduplication via SHA256 hashing
+✅ SQLite-based storage
+✅ Cross-platform CLI and web UI
+✅ Web-based file editing and image viewing
+✅ User account management
+✅ HTML 3.2 compatible (works with IBrowse, Dillo, Elinks, w3m)
+
+## Quick Start
+
+### CLI (Bash)
+```bash
+./omi.sh init               # Initialize repository
+./omi.sh add --all         # Stage files
+./omi.sh commit -m "msg"   # Create commit
+./omi.sh push              # Upload to server
+./omi.sh pull              # Download from server
+./omi.sh list              # Show available repos
 ```
-omi clone https://omi.wekan.fi/wekan
 
-cd wekan
+### Web UI
+- **Home**: `http://omi.wekan.fi/`
+- **Sign In**: `/sign-in`
+- **Create Account**: `/sign-up`
+- **Browse Repo**: `/reponame`
+- **Manage Users**: `/people` (login required)
+- **Settings**: `/settings` (login required)
 
-omi add --all
+## Documentation
 
-omi commit -m "Updates"
+Complete documentation is available in the `docs/` directory:
 
-omi push
+- **[QUICK_START.md](docs/QUICK_START.md)** - Getting started guide
+- **[COMPLETE_GUIDE.md](docs/COMPLETE_GUIDE.md)** - Full feature documentation
+- **[WEB_INTERFACE.md](docs/WEB_INTERFACE.md)** - Web UI features
+- **[CLI_GUIDE.md](docs/CLI_GUIDE.md)** - Command-line interface reference
+- **[DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md)** - Database structure
+- **[webserver/](docs/webserver/)** - Server configuration files
+  - `Caddyfile` - Caddy server config
+  - `apache.conf` - Apache VirtualHost config
+  - `nginx.conf` - Nginx server block config
 
-cd ../repo2
+## Configuration
 
-omi pull
+At settings.txt and phpusers.txt .
+
+## Directory Structure
+
+```
+/wekan/
+├── omi              # AmigaShell script
+├── omi.bat          # FreeDOS batch script
+├── omi.sh           # Bash script
+├── public/          # Web interface (PHP)
+├── docs/            # Documentation
+│   ├── webserver/   # Server configurations
+│   ├── COMPLETE_GUIDE.md
+│   ├── SERVER_SETUP.md
+│   ├── QUICK_START.md
+│   └── ...
+├── repos/           # Repository storage (.omi files)
+├── settings.txt     # Configuration
+├── phpusers.txt     # User accounts
+├── .htaccess        # Apache rewrite rules
+└── README.md        # This file
 ```
 
-## Related files
+## Setup Server
 
-- WeDOS, kanban made with FreeDOS .bat and Bash scripts: https://github.com/wekan/wedos
-- SQLite for Amiga: https://aminet.net/search?query=sqlite&ord=DESC&sort=date
-- https://aminet.net/package/util/cli/sha256
-- Fossil SCM: https://github.com/howinfo/howinfo/wiki/Fossil
-- FreeDOS: https://github.com/howinfo/howinfo/wiki/FreeDOS
-- Amiga: https://github.com/howinfo/howinfo/wiki/Amiga
+See [docs/webserver/](docs/webserver/) for configuration with:
+- **Caddy** (recommended, simplest)
+- **Apache** (with .htaccess or VirtualHost)
+- **Nginx** (server block)
 
-## Roadmap
+For detailed setup instructions, see [docs/SERVER_SETUP.md](docs/SERVER_SETUP.md).
 
-- [ ] Create hash of file: `SELECT hex(sha256(data)) FROM files`
-- [ ] Add file to database as BLOB and hash as TEXT
-- [ ] ...
+## How It Works
+
+1. **Add files** - Files are hashed with SHA256
+2. **Commit** - Creates database records with deduplication
+3. **Push/Pull** - Synchronize with server via CURL
+4. **Web UI** - Browse, edit, and manage files
+5. **Deduplication** - Identical files stored only once
+
+## Browser Compatibility
+
+| Browser    | Platform | Support        |
+|------------|----------|-----------------|
+| IBrowse    | Amiga    | Full (HTML 3.2) |
+| Dillo      | FreeDOS  | Full (HTML 3.2) |
+| Elinks     | Linux    | Full (text)     |
+| w3m        | Linux    | Full (text)     |
+| Modern browsers | All  | Full (HTML 5)   |
+
+## Related Projects
+
+- [Fossil SCM](https://fossil-scm.org/) - Original DVCS with SQLite
+- [WeDOS](https://github.com/wekan/wedos) - Kanban board (FreeDOS + Bash)
+
+## License
+
+Omi is a lightweight alternative to Fossil SCM for cross-platform version control.

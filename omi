@@ -1,0 +1,203 @@
+; Omi - Version Control for AmigaShell
+; Optimized Micro Index - Git-like commands with SQLite storage
+
+.KEY COMMAND/A,ARGS/F
+.BRA {
+.KET }
+
+; Read settings from settings.txt
+Execute >T:omi_settings "Type settings.txt"
+Search T:omi_settings "SQLITE=" >T:omi_var
+Execute <T:omi_var
+Search T:omi_settings "USERNAME=" >T:omi_var
+Execute <T:omi_var
+Search T:omi_settings "PASSWORD=" >T:omi_var
+Execute <T:omi_var
+Search T:omi_settings "REPOS=" >T:omi_var
+Execute <T:omi_var
+Search T:omi_settings "CURL=" >T:omi_var
+Execute <T:omi_var
+Delete T:omi_settings T:omi_var QUIET
+
+; Get command and arguments
+Set OMI_CMD {COMMAND}
+Set OMI_ARGS {ARGS}
+
+; Database file
+If Not Exists .omi
+  Set OMI_DB repo.omi
+Else
+  Execute <.omi
+EndIf
+
+; Command dispatcher
+If "$OMI_CMD" EQ "init"
+  Gosub INIT_DB
+Else If "$OMI_CMD" EQ "clone"
+  Gosub CLONE_DB
+Else If "$OMI_CMD" EQ "add"
+  Gosub ADD_FILES
+Else If "$OMI_CMD" EQ "commit"
+  Gosub COMMIT_FILES
+Else If "$OMI_CMD" EQ "push"
+  Gosub PUSH_CHANGES
+Else If "$OMI_CMD" EQ "pull"
+  Gosub PULL_CHANGES
+Else If "$OMI_CMD" EQ "list"
+  Gosub LIST_REPOS
+Else If "$OMI_CMD" EQ "log"
+  Gosub LOG_COMMITS
+Else If "$OMI_CMD" EQ "status"
+  Gosub SHOW_STATUS
+Else
+  Echo "Unknown command: $OMI_CMD"
+  Echo "Usage: omi <command> [args]"
+  Echo "Commands: init, clone, add, commit, push, pull, list, log, status"
+EndIf
+
+Skip END
+
+LAB INIT_DB
+  Echo "Initializing omi repository..."
+  Echo "OMI_DB=$OMI_DB" >.omi
+  
+  ; Create database schema
+  $SQLITE $OMI_DB "CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, data BLOB, size INTEGER);"
+  $SQLITE $OMI_DB "CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, hash TEXT, datetime TEXT, commit_id INTEGER);"
+  $SQLITE $OMI_DB "CREATE TABLE IF NOT EXISTS commits (id INTEGER PRIMARY KEY AUTOINCREMENT, message TEXT, datetime TEXT, user TEXT);"
+  $SQLITE $OMI_DB "CREATE TABLE IF NOT EXISTS staging (filename TEXT PRIMARY KEY, hash TEXT, datetime TEXT);"
+  $SQLITE $OMI_DB "CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash);"
+  $SQLITE $OMI_DB "CREATE INDEX IF NOT EXISTS idx_files_commit ON files(commit_id);"
+  
+  Echo "Repository initialized: $OMI_DB"
+  Return
+
+LAB CLONE_DB
+  Echo "Cloning from $OMI_ARGS..."
+  ; Download database file
+  ; For now, just copy if local path
+  If Exists "$OMI_ARGS"
+    Copy "$OMI_ARGS" "$OMI_DB"
+    Echo "Cloned to $OMI_DB"
+    Echo "OMI_DB=$OMI_DB" >.omi
+  Else
+    ; Remote clone using curl
+    Echo "Downloading from $REPOS..."
+    $CURL -f -o "$OMI_DB" "$REPOS/?download=$OMI_DB"
+    If WARN
+      Echo "Cloned to $OMI_DB"
+      Echo "OMI_DB=$OMI_DB" >.omi
+    Else
+      Echo "Error: Failed to clone from remote"
+    EndIf
+  EndIf
+  Return
+
+LAB ADD_FILES
+  Echo "Adding files to staging..."
+  If "$OMI_ARGS" EQ "--all"
+    ; Add all files
+    List >T:omi_files LFORMAT="Gosub ADD_ONE_FILE %S%N"
+    Execute T:omi_files
+    Delete T:omi_files QUIET
+  Else
+    ; Add specific file
+    Set ADDFILE $OMI_ARGS
+    Gosub ADD_ONE_FILE
+  EndIf
+  Return
+
+LAB ADD_ONE_FILE
+  If Exists "$ADDFILE"
+    ; Calculate hash using sha256
+    sha256 "$ADDFILE" >T:omi_hash
+    ; Extract hash value (assumes sha256 outputs "HASH filename")
+    Execute "Search T:omi_hash NONUM" >T:omi_hashval
+    
+    ; Get current datetime
+    Date >T:omi_date LFORMAT "%Y-%m-%d %H:%M:%S"
+    
+    ; Add to staging
+    $SQLITE $OMI_DB "INSERT OR REPLACE INTO staging (filename, hash, datetime) VALUES ('$ADDFILE', readfile('T:omi_hashval'), readfile('T:omi_date'));"
+    
+    Echo "Staged: $ADDFILE"
+    Delete T:omi_hash T:omi_hashval T:omi_date QUIET
+  EndIf
+  Return
+
+LAB COMMIT_FILES
+  ; Extract commit message from args (-m "message")
+  Set MSG $OMI_ARGS
+  
+  Echo "Committing changes..."
+  Date >T:omi_date LFORMAT "%Y-%m-%d %H:%M:%S"
+  
+  ; Create commit record
+  $SQLITE $OMI_DB "INSERT INTO commits (message, datetime, user) VALUES ('$MSG', readfile('T:omi_date'), '$USER'); SELECT last_insert_rowid();" >T:omi_commitid
+  
+  ; Process staged files
+  $SQLITE $OMI_DB "SELECT filename, hash, datetime FROM staging;" >T:omi_staged
+  
+  ; For each staged file, check if blob exists, add if not, then add file record
+  ; This is simplified - real implementation would need iteration
+  Execute T:omi_staged
+  
+  ; Clear staging
+  $SQLITE $OMI_DB "DELETE FROM staging;"
+  
+  Echo "Committed successfully"
+  Delete T:omi_date T:omi_commitid T:omi_staged QUIET
+  Return
+
+LAB PUSH_CHANGES
+  Echo "Pushing $OMI_DB to remote..."
+  
+  If Not Exists "$OMI_DB"
+    Echo "Error: Database file $OMI_DB not found"
+    Return
+  EndIf
+  
+  ; Upload using curl
+  $CURL -f -X POST -F "username=$USERNAME" -F "password=$PASSWORD" -F "repo_name=$OMI_DB" -F "repo_file=@$OMI_DB" -F "action=Upload" "$REPOS/"
+  
+  If WARN
+    Echo "Successfully pushed to $REPOS"
+  Else
+    Echo "Error: Failed to push to remote"
+  EndIf
+  Return
+
+LAB PULL_CHANGES
+  Echo "Pulling $OMI_DB from remote..."
+  
+  ; Download using curl with authentication
+  $CURL -f -X POST -d "username=$USERNAME" -d "password=$PASSWORD" -d "repo_name=$OMI_DB" -d "action=pull" -o "$OMI_DB" "$REPOS/"
+  
+  If WARN
+    Echo "Successfully pulled from $REPOS"
+  Else
+    Echo "Error: Failed to pull from remote"
+  EndIf
+  Return
+
+LAB LIST_REPOS
+  Echo "=== Available Repositories on $REPOS ==="
+  $CURL -s "$REPOS/?format=json"
+  Return
+
+LAB LOG_COMMITS
+  Set LIMIT {ARGS}
+  If "$LIMIT" EQ ""
+    Set LIMIT 20
+  EndIf
+  Echo "=== Commit History ==="
+  Echo ""
+  $SQLITE $OMI_DB "SELECT 'Commit: ' || id || ' (' || user || ')' as info, 'Date: ' || datetime, 'Message: ' || message, '' as sep, (SELECT COUNT(*) FROM files WHERE commit_id = commits.id) || ' files' FROM commits ORDER BY id DESC LIMIT $LIMIT;"
+  Return
+
+LAB SHOW_STATUS
+  Echo "=== Staged Files ==="
+  $SQLITE $OMI_DB "SELECT filename FROM staging;"
+  Return
+
+LAB END

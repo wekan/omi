@@ -1,0 +1,1044 @@
+<?php
+/**
+ * Omi Server - Version Control Server
+ * Manages SQLite repository files with authentication
+ */
+
+session_start();
+
+// Configuration
+define('REPOS_DIR', __DIR__ . '/../repos');
+define('SETTINGS_FILE', __DIR__ . '/../settings.txt');
+define('USERS_FILE', __DIR__ . '/../phpusers.txt');
+
+// Ensure repos directory exists
+if (!is_dir(REPOS_DIR)) {
+    mkdir(REPOS_DIR, 0755, true);
+}
+
+// Load users from phpusers.txt
+function loadUsers() {
+    $users = [];
+    if (file_exists(USERS_FILE)) {
+        $lines = file(USERS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $line) {
+            if (strpos($line, ':') !== false) {
+                list($username, $password) = explode(':', $line, 2);
+                $users[trim($username)] = trim($password);
+            }
+        }
+    }
+    return $users;
+}
+
+// Simple authentication check
+function authenticate($username, $password) {
+    $users = loadUsers();
+    return isset($users[$username]) && $users[$username] === $password;
+}
+
+// Check if user is logged in
+function isLoggedIn() {
+    return isset($_SESSION['username']);
+}
+
+// Get logged-in username
+function getUsername() {
+    return $_SESSION['username'] ?? null;
+}
+
+// Get list of repositories
+function getReposList() {
+    $repos = [];
+    $files = glob(REPOS_DIR . '/*.omi');
+    foreach ($files as $file) {
+        $basename = basename($file);
+        $repos[] = [
+            'name' => $basename,
+            'size' => filesize($file),
+            'modified' => filemtime($file)
+        ];
+    }
+    return $repos;
+}
+
+// Parse request URI for routing
+function parseRequestURI() {
+    $uri = $_SERVER['REQUEST_URI'];
+    $uri = parse_url($uri, PHP_URL_PATH);
+    $uri = trim($uri, '/');
+    
+    if (empty($uri)) {
+        return ['type' => 'list'];
+    }
+    
+    $parts = explode('/', $uri);
+    $repoName = $parts[0];
+    
+    // Check if it's a valid repo
+    if (!preg_match('/\.omi$/', $repoName)) {
+        $repoName .= '.omi';
+    }
+    
+    $repoPath = REPOS_DIR . '/' . $repoName;
+    
+    if (!file_exists($repoPath)) {
+        return ['type' => 'error', 'message' => 'Repository not found'];
+    }
+    
+    $path = isset($parts[1]) ? implode('/', array_slice($parts, 1)) : '';
+    
+    return [
+        'type' => 'browse',
+        'repo' => $repoName,
+        'path' => $path,
+        'db' => $repoPath
+    ];
+}
+
+// Get files from latest commit
+function getLatestFiles($db, $path = '') {
+    try {
+        $pdo = new PDO('sqlite:' . $db);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        
+        // Get latest commit
+        $stmt = $pdo->query("SELECT id FROM commits ORDER BY id DESC LIMIT 1");
+        $commit = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$commit) {
+            return [];
+        }
+        
+        $commitId = $commit['id'];
+        
+        // Get files from this commit
+        $sql = "SELECT f.filename, f.hash, f.datetime, b.size 
+                FROM files f 
+                LEFT JOIN blobs b ON f.hash = b.hash 
+                WHERE f.commit_id = ?";
+        
+        if ($path) {
+            $sql .= " AND (f.filename LIKE ? OR f.filename = ?)";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$commitId, $path . '/%', $path]);
+        } else {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$commitId]);
+        }
+        
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        return [];
+    }
+}
+
+// Organize files into directories and files
+function organizeFiles($files, $basePath = '') {
+    $result = ['dirs' => [], 'files' => []];
+    $baseDepth = empty($basePath) ? 0 : substr_count($basePath, '/') + 1;
+    
+    foreach ($files as $file) {
+        $filename = $file['filename'];
+        
+        // Skip if not in current path
+        if ($basePath && strpos($filename, $basePath . '/') !== 0 && $filename !== $basePath) {
+            continue;
+        }
+        
+        // Remove base path
+        if ($basePath) {
+            if ($filename === $basePath) {
+                // This is the file itself
+                $result['files'][] = $file;
+                continue;
+            }
+            $relativePath = substr($filename, strlen($basePath) + 1);
+        } else {
+            $relativePath = $filename;
+        }
+        
+        $parts = explode('/', $relativePath);
+        
+        if (count($parts) > 1) {
+            // It's in a subdirectory
+            $dirName = $parts[0];
+            if (!isset($result['dirs'][$dirName])) {
+                $result['dirs'][$dirName] = [
+                    'name' => $dirName,
+                    'path' => $basePath ? $basePath . '/' . $dirName : $dirName,
+                    'datetime' => $file['datetime']
+                ];
+            }
+        } else {
+            // It's a file in current directory
+            $result['files'][] = $file;
+        }
+    }
+    
+    return $result;
+}
+
+// Get file content from blob
+function getFileContent($db, $hash) {
+    try {
+        $pdo = new PDO('sqlite:' . $db);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        
+        $stmt = $pdo->prepare("SELECT data FROM blobs WHERE hash = ?");
+        $stmt->execute([$hash]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        return $result ? $result['data'] : null;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+// Check if content is text
+function isTextFile($content) {
+    if (empty($content)) return true;
+    
+    // Check for null bytes (binary indicator)
+    if (strpos($content, "\0") !== false) {
+        return false;
+    }
+    
+    return true;
+}
+
+// Add new file commit to database
+function commitFile($db, $filename, $content) {
+    try {
+        $pdo = new PDO('sqlite:' . $db);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        
+        // Calculate hash
+        $hash = hash('sha256', $content);
+        $size = strlen($content);
+        
+        // Check if blob already exists
+        $stmt = $pdo->prepare("SELECT COUNT(*) as cnt FROM blobs WHERE hash = ?");
+        $stmt->execute([$hash]);
+        $blobExists = $stmt->fetch(PDO::FETCH_ASSOC)['cnt'] > 0;
+        
+        // Insert blob if new
+        if (!$blobExists) {
+            $stmt = $pdo->prepare("INSERT INTO blobs (hash, data, size) VALUES (?, ?, ?)");
+            $stmt->execute([$hash, $content, $size]);
+        }
+        
+        // Get current datetime
+        $datetime = date('Y-m-d H:i:s');
+        
+        // Create commit
+        $stmt = $pdo->prepare("INSERT INTO commits (message, datetime, user) VALUES (?, ?, ?)");
+        $stmt->execute(["Edited: $filename", $datetime, getUsername()]);
+        
+        $commitId = $pdo->lastInsertId();
+        
+        // Add file record
+        $stmt = $pdo->prepare("INSERT INTO files (filename, hash, datetime, commit_id) VALUES (?, ?, ?, ?)");
+        $stmt->execute([$filename, $hash, $datetime, $commitId]);
+        
+        return true;
+    } catch (Exception $e) {
+        error_log("Error committing file: " . $e->getMessage());
+        return false;
+    }
+}
+
+// Handle /logout route
+if (strpos($_SERVER['REQUEST_URI'], '/logout') !== false) {
+    session_destroy();
+    header('Location: /');
+    exit;
+}
+
+// Handle /sign-in route
+if (strpos($_SERVER['REQUEST_URI'], '/sign-in') !== false) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $username = $_POST['username'] ?? '';
+        $password = $_POST['password'] ?? '';
+        
+        if (authenticate($username, $password)) {
+            $_SESSION['username'] = $username;
+            // Redirect to home
+            header('Location: /');
+            exit;
+        } else {
+            $error = 'Invalid username or password';
+        }
+    }
+    
+    ?>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>Sign In - Omi Server</title>
+</head>
+<body bgcolor="#f0f0f0">
+<h1>Omi Server - Sign In</h1>
+<table border="0" cellpadding="5">
+<tr><td colspan="2"><a href="/">[Home]</a></td></tr>
+</table>
+<?php if (isset($error)): ?>
+<p><font color="red"><strong>Error: <?php echo htmlspecialchars($error); ?></strong></font></p>
+<?php endif; ?>
+<form method="POST">
+<table border="1" cellpadding="5">
+<tr><td>Username:</td><td><input type="text" name="username" size="30" required></td></tr>
+<tr><td>Password:</td><td><input type="password" name="password" size="30" required></td></tr>
+<tr><td colspan="2"><input type="submit" value="Sign In"></td></tr>
+</table>
+</form>
+<p><a href="/sign-up">Create new account</a></p>
+</body>
+</html>
+    <?php
+    exit;
+}
+
+// Handle /sign-up route
+if (strpos($_SERVER['REQUEST_URI'], '/sign-up') !== false) {
+    $error = null;
+    $success = null;
+    
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $username = $_POST['username'] ?? '';
+        $password = $_POST['password'] ?? '';
+        $password2 = $_POST['password2'] ?? '';
+        
+        if (empty($username) || empty($password)) {
+            $error = 'Username and password are required';
+        } elseif ($password !== $password2) {
+            $error = 'Passwords do not match';
+        } elseif (strlen($username) < 3) {
+            $error = 'Username must be at least 3 characters';
+        } else {
+            // Check if user exists
+            $users = loadUsers();
+            if (isset($users[$username])) {
+                $error = 'User already exists';
+            } else {
+                // Add new user
+                $line = $username . ':' . $password . "\n";
+                if (file_put_contents(USERS_FILE, $line, FILE_APPEND | LOCK_EX)) {
+                    $success = 'Account created! You can now sign in.';
+                } else {
+                    $error = 'Failed to create account';
+                }
+            }
+        }
+    }
+    
+    ?>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>Sign Up - Omi Server</title>
+</head>
+<body bgcolor="#f0f0f0">
+<h1>Omi Server - Sign Up</h1>
+<table border="0" cellpadding="5">
+<tr><td colspan="2"><a href="/">[Home]</a></td></tr>
+</table>
+<?php if (isset($error)): ?>
+<p><font color="red"><strong>Error: <?php echo htmlspecialchars($error); ?></strong></font></p>
+<?php endif; ?>
+<?php if (isset($success)): ?>
+<p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p>
+<p><a href="/sign-in">Go to Sign In</a></p>
+<?php else: ?>
+<form method="POST">
+<table border="1" cellpadding="5">
+<tr><td>Username:</td><td><input type="text" name="username" size="30" required></td></tr>
+<tr><td>Password:</td><td><input type="password" name="password" size="30" required></td></tr>
+<tr><td>Confirm:</td><td><input type="password" name="password2" size="30" required></td></tr>
+<tr><td colspan="2"><input type="submit" value="Create Account"></td></tr>
+</table>
+</form>
+<p><a href="/sign-in">Already have an account? Sign in</a></p>
+<?php endif; ?>
+</body>
+</html>
+    <?php
+    exit;
+}
+
+// Handle /settings route
+if (strpos($_SERVER['REQUEST_URI'], '/settings') !== false && strpos($_SERVER['REQUEST_URI'], '/sign') === false) {
+    if (!isLoggedIn()) {
+        header('Location: /sign-in');
+        exit;
+    }
+    
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $settings = [];
+        foreach (['SQLITE', 'USERNAME', 'PASSWORD', 'REPOS', 'CURL'] as $key) {
+            if (isset($_POST[$key])) {
+                $settings[$key] = $_POST[$key];
+            }
+        }
+        
+        $content = '';
+        foreach ($settings as $key => $value) {
+            $content .= $key . '=' . $value . "\n";
+        }
+        
+        if (file_put_contents(SETTINGS_FILE, $content, LOCK_EX)) {
+            $success = 'Settings updated successfully';
+        } else {
+            $error = 'Failed to save settings';
+        }
+    }
+    
+    $settings = [];
+    if (file_exists(SETTINGS_FILE)) {
+        $lines = file(SETTINGS_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $line) {
+            if (strpos($line, '=') !== false) {
+                list($key, $value) = explode('=', $line, 2);
+                $settings[trim($key)] = trim($value);
+            }
+        }
+    }
+    
+    ?>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>Settings - Omi Server</title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>Settings</h1></td><td align="right"><small><strong><?php echo htmlspecialchars(getUsername()); ?></strong> | <a href="/logout">[Logout]</a></small></td></tr>
+</table>
+<p><a href="/">[Home]</a> | <a href="/settings">[Settings]</a> | <a href="/people">[People]</a></p>
+<hr>
+<?php if (isset($success)): ?><p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p><?php endif; ?>
+<?php if (isset($error)): ?><p><font color="red"><strong><?php echo htmlspecialchars($error); ?></strong></font></p><?php endif; ?>
+<form method="POST">
+<table border="1" cellpadding="5">
+<tr><td>SQLITE executable:</td><td><input type="text" name="SQLITE" size="50" value="<?php echo htmlspecialchars($settings['SQLITE'] ?? 'sqlite'); ?>"></td></tr>
+<tr><td>USERNAME:</td><td><input type="text" name="USERNAME" size="50" value="<?php echo htmlspecialchars($settings['USERNAME'] ?? ''); ?>"></td></tr>
+<tr><td>PASSWORD:</td><td><input type="password" name="PASSWORD" size="50" value="<?php echo htmlspecialchars($settings['PASSWORD'] ?? ''); ?>"></td></tr>
+<tr><td>REPOS (server URL):</td><td><input type="text" name="REPOS" size="50" value="<?php echo htmlspecialchars($settings['REPOS'] ?? ''); ?>"></td></tr>
+<tr><td>CURL executable:</td><td><input type="text" name="CURL" size="50" value="<?php echo htmlspecialchars($settings['CURL'] ?? 'curl'); ?>"></td></tr>
+<tr><td colspan="2"><input type="submit" value="Save Settings"></td></tr>
+</table>
+</form>
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>
+    <?php
+    exit;
+}
+
+// Handle /people route
+if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
+    if (!isLoggedIn()) {
+        header('Location: /sign-in');
+        exit;
+    }
+    
+    $users = loadUsers();
+    
+    // Handle user operations
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $action = $_POST['action'] ?? '';
+        
+        if ($action === 'add') {
+            $newuser = $_POST['newuser'] ?? '';
+            $newpass = $_POST['newpass'] ?? '';
+            
+            if (!empty($newuser) && !empty($newpass)) {
+                if (!isset($users[$newuser])) {
+                    $users[$newuser] = $newpass;
+                    $userContent = '';
+                    foreach ($users as $u => $p) {
+                        $userContent .= $u . ':' . $p . "\n";
+                    }
+                    if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
+                        $success = 'User added successfully';
+                    } else {
+                        $error = 'Failed to add user';
+                    }
+                } else {
+                    $error = 'User already exists';
+                }
+            }
+        } elseif ($action === 'delete') {
+            $deluser = $_POST['deluser'] ?? '';
+            if (isset($users[$deluser])) {
+                unset($users[$deluser]);
+                $userContent = '';
+                foreach ($users as $u => $p) {
+                    $userContent .= $u . ':' . $p . "\n";
+                }
+                if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
+                    $success = 'User deleted successfully';
+                } else {
+                    $error = 'Failed to delete user';
+                }
+            }
+        } elseif ($action === 'update') {
+            $upuser = $_POST['upuser'] ?? '';
+            $uppass = $_POST['uppass'] ?? '';
+            if (isset($users[$upuser]) && !empty($uppass)) {
+                $users[$upuser] = $uppass;
+                $userContent = '';
+                foreach ($users as $u => $p) {
+                    $userContent .= $u . ':' . $p . "\n";
+                }
+                if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
+                    $success = 'User updated successfully';
+                } else {
+                    $error = 'Failed to update user';
+                }
+            }
+        }
+        
+        $users = loadUsers();
+    }
+    
+    ?>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>People - Omi Server</title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>User Management</h1></td><td align="right"><small><strong><?php echo htmlspecialchars(getUsername()); ?></strong> | <a href="/logout">[Logout]</a></small></td></tr>
+</table>
+<p><a href="/">[Home]</a> | <a href="/settings">[Settings]</a> | <a href="/people">[People]</a></p>
+<hr>
+<?php if (isset($success)): ?><p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p><?php endif; ?>
+<?php if (isset($error)): ?><p><font color="red"><strong><?php echo htmlspecialchars($error); ?></strong></font></p><?php endif; ?>
+
+<h2>Manage Users</h2>
+<table border="1" cellpadding="5" width="100%">
+<tr bgcolor="#333333"><th><font color="white">Username</font></th><th><font color="white">Action</font></th></tr>
+<?php foreach ($users as $u => $p): ?>
+<tr><td><?php echo htmlspecialchars($u); ?></td><td>
+<form method="POST" style="display:inline">
+<input type="hidden" name="action" value="delete">
+<input type="hidden" name="deluser" value="<?php echo htmlspecialchars($u); ?>">
+<input type="submit" value="Delete" onclick="return confirm('Delete user <?php echo htmlspecialchars($u); ?>?')">
+</form> | 
+<a href="#" onclick="document.getElementById('edit_<?php echo htmlspecialchars($u); ?>').style.display='block'; return false;">[Edit]</a>
+</td></tr>
+<?php endforeach; ?>
+</table>
+
+<h2>Add New User</h2>
+<form method="POST">
+<table border="0" cellpadding="5">
+<tr><td>Username:</td><td><input type="text" name="newuser" size="30" required></td></tr>
+<tr><td>Password:</td><td><input type="password" name="newpass" size="30" required></td></tr>
+<tr><td colspan="2"><input type="hidden" name="action" value="add"><input type="submit" value="Add User"></td></tr>
+</table>
+</form>
+
+<h2>Edit User Password</h2>
+<?php foreach ($users as $u => $p): ?>
+<div id="edit_<?php echo htmlspecialchars($u); ?>" style="display:none;border:1px solid #ccc;padding:10px;margin:10px 0">
+<form method="POST">
+<table border="0" cellpadding="5">
+<tr><td>User:</td><td><strong><?php echo htmlspecialchars($u); ?></strong></td></tr>
+<tr><td>New Password:</td><td><input type="password" name="uppass" size="30" required></td></tr>
+<tr><td colspan="2"><input type="hidden" name="action" value="update"><input type="hidden" name="upuser" value="<?php echo htmlspecialchars($u); ?>"><input type="submit" value="Update"> | <a href="#" onclick="document.getElementById('edit_<?php echo htmlspecialchars($u); ?>').style.display='none'; return false;">[Cancel]</a></td></tr>
+</table>
+</form>
+</div>
+<?php endforeach; ?>
+
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>
+    <?php
+    exit;
+}
+
+// Handle commit log/history display
+if (isset($_GET['log'])) {
+    $reponame = $_GET['log'];
+    if (!preg_match('/\.omi$/', $reponame)) {
+        $reponame .= '.omi';
+    }
+    
+    $repopath = REPOS_DIR . '/' . $reponame;
+    
+    if (!file_exists($repopath)) {
+        http_response_code(404);
+        echo 'Repository not found';
+        exit;
+    }
+    
+    $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+    $per_page = 10;
+    $offset = ($page - 1) * $per_page;
+    
+    try {
+        $pdo = new PDO('sqlite:' . $repopath);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        
+        // Get total commits
+        $stmt = $pdo->query("SELECT COUNT(*) as total FROM commits");
+        $total = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+        $total_pages = ceil($total / $per_page);
+        
+        // Get commits for this page
+        $stmt = $pdo->prepare("
+            SELECT 
+                c.id, 
+                c.message, 
+                c.datetime, 
+                c.user,
+                COUNT(f.id) as file_count
+            FROM commits c
+            LEFT JOIN files f ON c.id = f.commit_id
+            GROUP BY c.id
+            ORDER BY c.id DESC
+            LIMIT ? OFFSET ?
+        ");
+        $stmt->execute([$per_page, $offset]);
+        $commits = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        $username = getUsername();
+        ?>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>Commit History - <?php echo htmlspecialchars($reponame); ?></title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>Commit History - <?php echo htmlspecialchars($reponame); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
+</table>
+<p><a href="/">[Home]</a> | <a href="/settings">[Settings]</a> | <a href="/people">[People]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $reponame)); ?>">[Repository Root]</a></p>
+<hr>
+<?php if (empty($commits)): ?>
+<p>No commits found</p>
+<?php else: ?>
+<table border="1" width="100%" cellpadding="5" cellspacing="0">
+<tr bgcolor="#333333">
+<th><font color="white">Commit ID</font></th>
+<th><font color="white">Message</font></th>
+<th><font color="white">Author</font></th>
+<th><font color="white">Date</font></th>
+<th><font color="white">Files</font></th>
+</tr>
+<?php foreach ($commits as $commit): ?>
+<tr>
+<td><strong><?php echo htmlspecialchars($commit['id']); ?></strong></td>
+<td><?php echo htmlspecialchars($commit['message']); ?></td>
+<td><?php echo htmlspecialchars($commit['user']); ?></td>
+<td><?php echo htmlspecialchars($commit['datetime']); ?></td>
+<td><?php echo intval($commit['file_count']); ?></td>
+</tr>
+<?php endforeach; ?>
+</table>
+<hr>
+<p>Page <?php echo $page; ?> of <?php echo $total_pages; ?> (Total: <?php echo $total; ?> commits)</p>
+<p>
+<?php if ($page > 1): ?>
+<a href="?log=<?php echo urlencode($reponame); ?>&page=<?php echo $page - 1; ?>">[Previous]</a>
+<?php endif; ?>
+<?php if ($page < $total_pages): ?>
+<a href="?log=<?php echo urlencode($reponame); ?>&page=<?php echo $page + 1; ?>">[Next]</a>
+<?php endif; ?>
+</p>
+<?php endif; ?>
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>
+        <?php
+        exit;
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo 'Error reading commits: ' . htmlspecialchars($e->getMessage());
+        exit;
+    }
+}
+
+// Handle image display
+if (isset($_GET['image'])) {
+    $imagefile = $_GET['image'];
+    $username = getUsername();
+    
+    // Validate and open image from repo
+    $parts = explode('/', $imagefile);
+    $repoName = array_shift($parts);
+    $imagePath = implode('/', $parts);
+    
+    if (!preg_match('/\.omi$/', $repoName)) {
+        $repoName .= '.omi';
+    }
+    
+    $repoPath = REPOS_DIR . '/' . $repoName;
+    
+    if (!file_exists($repoPath)) {
+        http_response_code(404);
+        echo 'Image not found';
+        exit;
+    }
+    
+    try {
+        $pdo = new PDO('sqlite:' . $repoPath);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        
+        $stmt = $pdo->prepare("SELECT f.filename, b.data FROM files f 
+                             LEFT JOIN blobs b ON f.hash = b.hash 
+                             WHERE f.filename = ? ORDER BY f.commit_id DESC LIMIT 1");
+        $stmt->execute([$imagePath]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($result && $result['data']) {
+            ?>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title><?php echo htmlspecialchars($imagePath); ?> - <?php echo htmlspecialchars($repoName); ?></title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
+</table>
+<p><a href="/">[Home]</a> | <a href="/settings">[Settings]</a> | <a href="/people">[People]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[Repository Root]</a></p>
+<h2>Image: <?php echo htmlspecialchars($imagePath); ?></h2>
+<hr>
+<div style="text-align:center">
+<img src="data:image/png;base64,<?php echo base64_encode($result['data']); ?>" alt="<?php echo htmlspecialchars(basename($imagePath)); ?>">
+</div>
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>
+            <?php
+            exit;
+        } else {
+            http_response_code(404);
+            echo 'Image not found';
+            exit;
+        }
+    } catch (Exception $e) {
+        http_response_code(404);
+        echo 'Image not found';
+        exit;
+    }
+}
+    // Handle download request
+    if (isset($_GET['download'])) {
+        $filename = basename($_GET['download']);
+        $filepath = REPOS_DIR . '/' . $filename;
+        
+        if (file_exists($filepath) && pathinfo($filename, PATHINFO_EXTENSION) === 'omi') {
+            header('Content-Type: application/octet-stream');
+            header('Content-Disposition: attachment; filename="' . $filename . '"');
+            header('Content-Length: ' . filesize($filepath));
+            readfile($filepath);
+            exit;
+        } else {
+            http_response_code(404);
+            echo "Repository not found";
+            exit;
+        }
+    }
+    
+    // Check if requesting JSON API
+    if (isset($_GET['format']) && $_GET['format'] === 'json') {
+        header('Content-Type: application/json');
+        echo json_encode(['repos' => getReposList()]);
+        exit;
+    }
+    
+    // Parse request URI
+    $request = parseRequestURI();
+    
+    if ($request['type'] === 'error') {
+        http_response_code(404);
+        echo '<html><body><h1>Error: ' . htmlspecialchars($request['message']) . '</h1></body></html>';
+        exit;
+    }
+    
+    if ($request['type'] === 'browse') {
+        // Browse repository
+        $repoName = $request['repo'];
+        $repoPath = $request['path'];
+        $db = $request['db'];
+        
+        $files = getLatestFiles($db, $repoPath);
+        
+        // Check if it's a single file
+        $isFile = false;
+        $fileContent = null;
+        $fileHash = null;
+        
+        if (count($files) === 1 && $files[0]['filename'] === $repoPath) {
+            $isFile = true;
+            $fileHash = $files[0]['hash'];
+            $fileContent = getFileContent($db, $fileHash);
+        }
+        
+        if ($isFile && $fileContent !== null) {
+            // Display file content
+            $isText = isTextFile($fileContent);
+            $username = getUsername();
+            
+            // Handle edit request
+            if (isset($_POST['save_file']) && $isText && $username) {
+                $newContent = $_POST['file_content'] ?? '';
+                if (commitFile($db, $repoPath, $newContent)) {
+                    $fileContent = $newContent;
+                    $success_msg = 'File saved successfully';
+                } else {
+                    $error_msg = 'Failed to save file';
+                }
+            }
+            
+            // Check if in edit mode
+            $in_edit = isset($_GET['edit']) && $_GET['edit'] === '1' && $username && $isText;
+            
+            ?>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title><?php echo htmlspecialchars($repoPath); ?> - <?php echo htmlspecialchars($repoName); ?></title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
+</table>
+<p><a href="/">[Home]</a> | <a href="?log=<?php echo urlencode($repoName); ?>">[Log]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[Repository Root]</a></p>
+<h2>File: <?php echo htmlspecialchars($repoPath); ?></h2>
+<?php if (isset($success_msg)): ?>
+<p><font color="green"><strong><?php echo htmlspecialchars($success_msg); ?></strong></font></p>
+<?php endif; ?>
+<?php if (isset($error_msg)): ?>
+<p><font color="red"><strong><?php echo htmlspecialchars($error_msg); ?></strong></font></p>
+<?php endif; ?>
+<hr>
+<?php if ($in_edit): ?>
+<form method="POST">
+<textarea name="file_content" rows="20" cols="80"><?php echo htmlspecialchars($fileContent); ?></textarea><br>
+<input type="submit" name="save_file" value="Save"> | <a href="?">[Cancel]</a>
+</form>
+<?php else: ?>
+<?php if ($isText): ?>
+<pre><?php echo htmlspecialchars($fileContent); ?></pre>
+<?php if ($username): ?>
+<p><a href="?edit=1">[Edit]</a></p>
+<?php endif; ?>
+<?php else: ?>
+<p><strong>Binary file (<?php echo strlen($fileContent); ?> bytes)</strong></p>
+<p>Hash: <?php echo htmlspecialchars($fileHash); ?></p>
+<?php endif; ?>
+<?php endif; ?>
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>
+            <?php
+            exit;
+        }
+        
+        // Display directory listing
+        $organized = organizeFiles($files, $repoPath);
+        $username = getUsername();
+        
+        ?>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title><?php echo $repoPath ? htmlspecialchars($repoPath) : 'Root'; ?> - <?php echo htmlspecialchars($repoName); ?></title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
+</table>
+<p><a href="/">[Home]</a> | <a href="?log=<?php echo urlencode($repoName); ?>">[Log]</a> <?php if ($repoPath): ?>| <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[Repository Root]</a><?php endif; ?></p>
+<h2>Directory: /<?php echo htmlspecialchars($repoPath); ?></h2>
+<hr>
+<table border="1" width="100%" cellpadding="5" cellspacing="0">
+<tr bgcolor="#333333">
+<th><font color="white">Name</font></th>
+<th><font color="white">Size</font></th>
+<th><font color="white">Modified</font></th>
+</tr>
+<?php if (!empty($organized['dirs'])): ?>
+<?php foreach ($organized['dirs'] as $dir): ?>
+<tr>
+<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $dir['path']); ?>">📁 <?php echo htmlspecialchars($dir['name']); ?>/</a></td>
+<td>-</td>
+<td><?php echo htmlspecialchars($dir['datetime']); ?></td>
+</tr>
+<?php endforeach; ?>
+<?php endif; ?>
+<?php if (!empty($organized['files'])): ?>
+<?php foreach ($organized['files'] as $file): ?>
+<tr>
+<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']); ?>">📄 <?php echo htmlspecialchars(basename($file['filename'])); ?></a></td>
+<td><?php echo number_format($file['size']); ?></td>
+<td><?php echo htmlspecialchars($file['datetime']); ?></td>
+</tr>
+<?php endforeach; ?>
+<?php endif; ?>
+<?php if (empty($organized['dirs']) && empty($organized['files'])): ?>
+<tr><td colspan="3">No files in this directory</td></tr>
+<?php endif; ?>
+</table>
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>
+        <?php
+        exit;
+    }
+    
+    // Default: Show repository list
+    $repos = getReposList();
+    $username = getUsername();
+    
+    // HTML display - Repository list
+    ?>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>Omi Server - Repository List</title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>Omi Server - Repository List</h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/logout">[Logout]</a><?php else: ?><a href="/sign-in">[Sign In]</a><?php endif; ?></small></td></tr>
+</table>
+<table border="1" width="100%" cellpadding="5" cellspacing="0">
+<tr bgcolor="#e8f4f8">
+<td colspan="4">
+<strong>Server:</strong> <?php echo htmlspecialchars($_SERVER['HTTP_HOST']); ?><br>
+<strong>Protocol:</strong> <?php echo isset($_SERVER['HTTPS']) ? 'HTTPS' : 'HTTP'; ?><br>
+<strong>Repositories:</strong> <?php echo count($repos); ?>
+</td>
+</tr>
+</table>
+<h2>Available Repositories</h2>
+<table border="1" width="100%" cellpadding="5" cellspacing="0">
+<tr bgcolor="#333333">
+<th><font color="white">Repository</font></th>
+<th><font color="white">Size (bytes)</font></th>
+<th><font color="white">Last Modified</font></th>
+<th><font color="white">Actions</font></th>
+</tr>
+<?php if (empty($repos)): ?>
+<tr><td colspan="4">No repositories found</td></tr>
+<?php else: ?>
+<?php foreach ($repos as $repo): ?>
+<tr>
+<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repo['name'])); ?>"><?php echo htmlspecialchars($repo['name']); ?></a></td>
+<td><?php echo number_format($repo['size']); ?></td>
+<td><?php echo htmlspecialchars(date('Y-m-d H:i:s', $repo['modified'])); ?></td>
+<td><a href="?download=<?php echo urlencode($repo['name']); ?>">Download</a> | <a href="?log=<?php echo urlencode($repo['name']); ?>">[Log]</a></td>
+</tr>
+<?php endforeach; ?>
+<?php endif; ?>
+</table>
+<?php if ($username): ?>
+<h2>Upload/Update Repository</h2>
+<form method="POST" enctype="multipart/form-data">
+<table border="0" cellpadding="5">
+<tr><td>Username:</td><td><input type="text" name="username" size="30"></td></tr>
+<tr><td>Password:</td><td><input type="password" name="password" size="30"></td></tr>
+<tr><td>Repository name:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
+<tr><td>File:</td><td><input type="file" name="repo_file"></td></tr>
+<tr><td colspan="2"><input type="submit" name="action" value="Upload"></td></tr>
+</table>
+</form>
+<?php else: ?>
+<p><a href="/sign-in">[Sign In to upload repositories]</a></p>
+<?php endif; ?>
+<h2>API Endpoints</h2>
+<table border="1" width="100%" cellpadding="5" cellspacing="0">
+<tr><td><strong>List repos (JSON):</strong></td><td>GET /?format=json</td></tr>
+<tr><td><strong>Download repo:</strong></td><td>GET /?download=wekan.omi</td></tr>
+<tr><td><strong>Upload repo:</strong></td><td>POST with username, password, repo_name, repo_file</td></tr>
+<tr><td><strong>Pull changes:</strong></td><td>POST with username, password, action=pull, repo_name</td></tr>
+</table>
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>
+    <?php
+    exit;
+}
+
+// Handle POST request - Upload/Download with authentication
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $username = $_POST['username'] ?? '';
+    $password = $_POST['password'] ?? '';
+    $action = $_POST['action'] ?? 'Upload';
+    
+    // Authenticate
+    if (!authenticate($username, $password)) {
+        http_response_code(401);
+        echo json_encode(['error' => 'Authentication failed']);
+        exit;
+    }
+    
+    // Handle upload
+    if ($action === 'Upload' && isset($_FILES['repo_file'])) {
+        $repo_name = basename($_POST['repo_name'] ?? '');
+        
+        // Validate repository name
+        if (!preg_match('/^[a-zA-Z0-9_-]+\.omi$/', $repo_name)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid repository name. Must end with .omi']);
+            exit;
+        }
+        
+        $upload_file = $_FILES['repo_file'];
+        $target_path = REPOS_DIR . '/' . $repo_name;
+        
+        if ($upload_file['error'] === UPLOAD_ERR_OK) {
+            if (move_uploaded_file($upload_file['tmp_name'], $target_path)) {
+                echo json_encode([
+                    'success' => true,
+                    'message' => "Repository $repo_name uploaded successfully",
+                    'size' => filesize($target_path)
+                ]);
+            } else {
+                http_response_code(500);
+                echo json_encode(['error' => 'Failed to save repository']);
+            }
+        } else {
+            http_response_code(400);
+            echo json_encode(['error' => 'Upload error: ' . $upload_file['error']]);
+        }
+        exit;
+    }
+    
+    // Handle pull request (download specific repo)
+    if ($action === 'pull') {
+        $repo_name = basename($_POST['repo_name'] ?? '');
+        $filepath = REPOS_DIR . '/' . $repo_name;
+        
+        if (file_exists($filepath)) {
+            header('Content-Type: application/octet-stream');
+            header('Content-Disposition: attachment; filename="' . $repo_name . '"');
+            header('Content-Length: ' . filesize($filepath));
+            readfile($filepath);
+            exit;
+        } else {
+            http_response_code(404);
+            echo json_encode(['error' => 'Repository not found']);
+            exit;
+        }
+    }
+    
+    // Default response
+    http_response_code(400);
+    echo json_encode(['error' => 'Invalid action']);
+    exit;
+}
