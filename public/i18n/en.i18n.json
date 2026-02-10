@@ -1723,5 +1723,9 @@
   "total": "Total",
   "commits": "Commits",
   "new-name": "New name",
-  "close": "Close"
+  "manage-otp": "Manage OTP Authentication",
+  "otp-url-stored": "Your OTP URL is stored securely. Use your authenticator app to generate codes.",
+  "otp-disable-confirm": "Are you sure you want to disable OTP?",
+  "list-repos-json": "List repos (JSON)",
+  "download-repo": "Download repo"
 }

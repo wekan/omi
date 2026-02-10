@@ -1808,64 +1808,64 @@ ${actionForms}
   const repos = getReposList();
   username = getUsername(req);
   const userDisplay = username
-    ? `<strong>${username}</strong> | <a href="/logout">[Logout]</a>`
-    : `<a href="/sign-in">[Sign In]</a>`;
+    ? `<strong>${escapeHtml(username)}</strong> | <a href="/language">[${t('language', translations)}]</a> | <a href="/logout">[${t('logout', translations)}]</a>`
+    : `<a href="/sign-in">[${t('login', translations)}]</a>`;
 
   const reposTable = repos.length > 0
     ? repos.map(repo => `<tr>
 <td><a href="/${repo.name.replace(/\.omi$/, '')}">${repo.name.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</a></td>
 <td>${repo.size.toLocaleString()}</td>
 <td>${new Date(repo.modified * 1000).toISOString().replace('T', ' ').slice(0, 19)}</td>
-<td><a href="?download=${encodeURIComponent(repo.name)}">[Download]</a></td>
+<td><a href="?download=${encodeURIComponent(repo.name)}">[${t('download', translations)}]</a></td>
 </tr>`).join('\n')
-    : '<tr><td colspan="4">No repositories found</td></tr>';
+    : `<tr><td colspan="4">${t('no-repositories', translations)}</td></tr>`;
 
   const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
-<title>Omi Server - Repository List</title>
+<title>Omi Server - ${t('repositories', translations)}</title>
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Omi Server - Repository List</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
+<tr><td><h1>Omi Server - ${t('repositories', translations)}</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
 </table>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#e8f4f8">
 <td colspan="4">
-<strong>Repositories:</strong> ${repos.length}
+<strong>${t('repositories', translations)}:</strong> ${repos.length}
 </td>
 </tr>
 </table>
 ${repoMessage ? `<p><font color="${repoMessageIsError ? 'red' : 'green'}"><strong>${repoMessage.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong></font></p>` : ''}
-<h2>Available Repositories</h2>
+<h2>${t('available-repositories', translations)}</h2>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#333333">
-<th><font color="white">Repository</font></th>
-<th><font color="white">Size (bytes)</font></th>
-<th><font color="white">Last Modified</font></th>
-<th><font color="white">Actions</font></th>
+<th><font color="white">${t('repository', translations)}</font></th>
+<th><font color="white">${t('size-bytes', translations)}</font></th>
+<th><font color="white">${t('last-modified', translations)}</font></th>
+<th><font color="white">${t('actions', translations)}</font></th>
 </tr>
 ${reposTable}
 </table>
-${username ? `<h2>Create New Repository</h2>
+${username ? `<h2>${t('create-repository', translations)}</h2>
 <form method="POST">
 <table border="0" cellpadding="5">
-<tr><td>Repository name:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
-<tr><td colspan="2"><input type="hidden" name="action" value="create_repo"><input type="submit" value="Create Repository"></td></tr>
+<tr><td>${t('repository-name', translations)}:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
+<tr><td colspan="2"><input type="hidden" name="action" value="create_repo"><input type="submit" value="${t('create-repository', translations)}"></td></tr>
 </table>
 </form>
-<h2>Upload Repository</h2>
+<h2>${t('upload-repository', translations)}</h2>
 <form method="POST" enctype="multipart/form-data">
 <table border="0" cellpadding="5">
-<tr><td>Repository name:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
-<tr><td>File:</td><td><input type="file" name="repo_file"></td></tr>
-<tr><td colspan="2"><input type="submit" name="action" value="Upload"></td></tr>
+<tr><td>${t('repository-name', translations)}:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
+<tr><td>${t('file', translations)}:</td><td><input type="file" name="repo_file"></td></tr>
+<tr><td colspan="2"><input type="submit" name="action" value="${t('upload', translations)}"></td></tr>
 </table>
-</form>` : '<p><a href="/sign-in">[Sign In to upload repositories]</a></p>'}
-<h2>API Endpoints</h2>
+</form>` : `<p><a href="/sign-in">[${t('sign-in-to-upload', translations)}]</a></p>`}
+<h2>${t('api-endpoints', translations)}</h2>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
-<tr><td><strong>List repos (JSON):</strong></td><td>GET /?format=json</td></tr>
-<tr><td><strong>Download repo:</strong></td><td>GET /?download=wekan.omi</td></tr>
+<tr><td><strong>${t('list-repos-json', translations)}:</strong></td><td>GET /?format=json</td></tr>
+<tr><td><strong>${t('download-repo', translations)}:</strong></td><td>GET /?download=wekan.omi</td></tr>
 </table>
 <hr>
 <p><small>Omi Server</small></p>
