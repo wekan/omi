@@ -2,8 +2,8 @@
 
 **Omi** is a lightweight, cross-platform version control system that stores complete repository history in a single SQLite database file (.omi).
 
-Difference to Fossil SCM is, that Omi stores deduplicated files to SQLite as blobs without compressing, this simplifies implementation
-and makes it work faster at platforms where is limited CPU resources like Amiga.
+Difference to Fossil SCM is, that Omi stores deduplicated files to SQLite as blobs without compressing,
+this simplifies implementation and porting to limited CPU resources like Amiga and FreeDOS.
 
 <img src="public/logo.jpg" width="60%" alt="Omi logo" />
 
@@ -21,6 +21,7 @@ and makes it work faster at platforms where is limited CPU resources like Amiga.
 ### Web Server Platforms Supported
 - **Web Browser** (PHP interface - HTML 3.2 compatible)
 - **Web Browser** (JavaScript/Node.js/Bun/Deno server - HTML 3.2 compatible)
+- **Web Browser** (FreePascal server - HTML 3.2 compatible, needs fixes for scandinavian characters)
 
 ### Features
 - [X] Git-like commands (`init`, `clone`, `add`, `commit`, `push`, `pull`)
@@ -64,15 +65,15 @@ Start with **[`docs/README.md`](docs/README.md)** for navigation and quick refer
 Key guides:
 - **[FEATURES.md](docs/FEATURES.md)** - Complete feature overview
 - CLI:
-  - **[CLI_PYTHON3.md](docs/CLI_PYTHON3.md)** - CLI for Python 3 (recommended)
-  - **[CLI_HAXE5.md](docs/CLI_HAXE5.md)** - CLI for Haxe 5 (compiled, multi-target)
-  - **[CLI_CSHARP.md](docs/CLI_CSHARP.md)** - CLI for C# / Mono (compiled, .NET)
-  - **[CLI_C89.md](docs/CLI_C89.md)** - CLI for C89 (portable C implementation)
-  - **[CLI_TCL.md](docs/CLI_TCL.md)** - CLI for Tcl (tclsh)
-  - **[CLI_BASH.md](docs/CLI_BASH.md)** - CLI for Linux/Unix/macOS
-  - **[CLI_BAT.md](docs/CLI_BAT.md)** - CLI for FreeDOS/Windows
   - **[CLI_AMIGASHELL.md](docs/CLI_AMIGASHELL.md)** - CLI for Amiga
+  - **[CLI_BAT.md](docs/CLI_BAT.md)** - CLI for FreeDOS/Windows
+  - **[CLI_BASH.md](docs/CLI_BASH.md)** - CLI for Linux/Unix/macOS
+  - **[CLI_C89.md](docs/CLI_C89.md)** - CLI for C89 (portable C implementation)
+  - **[CLI_CSHARP.md](docs/CLI_CSHARP.md)** - CLI for C# / Mono (compiled, .NET)
+  - **[CLI_HAXE5.md](docs/CLI_HAXE5.md)** - CLI for Haxe 5 (compiled, multi-target)
   - **[CLI_LUA.md](docs/CLI_LUA.md)** - CLI for Lua (cross-platform)
+  - **[CLI_PYTHON3.md](docs/CLI_PYTHON3.md)** - CLI for Python 3 (recommended)
+  - **[CLI_TCL.md](docs/CLI_TCL.md)** - CLI for Tcl (tclsh)
 - **[WEB.md](docs/WEB.md)** - Web interface guide
 - SERVER:
   - **[SERVER_JS.md](docs/SERVER_JS.md)** - JavaScript server (Node.js, Bun, Deno)
