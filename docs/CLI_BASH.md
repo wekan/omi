@@ -322,7 +322,7 @@ $ ./omi.sh push
 Pushing repo.omi to remote...
 2FA Required
 Enter OTP code (6 digits): 123456
-Successfully pushed to https://omi.wekan.fi
+Successfully pushed to http://localhost:8000
 ```
 
 **Using with Authenticators:**
@@ -344,7 +344,7 @@ If you exceed the server's rate limit (default: 60 requests/minute):
 $ ./omi.sh push
 Error: Rate limit exceeded. Waiting 45s...
 [waits automatically]
-Successfully pushed to https://omi.wekan.fi
+Successfully pushed to http://localhost:8000
 ```
 
 CLI automatically:

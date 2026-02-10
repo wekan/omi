@@ -46,7 +46,7 @@ cd omi/cli
 ```
 
 ### Web UI
-- **Repo URL example**: `http://omi.wekan.fi/`
+- **Repo URL example**: `http://localhost:8000`
 - **Sign In**: `/sign-in`
 - **Create Account**: `/sign-up`
 - **Browse Repo**: `/reponame`

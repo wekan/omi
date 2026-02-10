@@ -333,7 +333,7 @@ Enter OTP code: 123456
 AmigaShell with AmiSSL support:
 
 ```
-REPOS=https://omi.wekan.fi
+REPOS=http://localhost:8000
 ```
 
 **Setup AmiSSL:**
