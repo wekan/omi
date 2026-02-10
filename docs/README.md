@@ -1,6 +1,6 @@
 # Omi Documentation
 
-> **Quick Navigation:** [FEATURES.md](FEATURES.md) | [CLI](#cli-documentation) | [WEB.md](WEB.md) | [SERVER.md](SERVER.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)
+> **Quick Navigation:** [FEATURES.md](FEATURES.md) | [CLI](#cli-documentation) | [WEB.md](WEB.md) | [SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)
 
 ## Getting Started
 
@@ -24,7 +24,8 @@ Omi is a lightweight Git-like version control system for retro systems and moder
 | **[CLI_LUA.md](CLI_LUA.md)** | Command line for Lua (cross-platform) | Lua developers |
 | **[WEB.md](WEB.md)** | Web interface and browser access | Web users |
 | **[SERVER_JS.md](SERVER_JS.md)** | Web server (JavaScript runtimes) | Node.js/Bun/Deno developers |
-| **[SERVER.md](SERVER.md)** | Server setup and configuration | System admins |
+| **[SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md)** | Web server (FreePascal compiled) | System admins |
+| **[SERVER_PHP.md](SERVER_PHP.md)** | Web server (PHP with Apache/Nginx) | PHP/web admins |
 | **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** | Database structure and design | Developers |
 
 ## CLI Documentation
@@ -138,12 +139,19 @@ Located in project root:
 
 ## Server Deployment
 
-To run Omi on a web server:
+Choose your server implementation:
 
-1. Configure [settings.txt](../settings.txt)
-2. Place [public/index.php](../public/index.php) on web server
-3. Choose web server: Caddy, Apache, or Nginx
-4. See [SERVER.md](SERVER.md) for detailed setup
+**Option 1: FreePascal Server (Recommended for retro systems)**
+- Single compiled binary, minimal dependencies
+- See [SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md) for setup
+
+**Option 2: JavaScript Server (Node.js, Bun, or Deno)**
+- Multi-runtime support, modern tooling
+- See [SERVER_JS.md](SERVER_JS.md) for setup
+
+**Option 3: PHP Server (Apache, Nginx, or Caddy)**
+- Traditional web server deployment
+- See [SERVER_PHP.md](SERVER_PHP.md) for setup
 
 Configuration examples in [webserver/](webserver/) directory:
 - **Caddyfile** - Caddy (recommended)
@@ -203,9 +211,9 @@ Project files:
 7. Click `[Upload]` - Add new file to repository
 
 ### Server Workflow
-1. Set up [SERVER.md](SERVER.md)
+1. Choose server: [SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md) | [SERVER_JS.md](SERVER_JS.md) | [SERVER_PHP.md](SERVER_PHP.md)
 2. Configure [settings.txt](../settings.txt)
-3. Create users in [phpusers.txt](../phpusers.txt)
+3. Create users in [users.txt](../users.txt)
 4. Users can push/pull via CLI
 5. Browse via web interface
 
@@ -231,7 +239,9 @@ See [FEATURES.md](FEATURES.md) for complete security information.
 - [WEB.md](WEB.md#troubleshooting)
 
 ### For Server Issues
-- [SERVER.md](SERVER.md)
+- **FreePascal:** [SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md#troubleshooting)
+- **JavaScript:** [SERVER_JS.md](SERVER_JS.md#troubleshooting)
+- **PHP:** [SERVER_PHP.md](SERVER_PHP.md#troubleshooting)
 
 ### For Database Issues
 - [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)
@@ -258,7 +268,8 @@ See [FEATURES.md](FEATURES.md) for complete security information.
 | CLI_LUA.md | Detailed | Lua CLI guide (cross-platform) |
 | WEB.md | Detailed | Web interface guide |
 | SERVER_JS.md | Detailed | JavaScript server guide (Node.js/Bun/Deno) |
-| SERVER.md | Detailed | Server setup guide |
+| SERVER_FREEPASCAL.md | Detailed | FreePascal server guide (compiled) |
+| SERVER_PHP.md | Detailed | PHP server guide (Apache/Nginx) |
 | DATABASE_SCHEMA.md | Reference | Database technical details |
 | README.md | Navigation | This file |
 

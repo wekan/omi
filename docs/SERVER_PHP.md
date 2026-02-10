@@ -147,7 +147,7 @@ API_RATE_LIMIT_WINDOW=60
 3. Click "Save Settings"
 4. Changes written to settings.txt
 
-### phpusers.txt
+### users.txt
 
 User credentials file. Format: `username:password:otpauth_url`
 
@@ -170,8 +170,7 @@ user1:password456:otpauth://totp/Omi/user1?secret=BASE32SECRET&issuer=Omi
 
 ### Other Files
 
-- **phpusersbruteforcelocked.txt** - Locked accounts (one per line)
-- **phpusersfailedattempts.txt** - Failed login tracking
+- **usersbruteforcelocked.txt** - Locked accounts (one per line)
 - **api_rate_limit.txt** - API request tracking per user
 
 ## Web Server Configurations
@@ -229,13 +228,13 @@ The web interface uses HTML 3.2 with no JavaScript or CSS for compatibility with
 - Nginx: Configure SSL certificates
 
 ### File Permissions
-- Web server must read `settings.txt`, `phpusers.txt`
+- Web server must read `settings.txt`, `users.txt`
 - Web server must write to `api_rate_limit.txt`
 - Repository files in `repos/` must be readable
 
 ```bash
 # Example permissions
-chmod 644 settings.txt phpusers.txt
+chmod 644 settings.txt users.txt
 chmod 755 repos/
 ```
 
@@ -255,7 +254,7 @@ chmod 755 repos/
 - [ ] Install web server and PHP
 - [ ] Copy `public/index.php` to web root
 - [ ] Create/configure `settings.txt`
-- [ ] Create `phpusers.txt` with admin account
+- [ ] Create `users.txt` with admin account
 - [ ] Set file permissions correctly
 - [ ] Configure web server routing
 - [ ] Test URLs: `/`, `/login`, `/logout`
@@ -289,7 +288,7 @@ chmod 755 repos/
 - Solution: Check write permissions to repos/
 
 ### Users Not Appearing
-- Check phpusers.txt file exists
+- Check users.txt file exists
 - Verify format: `username:password`
 - Reload web page (may be cached)
 
@@ -327,7 +326,7 @@ systemctl status php-fpm
 tail -f api_rate_limit.txt
 
 # Check file permissions
-ls -la settings.txt phpusers.txt repos/
+ls -la settings.txt users.txt repos/
 ```
 
 ---
@@ -337,6 +336,8 @@ ls -la settings.txt phpusers.txt repos/
 - **[README.md](README.md)** - Documentation index
 - **[WEB.md](WEB.md)** - Web interface guide
 - **[FEATURES.md](FEATURES.md)** - Feature overview
+- **[SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md)** - FreePascal server guide
+- **[SERVER_JS.md](SERVER_JS.md)** - JavaScript server guide
 - **[CLI_PYTHON3.md](CLI_PYTHON3.md)** - CLI usage (Python 3)
 - **[CLI_HAXE5.md](CLI_HAXE5.md)** - CLI usage (Haxe 5)
 - **[CLI_CSHARP.md](CLI_CSHARP.md)** - CLI usage (C# / Mono)

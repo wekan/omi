@@ -76,15 +76,25 @@ Key guides:
   - **[CLI_TCL.md](docs/CLI_TCL.md)** - CLI for Tcl (tclsh)
 - **[WEB.md](docs/WEB.md)** - Web interface guide
 - SERVER:
+  - **[SERVER_FREEPASCAL.md](docs/SERVER_FREEPASCAL.md)** - FreePascal server (compiled binary)
   - **[SERVER_JS.md](docs/SERVER_JS.md)** - JavaScript server (Node.js, Bun, Deno)
   - **[SERVER_PHP.md](docs/SERVER_PHP.md)** - PHP server setup
 - **[DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md)** - Database design
 
 ## Setup
 
-Copy `public/index.php` to your web server root. Configure `settings.txt` and `users.txt` as needed.
+Choose your server implementation:
 
-See **[`docs/SERVER_PHP.md`](docs/SERVER_PHP.md)** or **[`docs/SERVER_JS.md`](docs/SERVER_JS.md)** for detailed server setup instructions.
+- **FreePascal** (recommended for retro systems): Single compiled binary, minimal dependencies  
+  See **[`docs/SERVER_FREEPASCAL.md`](docs/SERVER_FREEPASCAL.md)** for setup
+
+- **JavaScript** (Node.js, Bun, or Deno): Multi-runtime support  
+  See **[`docs/SERVER_JS.md`](docs/SERVER_JS.md)** for setup
+
+- **PHP** (Apache, Nginx, or Caddy): Traditional web server deployment  
+  See **[`docs/SERVER_PHP.md`](docs/SERVER_PHP.md)** for setup
+
+Configure `settings.txt` and `users.txt` as needed.
 
 Webserver configs are at `docs/webserver/`
 

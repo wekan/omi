@@ -231,5 +231,7 @@ Omi is a lightweight Git-like version control system designed for retro systems 
 - **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI commands (Amiga)
 - **[CLI_LUA.md](CLI_LUA.md)** - CLI commands (Lua)
 - **[WEB.md](WEB.md)** - Web interface
-- **[SERVER.md](SERVER.md)** - Server setup
+- **[SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md)** - FreePascal server
+- **[SERVER_JS.md](SERVER_JS.md)** - JavaScript server
+- **[SERVER_PHP.md](SERVER_PHP.md)** - PHP server
 - **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Database design

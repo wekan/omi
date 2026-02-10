@@ -752,7 +752,9 @@ Python 3 implementation benefits:
 - **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI alternative (Amiga)
 - **[CLI_LUA.md](CLI_LUA.md)** - CLI alternative (Lua)
 - **[WEB.md](WEB.md)** - Web interface
-- **[SERVER.md](SERVER.md)** - Server setup
+- **[SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md)** - FreePascal server
+- **[SERVER_JS.md](SERVER_JS.md)** - JavaScript server
+- **[SERVER_PHP.md](SERVER_PHP.md)** - PHP server
 - **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Database design
 
 ## Notes

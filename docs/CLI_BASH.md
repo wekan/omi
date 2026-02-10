@@ -1,6 +1,6 @@
 # Bash CLI (omi.sh)
 
-> **Documentation:** [README.md](README.md) | [FEATURES.md](FEATURES.md) | [WEB.md](WEB.md) | [SERVER.md](SERVER.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)  
+> **Documentation:** [README.md](README.md) | [FEATURES.md](FEATURES.md) | [WEB.md](WEB.md) | [SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md) | [SERVER_JS.md](SERVER_JS.md) | [SERVER_PHP.md](SERVER_PHP.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)  
 > **CLI Options:** [CLI_BASH.md](CLI_BASH.md) | [CLI_BAT.md](CLI_BAT.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md) | [CLI_C89.md](CLI_C89.md) | [CLI_TCL.md](CLI_TCL.md)
 
 The Bash implementation (`omi.sh`) runs on Linux, macOS, Unix and any system with Bash 3.0+.
@@ -493,4 +493,4 @@ Add multiple files:
 ---
 
 **Other CLI Versions:** [CLI_PYTHON3.md](CLI_PYTHON3.md) | [CLI_HAXE5.md](CLI_HAXE5.md) | [CLI_CSHARP.md](CLI_CSHARP.md) | [CLI_BAT.md](CLI_BAT.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md) | [CLI_LUA.md](CLI_LUA.md)  
-**See Also:** [WEB.md](WEB.md) | [SERVER.md](SERVER.md) | [FEATURES.md](FEATURES.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) | [README.md](README.md)
+**See Also:** [WEB.md](WEB.md) | [SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md) | [SERVER_JS.md](SERVER_JS.md) | [SERVER_PHP.md](SERVER_PHP.md) | [FEATURES.md](FEATURES.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) | [README.md](README.md)

@@ -90,7 +90,7 @@ ACCOUNTS_LOCKOUT_UNKNOWN_USERS_LOCKOUT_PERIOD=60
 
 ## User Management
 
-Users are stored in `phpusers.txt` with format:
+Users are stored in `users.txt` with format:
 ```
 username:password:otpauth_url
 user1:pass123:
@@ -147,7 +147,7 @@ All API requests require:
 
 ### Authentication issues
 - Clear cookies/sessions if locked out
-- Check phpusers.txt format: `username:password:otp`
+- Check users.txt format: `username:password:otp`
 - Verify OTP secret format in otpauth URL
 
 ### File upload failures
@@ -174,11 +174,14 @@ All API requests require:
 
 ## See Also
 
-- [WEB.md](WEB.md) - Web server documentation
-- [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) - SQLite schema
-- [CLI_PYTHON3.md](CLI_PYTHON3.md) - Python CLI (similar architecture)
-- [CLI_C89.md](CLI_C89.md) - C89 CLI
-- [CLI_TCL.md](CLI_TCL.md) - Tcl CLI
+- **[README.md](README.md)** - Documentation index
+- **[WEB.md](WEB.md)** - Web interface guide
+- **[SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md)** - FreePascal server guide
+- **[SERVER_PHP.md](SERVER_PHP.md)** - PHP server guide
+- **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - SQLite schema
+- **[CLI_PYTHON3.md](CLI_PYTHON3.md)** - Python CLI (similar architecture)
+- **[CLI_C89.md](CLI_C89.md)** - C89 CLI
+- **[CLI_TCL.md](CLI_TCL.md)** - Tcl CLI
 
 ## Notes
 

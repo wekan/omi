@@ -317,6 +317,8 @@ CREATE INDEX idx_commits_date ON commits(datetime);
 - **[CLI_BAT.md](CLI_BAT.md)** - CLI commands (FreeDOS)
 - **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** - CLI commands (Amiga)
 - **[WEB.md](WEB.md)** - Web interface
-- **[SERVER.md](SERVER.md)** - Server setup
+- **[SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md)** - FreePascal server
+- **[SERVER_JS.md](SERVER_JS.md)** - JavaScript server
+- **[SERVER_PHP.md](SERVER_PHP.md)** - PHP server
 
 This speeds up queries filtering by date range.
