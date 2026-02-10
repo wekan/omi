@@ -1,6 +1,7 @@
 # Repos
 /repos/*
 /public/server
+/public/server.o
 
 # Python
 __pycache__/

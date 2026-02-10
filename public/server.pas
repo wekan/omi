@@ -261,8 +261,12 @@ var
 begin
   Result := '';
   SessionId := GetCookieValue(ARequest, 'sessionId');
+  WriteLn('[Session] Cookie received: sessionId=', SessionId);
   if SessionId <> '' then
+  begin
     Result := Sessions.Values[SessionId];
+    WriteLn('[Session] Lookup result: ', Result);
+  end;
 end;
 
 function LoadSettingsMap: TStringList;
@@ -548,8 +552,9 @@ var
   SessionId: string;
 begin
   Randomize;
-  SessionId := Format('%s_%d', [Username, Random(999999)]);
+  SessionId := Format('%s_%d_%d', [Username, Random(999999), GetTickCount64 mod 1000000]);
   Sessions.Values[SessionId] := Username;
+  WriteLn('[Session] Created: ', SessionId, ' -> ', Username);
   Result := SessionId;
 end;
 
@@ -1188,7 +1193,8 @@ begin
           else
           begin
             SessionId := CreateSession(Username);
-            AResponse.CustomHeaders.Add('Set-Cookie: sessionId=' + SessionId + '; Path=/');
+            WriteLn('[Login] Setting cookie: sessionId=', SessionId);
+            AResponse.SetCustomHeader('Set-Cookie', 'sessionId=' + SessionId + '; Path=/; HttpOnly');
             AResponse.Code := 302;
             AResponse.Location := '/';
             AResponse.Content := '';
@@ -1569,7 +1575,7 @@ begin
   SessionId := GetCookieValue(ARequest, 'sessionId');
   if SessionId <> '' then
     Sessions.Values[SessionId] := '';
-  AResponse.CustomHeaders.Add('Set-Cookie: sessionId=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT');
+  AResponse.SetCustomHeader('Set-Cookie', 'sessionId=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly');
   AResponse.Code := 302;
   AResponse.Location := '/';
   AResponse.Content := '';
@@ -2567,7 +2573,8 @@ begin
   WriteLn('Omi Server v', VERSION);
   WriteLn('Port: ', Settings.Port);
   WriteLn('SQLite: ', Settings.SqliteCmd);
-  WriteLn('Database: ', Settings.DbPath);
+  WriteLn('Users file: ', DataPath(USERS_FILE));
+  WriteLn('Repos dir: ', DataPath(REPOS_DIR));
   WriteLn('');
 
   Application.Port := Settings.Port;
