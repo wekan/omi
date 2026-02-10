@@ -1180,7 +1180,7 @@ ${form}
       const langName = `${langInfo.name || langCode} (${langCode})${rtlIndicator}`;
       form += `<tr><td><input type="radio" name="language" value="${langCode}" ${isSelected}></td><td>${langName}</td></tr>\n`;
     }
-    form += `<tr><td colspan="2"><input type="submit" value="${t('save-language', translations)}"></td></tr>\n`;},{
+    form += `<tr><td colspan="2"><input type="submit" value="${t('save-language', translations)}"></td></tr>\n`;
     form += '</table></form>\n';
 
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
