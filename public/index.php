@@ -2213,12 +2213,15 @@ if (isset($_GET['image'])) {
 <td>
 <?php if ($username): ?>
 <?php
-  // Check if file is text to show edit link
+  // Check if file is text to show edit button
   $isTextFile = true;
   // For now, we assume text files. In a real implementation, we'd check the file content
   $fileLink = '/' . htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']);
 ?>
-<a href="<?php echo $fileLink; ?>?edit=1">[<?php echo t('edit', $translations); ?>]</a> |
+<form method="GET" action="<?php echo $fileLink; ?>" style="display:inline">
+<input type="hidden" name="edit" value="1">
+<input type="submit" value="<?php echo t('edit', $translations); ?>">
+</form>
 <form method="POST" style="display:inline">
 <input type="hidden" name="action" value="delete_file">
 <input type="hidden" name="target" value="<?php echo htmlspecialchars(basename($file['filename'])); ?>">

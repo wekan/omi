@@ -1708,7 +1708,7 @@ ${contentHtml}
       if (username) {
         let editLink = '';
         if (isText) {
-          editLink = `<a href="${fileLinkPath}?edit=1">[${t('edit', translations)}]</a> | `;
+          editLink = `<form method="GET" action="${fileLinkPath}" style="display:inline"><input type="hidden" name="edit" value="1"><input type="submit" value="${t('edit', translations)}"></form> `;
         }
         actionsHtml = `
   ${editLink}<form method="POST" style="display:inline">
