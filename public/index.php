@@ -801,6 +801,68 @@ function svgContainsXMLDanger($svgContent) {
     return false;
 }
 
+// Get file type label for display
+function getFileTypeLabel($filename) {
+    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    $fileTypes = [
+        'md' => 'Markdown',
+        'markdown' => 'Markdown',
+        'txt' => 'Text',
+        'json' => 'JSON',
+        'csv' => 'CSV',
+        'xml' => 'XML',
+        'yaml' => 'YAML',
+        'yml' => 'YAML',
+        'html' => 'HTML',
+        'htm' => 'HTML',
+        'css' => 'CSS',
+        'js' => 'JavaScript',
+        'py' => 'Python',
+        'php' => 'PHP',
+        'java' => 'Java',
+        'cpp' => 'C++',
+        'c' => 'C',
+        'sh' => 'Shell',
+        'bash' => 'Bash',
+        'sql' => 'SQL',
+        'pdf' => 'PDF',
+        'doc' => 'Word Document',
+        'docx' => 'Word Document',
+        'xls' => 'Excel',
+        'xlsx' => 'Excel',
+        'ppt' => 'PowerPoint',
+        'pptx' => 'PowerPoint',
+        'zip' => 'ZIP Archive',
+        'tar' => 'TAR Archive',
+        'gz' => 'GZ Archive',
+        'rar' => 'RAR Archive',
+        'jpg' => 'JPEG',
+        'jpeg' => 'JPEG',
+        'png' => 'PNG',
+        'gif' => 'GIF',
+        'bmp' => 'Bitmap',
+        'svg' => 'SVG',
+        'webp' => 'WebP',
+        'ico' => 'Icon',
+        'tiff' => 'TIFF',
+        'tif' => 'TIFF',
+        'mp3' => 'MP3 Audio',
+        'wav' => 'WAV Audio',
+        'ogg' => 'OGG Audio',
+        'flac' => 'FLAC Audio',
+        'm4a' => 'M4A Audio',
+        'aac' => 'AAC Audio',
+        'mp4' => 'MP4 Video',
+        'webm' => 'WebM Video',
+        'mkv' => 'Matroska Video',
+        'avi' => 'AVI Video',
+        'mov' => 'QuickTime Video',
+        'flv' => 'Flash Video',
+        'wmv' => 'Windows Media Video'
+    ];
+    return isset($fileTypes[$ext]) ? $fileTypes[$ext] : 'File';
+}
+
 // Add new file commit to database
 function commitFile($db, $filename, $content) {
     try {
@@ -2188,7 +2250,7 @@ if (isset($_GET['image'])) {
   if ($parentPath) $parentUrl .= '/' . htmlspecialchars($parentPath);
 ?>
 <tr>
-<td><a href="<?php echo $parentUrl; ?>">📁 ..</a></td>
+<td><a href="<?php echo $parentUrl; ?>"><?php echo t('directory', $translations); ?> ..</a></td>
 <td>-</td>
 <td>-</td>
 <td>-</td>
@@ -2197,7 +2259,7 @@ if (isset($_GET['image'])) {
 <?php if (!empty($organized['dirs'])): ?>
 <?php foreach ($organized['dirs'] as $dir): ?>
 <tr>
-<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $dir['path']); ?>">📁 <?php echo htmlspecialchars($dir['name']); ?>/</a></td>
+<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $dir['path']); ?>"><?php echo t('directory', $translations); ?> <?php echo htmlspecialchars($dir['name']); ?>/</a></td>
 <td>-</td>
 <td><?php echo htmlspecialchars($dir['datetime']); ?></td>
 <td>-</td>
@@ -2207,7 +2269,7 @@ if (isset($_GET['image'])) {
 <?php if (!empty($organized['files'])): ?>
 <?php foreach ($organized['files'] as $file): ?>
 <tr>
-<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']); ?>">📄 <?php echo htmlspecialchars(basename($file['filename'])); ?></a></td>
+<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']); ?>"><?php echo htmlspecialchars(getFileTypeLabel($file['filename'])); ?> <?php echo htmlspecialchars(basename($file['filename'])); ?></a></td>
 <td><?php echo number_format($file['size']); ?></td>
 <td><?php echo htmlspecialchars($file['datetime']); ?></td>
 <td>

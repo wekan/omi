@@ -691,6 +691,68 @@ function getMediaType(filename) {
   return null;
 }
 
+// Get file type label for display
+function getFileTypeLabel(filename) {
+  const ext = path.extname(filename).toLowerCase().slice(1);
+  const fileTypes = {
+    'md': 'Markdown',
+    'markdown': 'Markdown',
+    'txt': 'Text',
+    'json': 'JSON',
+    'csv': 'CSV',
+    'xml': 'XML',
+    'yaml': 'YAML',
+    'yml': 'YAML',
+    'html': 'HTML',
+    'htm': 'HTML',
+    'css': 'CSS',
+    'js': 'JavaScript',
+    'py': 'Python',
+    'php': 'PHP',
+    'java': 'Java',
+    'cpp': 'C++',
+    'c': 'C',
+    'sh': 'Shell',
+    'bash': 'Bash',
+    'sql': 'SQL',
+    'pdf': 'PDF',
+    'doc': 'Word Document',
+    'docx': 'Word Document',
+    'xls': 'Excel',
+    'xlsx': 'Excel',
+    'ppt': 'PowerPoint',
+    'pptx': 'PowerPoint',
+    'zip': 'ZIP Archive',
+    'tar': 'TAR Archive',
+    'gz': 'GZ Archive',
+    'rar': 'RAR Archive',
+    'jpg': 'JPEG',
+    'jpeg': 'JPEG',
+    'png': 'PNG',
+    'gif': 'GIF',
+    'bmp': 'Bitmap',
+    'svg': 'SVG',
+    'webp': 'WebP',
+    'ico': 'Icon',
+    'tiff': 'TIFF',
+    'tif': 'TIFF',
+    'mp3': 'MP3 Audio',
+    'wav': 'WAV Audio',
+    'ogg': 'OGG Audio',
+    'flac': 'FLAC Audio',
+    'm4a': 'M4A Audio',
+    'aac': 'AAC Audio',
+    'mp4': 'MP4 Video',
+    'webm': 'WebM Video',
+    'mkv': 'Matroska Video',
+    'avi': 'AVI Video',
+    'mov': 'QuickTime Video',
+    'flv': 'Flash Video',
+    'wmv': 'Windows Media Video'
+  };
+  return fileTypes[ext] || 'File';
+}
+
 // Simple markdown to HTML converter (basic support)
 function markdownToHtml(markdown, filePath = '', repoRoot = '', imageMap = {}) {
   let html = markdown.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1769,7 +1831,7 @@ ${contentHtml}
     const organized = organizeFiles(files, repoPath);
     const directoryTitle = repoPath ? escapeHtml(repoPath) : '';
     const dirRows = organized.dirs.map(dir => `<tr>
-  <td><a href="/${escapeHtml(repoRoot)}/${escapeHtml(dir.path)}">📁 ${escapeHtml(dir.name)}/</a></td>
+  <td><a href="/${escapeHtml(repoRoot)}/${escapeHtml(dir.path)}">${t('directory', translations)} ${escapeHtml(dir.name)}/</a></td>
   <td>-</td>
   <td>${escapeHtml(dir.datetime)}</td>
   <td>-</td>
@@ -1781,6 +1843,7 @@ ${contentHtml}
       const fileBasename = escapeHtml(path.basename(file.filename));
       const filePathEscaped = escapeHtml(file.filename);
       const fileLinkPath = `/${escapeHtml(repoRoot)}/${escapeHtml(file.filename)}`;
+      const fileTypeLabel = getFileTypeLabel(file.filename);
       
       let actionsHtml = '-';
       if (username) {
@@ -1806,7 +1869,7 @@ ${contentHtml}
       }
       
       return `<tr>
-  <td><a href="${fileLinkPath}">📄 ${fileBasename}</a></td>
+  <td><a href="${fileLinkPath}">${escapeHtml(fileTypeLabel)} ${fileBasename}</a></td>
   <td>${fileSize}</td>
   <td>${fileDateTime}</td>
   <td>${actionsHtml}</td>

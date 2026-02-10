@@ -484,6 +484,43 @@ begin
     Result := TJSONObject.Create;
 end;
 
+// Convert Scandinavian and special UTF-8 characters to HTML entities
+function ConvertUTF8ToHtmlEntities(Text: string): string;
+begin
+  Result := Text;
+  // Scandinavian lowercase vowels
+  Result := StringReplace(Result, 'ä', '&auml;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ö', '&ouml;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'å', '&aring;', [rfReplaceAll]);
+  // Scandinavian uppercase vowels
+  Result := StringReplace(Result, 'Ä', '&Auml;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'Ö', '&Ouml;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'Å', '&Aring;', [rfReplaceAll]);
+  // Other common special characters
+  Result := StringReplace(Result, 'é', '&eacute;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'è', '&egrave;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ê', '&ecirc;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ë', '&euml;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'á', '&aacute;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'à', '&agrave;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'â', '&acirc;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ã', '&atilde;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ó', '&oacute;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ò', '&ograve;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ô', '&ocirc;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'õ', '&otilde;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ú', '&uacute;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ù', '&ugrave;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'û', '&ucirc;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ü', '&uuml;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ç', '&ccedil;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'Ç', '&Ccedil;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ñ', '&ntilde;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'Ñ', '&Ntilde;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ƒ', '&fnof;', [rfReplaceAll]);
+  Result := StringReplace(Result, 'ß', '&szlig;', [rfReplaceAll]);
+end;
+
 function T(Key: string; Translations: TJSONObject): string;
 var
   JsonValue: TJSONData;
@@ -499,6 +536,8 @@ begin
       Result := Key;
     end;
   end;
+  // Convert UTF-8 Scandinavian characters to HTML entities
+  Result := ConvertUTF8ToHtmlEntities(Result);
 end;
 
 function ifthen(Condition: Boolean; const TrueVal, FalseVal: string): string;
@@ -677,6 +716,8 @@ begin
   Result := StringReplace(Result, '<', '&lt;', [rfReplaceAll]);
   Result := StringReplace(Result, '>', '&gt;', [rfReplaceAll]);
   Result := StringReplace(Result, '"', '&quot;', [rfReplaceAll]);
+  // Convert UTF-8 Scandinavian characters to HTML entities
+  Result := ConvertUTF8ToHtmlEntities(Result);
 end;
 
 function HexToString(const HexValue: string): string;
@@ -1028,6 +1069,8 @@ begin
   end;
 end;
 
+// Convert Scandinavian and special UTF-8 characters to HTML entities
+
 function MarkdownToHtml(Markdown: string): string;
 var
   Lines: TStringArray;
@@ -1101,6 +1144,67 @@ begin
     '.pdf': Result := 'application/pdf';
   else
     Result := 'application/octet-stream';
+  end;
+end;
+
+function GetFileTypeLabel(Filename: string): string;
+var
+  Ext: string;
+begin
+  Ext := LowerCase(ExtractFileExt(Filename));
+  
+  case Ext of
+    '.md', '.markdown': Result := 'Markdown';
+    '.txt': Result := 'Text';
+    '.json': Result := 'JSON';
+    '.csv': Result := 'CSV';
+    '.xml': Result := 'XML';
+    '.yaml', '.yml': Result := 'YAML';
+    '.html', '.htm': Result := 'HTML';
+    '.css': Result := 'CSS';
+    '.js': Result := 'JavaScript';
+    '.py': Result := 'Python';
+    '.php': Result := 'PHP';
+    '.java': Result := 'Java';
+    '.cpp': Result := 'C++';
+    '.c': Result := 'C';
+    '.sh': Result := 'Shell';
+    '.bash': Result := 'Bash';
+    '.sql': Result := 'SQL';
+    '.pdf': Result := 'PDF';
+    '.doc': Result := 'Word Document';
+    '.docx': Result := 'Word Document';
+    '.xls': Result := 'Excel';
+    '.xlsx': Result := 'Excel';
+    '.ppt': Result := 'PowerPoint';
+    '.pptx': Result := 'PowerPoint';
+    '.zip': Result := 'ZIP Archive';
+    '.tar': Result := 'TAR Archive';
+    '.gz': Result := 'GZ Archive';
+    '.rar': Result := 'RAR Archive';
+    '.jpg', '.jpeg': Result := 'JPEG';
+    '.png': Result := 'PNG';
+    '.gif': Result := 'GIF';
+    '.bmp': Result := 'Bitmap';
+    '.svg': Result := 'SVG';
+    '.webp': Result := 'WebP';
+    '.ico': Result := 'Icon';
+    '.tiff', '.tif': Result := 'TIFF';
+    '.mp3': Result := 'MP3 Audio';
+    '.wav': Result := 'WAV Audio';
+    '.ogg': Result := 'OGG Audio';
+    '.flac': Result := 'FLAC Audio';
+    '.m4a': Result := 'M4A Audio';
+    '.aac': Result := 'AAC Audio';
+    '.mp4': Result := 'MP4 Video';
+    '.webm': Result := 'WebM Video';
+    '.mkv': Result := 'Matroska Video';
+    '.avi': Result := 'AVI Video';
+    '.mov': Result := 'QuickTime Video';
+    '.flv': Result := 'Flash Video';
+    '.wmv': Result := 'Windows Media Video';
+  else
+    Result := 'File';
   end;
 end;
 
@@ -2467,7 +2571,7 @@ begin
         RepoRootLink := RepoToRoot(RepoName);
         if ParentPath <> '' then
           RepoRootLink := RepoRootLink + '/' + ParentPath;
-        TableRows := TableRows + '<tr><td><a href="' + RepoRootLink + '">📁 ..</a></td><td>-</td><td>-</td><td>-</td></tr>';
+        TableRows := TableRows + '<tr><td><a href="' + RepoRootLink + '">' + T('directory', Translations) + ' ..</a></td><td>-</td><td>-</td><td>-</td></tr>';
       end;
 
       for I := 0 to DirList.Count - 1 do
@@ -2477,7 +2581,7 @@ begin
         if RepoPath <> '' then
           EntryPath := EntryPath + '/' + RepoPath;
         EntryPath := EntryPath + '/' + DisplayName;
-        TableRows := TableRows + '<tr><td><a href="' + EntryPath + '">📁 ' + HtmlEncode(DisplayName) + '/</a></td><td>-</td><td>-</td><td>-</td></tr>';
+        TableRows := TableRows + '<tr><td><a href="' + EntryPath + '">' + T('directory', Translations) + ' ' + HtmlEncode(DisplayName) + '/</a></td><td>-</td><td>-</td><td>-</td></tr>';
       end;
 
       for I := 0 to FileList.Count - 1 do
@@ -2509,7 +2613,7 @@ begin
             '</div>' +
             '</div>';
         end;
-        TableRows := TableRows + '<tr><td><a href="' + EntryPath + '">📄 ' + HtmlEncode(DisplayName) + '</a></td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
+        TableRows := TableRows + '<tr><td><a href="' + EntryPath + '">' + HtmlEncode(GetFileTypeLabel(DisplayName)) + ' ' + HtmlEncode(DisplayName) + '</a></td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
       end;
 
       if TableRows = '' then
