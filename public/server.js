@@ -602,6 +602,9 @@ function markdownToHtml(markdown) {
   html = html.replace(/__(.+?)__/g, '<b>$1</b>');
   html = html.replace(/_(.+?)_/g, '<i>$1</i>');
   
+  // Images (process before links to avoid conflict)
+  html = html.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; height: auto; border: 1px solid #ccc; margin: 10px 0;">');
+  
   // Links
   html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>');
   
@@ -1386,6 +1389,8 @@ ${form}
 <tr><td>\`code\`</td><td><code>code</code></td></tr>
 <tr><td>\`\`\`<br>code block<br>\`\`\`</td><td>Multi-line code</td></tr>
 <tr><td>[link text](url)</td><td>Clickable link</td></tr>
+<tr><td>![alt text](image.jpg)</td><td>Image from repo or URL</td></tr>
+<tr><td>![alt](https://example.com/img.jpg)</td><td>Image from URL</td></tr>
 </table>`;
         contentHtml = `${markdownRef}<form method="POST">
 <textarea name="file_content" rows="20" cols="80" style="width: 100%; max-width: 800px; font-family: monospace; box-sizing: border-box;">${escapeHtml(displayContent)}</textarea><br><br>

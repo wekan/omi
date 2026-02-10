@@ -614,6 +614,9 @@ function markdownToHtml($markdown) {
     $html = preg_replace('/__(.+?)__/', '<b>$1</b>', $html);
     $html = preg_replace('/_(.+?)_/', '<i>$1</i>', $html);
     
+    // Images (process before links to avoid conflict)
+    $html = preg_replace('/!\[(.*?)\]\((.*?)\)/', '<img src="$2" alt="$1" style="max-width: 100%; height: auto; border: 1px solid #ccc; margin: 10px 0;">', $html);
+    
     // Links
     $html = preg_replace('/\[(.*?)\]\((.*?)\)/', '<a href="$2">$1</a>', $html);
     
@@ -1616,6 +1619,8 @@ if (isset($_GET['image'])) {
 <tr><td>`code`</td><td><code>code</code></td></tr>
 <tr><td>```<br>code block<br>```</td><td>Multi-line code</td></tr>
 <tr><td>[link text](url)</td><td>Clickable link</td></tr>
+<tr><td>![alt text](image.jpg)</td><td>Image from repo or URL</td></tr>
+<tr><td>![alt](https://example.com/img.jpg)</td><td>Image from URL</td></tr>
 </table>
 <form method="POST">
 <textarea name="file_content" rows="20" cols="80" style="width: 100%; max-width: 800px; font-family: monospace; box-sizing: border-box;"><?php echo htmlspecialchars($fileContent); ?></textarea><br><br>
