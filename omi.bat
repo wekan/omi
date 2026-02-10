@@ -8,6 +8,12 @@ FOR /F "tokens=2 delims==" %%A IN ('FIND "USERNAME=" settings.txt') DO SET USERN
 FOR /F "tokens=2 delims==" %%A IN ('FIND "PASSWORD=" settings.txt') DO SET PASSWORD=%%A
 FOR /F "tokens=2 delims==" %%A IN ('FIND "REPOS=" settings.txt') DO SET REPOS=%%A
 FOR /F "tokens=2 delims==" %%A IN ('FIND "CURL=" settings.txt') DO SET CURL=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "API_ENABLED=" settings.txt') DO SET API_ENABLED=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "API_RATE_LIMIT=" settings.txt') DO SET API_RATE_LIMIT=%%A
+
+REM Set defaults
+IF "%API_ENABLED%"=="" SET API_ENABLED=1
+IF "%API_RATE_LIMIT%"=="" SET API_RATE_LIMIT=60
 
 REM Database file
 IF NOT EXIST .omi (
@@ -179,8 +185,28 @@ GOTO END
     GOTO END
   )
 
-  REM Upload using curl
-  %CURL% -f -X POST -F "username=%USERNAME%" -F "password=%PASSWORD%" -F "repo_name=%OMI_DB%" -F "repo_file=@%OMI_DB%" -F "action=Upload" "%REPOS%/"
+  REM Check if API is enabled
+  IF "%API_ENABLED%"=="0" (
+    ECHO Error: API is disabled
+    GOTO END
+  )
+
+  REM Check if user has 2FA enabled (phpusers.txt exists and user has OTP URL)
+  SET HAS_2FA=0
+  IF EXIST "phpusers.txt" (
+    FOR /F "tokens=3 delims=:" %%O IN ('FIND "%USERNAME%:" phpusers.txt') DO (
+      IF NOT "%%O"=="" SET HAS_2FA=1
+    )
+  )
+
+  REM If 2FA enabled, prompt for OTP
+  IF "%HAS_2FA%"=="1" (
+    SET /P OTP_CODE="Enter OTP code (6 digits): "
+    %CURL% -f -X POST -F "username=%USERNAME%" -F "password=%PASSWORD%" -F "repo_name=%OMI_DB%" -F "repo_file=@%OMI_DB%" -F "otp_code=%OTP_CODE%" -F "action=Upload" "%REPOS%/"
+  ) ELSE (
+    REM Upload without OTP
+    %CURL% -f -X POST -F "username=%USERNAME%" -F "password=%PASSWORD%" -F "repo_name=%OMI_DB%" -F "repo_file=@%OMI_DB%" -F "action=Upload" "%REPOS%/"
+  )
 
   IF ERRORLEVEL 0 (
     ECHO Successfully pushed to %REPOS%
@@ -194,8 +220,28 @@ GOTO END
 
   FOR %%F IN ("%OMI_DB%") DO SET REPO_NAME=%%~nxF
 
-  REM Download using curl with authentication
-  %CURL% -f -X POST -d "username=%USERNAME%" -d "password=%PASSWORD%" -d "repo_name=%REPO_NAME%" -d "action=pull" -o "%OMI_DB%" "%REPOS%/"
+  REM Check if API is enabled
+  IF "%API_ENABLED%"=="0" (
+    ECHO Error: API is disabled
+    GOTO END
+  )
+
+  REM Check if user has 2FA enabled (phpusers.txt exists and user has OTP URL)
+  SET HAS_2FA=0
+  IF EXIST "phpusers.txt" (
+    FOR /F "tokens=3 delims=:" %%O IN ('FIND "%USERNAME%:" phpusers.txt') DO (
+      IF NOT "%%O"=="" SET HAS_2FA=1
+    )
+  )
+
+  REM If 2FA enabled, prompt for OTP
+  IF "%HAS_2FA%"=="1" (
+    SET /P OTP_CODE="Enter OTP code (6 digits): "
+    %CURL% -f -X POST -d "username=%USERNAME%" -d "password=%PASSWORD%" -d "repo_name=%REPO_NAME%" -d "otp_code=%OTP_CODE%" -d "action=pull" -o "%OMI_DB%" "%REPOS%/"
+  ) ELSE (
+    REM Download without OTP
+    %CURL% -f -X POST -d "username=%USERNAME%" -d "password=%PASSWORD%" -d "repo_name=%REPO_NAME%" -d "action=pull" -o "%OMI_DB%" "%REPOS%/"
+  )
 
   IF ERRORLEVEL 0 (
     ECHO Successfully pulled from %REPOS%

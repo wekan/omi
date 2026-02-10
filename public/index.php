@@ -215,6 +215,88 @@ function verifyTOTP($secret, $code, $window = 1) {
     return false;
 }
 
+// API rate limiting tracking
+define('API_RATE_LIMIT_FILE', __DIR__ . '/../api_rate_limit.txt');
+
+function trackAPIRequest($username) {
+    $line = $username . ':' . time() . "\n";
+    file_put_contents(API_RATE_LIMIT_FILE, $line, FILE_APPEND | LOCK_EX);
+}
+
+function getAPIRateInfo($username) {
+    $settings = loadSettings();
+    $apiEnabled = intval($settings['API_ENABLED'] ?? 1);
+    $rateLimit = intval($settings['API_RATE_LIMIT'] ?? 60);
+    $rateWindow = intval($settings['API_RATE_LIMIT_WINDOW'] ?? 60);
+
+    if (!$apiEnabled) {
+        return ['enabled' => false, 'message' => 'API is disabled'];
+    }
+
+    if (!file_exists(API_RATE_LIMIT_FILE)) {
+        return ['enabled' => true, 'remaining' => $rateLimit, 'reset' => time() + $rateWindow];
+    }
+
+    $lines = file(API_RATE_LIMIT_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $recentRequests = [];
+    foreach ($lines as $line) {
+        $parts = explode(':', $line, 2);
+        if (count($parts) === 2 && trim($parts[0]) === $username) {
+            $timestamp = intval($parts[1]);
+            if (time() - $timestamp < $rateWindow) {
+                $recentRequests[] = $timestamp;
+            }
+        }
+    }
+
+    $remaining = $rateLimit - count($recentRequests);
+
+    if ($remaining <= 0) {
+        $resetTime = min($recentRequests) + $rateWindow;
+        $waitTime = max(1, $resetTime - time());
+        return [
+            'enabled' => true,
+            'limited' => true,
+            'remaining' => 0,
+            'reset' => $resetTime,
+            'wait_seconds' => $waitTime
+        ];
+    }
+
+    $reset = !empty($recentRequests) ? max($recentRequests) + $rateWindow : time() + $rateWindow;
+
+    return [
+        'enabled' => true,
+        'limited' => false,
+        'remaining' => $remaining,
+        'reset' => $reset,
+        'requests_count' => count($recentRequests)
+    ];
+}
+
+// Clean up old API rate limit entries (older than 1 hour)
+function cleanupOldRateLimitEntries() {
+    if (!file_exists(API_RATE_LIMIT_FILE)) {
+        return;
+    }
+    $lines = file(API_RATE_LIMIT_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $newContent = '';
+    foreach ($lines as $line) {
+        $parts = explode(':', $line, 2);
+        if (count($parts) === 2) {
+            $timestamp = intval($parts[1]);
+            if (time() - $timestamp < 3600) {
+                $newContent .= $line . "\n";
+            }
+        }
+    }
+    if (!empty($newContent)) {
+        file_put_contents(API_RATE_LIMIT_FILE, $newContent, LOCK_EX);
+    } else {
+        @unlink(API_RATE_LIMIT_FILE);
+    }
+}
+
 // Simple authentication check with OTP support
 function authenticate($username, $password, $otpCode = '') {
     $users = loadUsers();
@@ -1331,14 +1413,63 @@ if (isset($_GET['image'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
+    $otpCode = $_POST['otp_code'] ?? '';
     $action = $_POST['action'] ?? 'Upload';
 
+    // Check if API is enabled
+    $settings = loadSettings();
+    if (intval($settings['API_ENABLED'] ?? 1) === 0) {
+        http_response_code(503);
+        echo json_encode(['error' => 'API is disabled', 'api_disabled' => true]);
+        exit;
+    }
+
+    // Get rate limit info (also cleans up old entries)
+    cleanupOldRateLimitEntries();
+    $rateInfo = getAPIRateInfo($username);
+
+    if (!$rateInfo['enabled']) {
+        http_response_code(503);
+        echo json_encode(['error' => $rateInfo['message'], 'api_disabled' => true]);
+        exit;
+    }
+
+    if (isset($rateInfo['limited']) && $rateInfo['limited']) {
+        http_response_code(429);
+        header('X-RateLimit-Remaining: 0');
+        header('X-RateLimit-Reset: ' . $rateInfo['reset']);
+        header('Retry-After: ' . $rateInfo['wait_seconds']);
+        echo json_encode([
+            'error' => 'Rate limit exceeded',
+            'rate_limit_reset' => $rateInfo['reset'],
+            'retry_after_seconds' => $rateInfo['wait_seconds']
+        ]);
+        exit;
+    }
+
     // Authenticate
-    if (!authenticate($username, $password)) {
+    $authResult = authenticate($username, $password, $otpCode);
+
+    if ($authResult === 'OTP_REQUIRED') {
+        http_response_code(401);
+        echo json_encode(['error' => 'OTP code required', 'otp_required' => true]);
+        exit;
+    }
+
+    if (!$authResult) {
         http_response_code(401);
         echo json_encode(['error' => 'Authentication failed']);
         exit;
     }
+
+    // Track the API request
+    trackAPIRequest($username);
+    $rateInfo = getAPIRateInfo($username);
+
+    // Send rate limit headers
+    header('X-RateLimit-Limit: ' . intval($settings['API_RATE_LIMIT'] ?? 60));
+    header('X-RateLimit-Remaining: ' . $rateInfo['remaining']);
+    header('X-RateLimit-Reset: ' . $rateInfo['reset']);
 
     // Handle upload
     if ($action === 'Upload' && isset($_FILES['repo_file'])) {
@@ -1359,7 +1490,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 echo json_encode([
                     'success' => true,
                     'message' => "Repository $repo_name uploaded successfully",
-                    'size' => filesize($target_path)
+                    'size' => filesize($target_path),
+                    'rate_limit_remaining' => $rateInfo['remaining']
                 ]);
             } else {
                 http_response_code(500);
@@ -1381,6 +1513,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Content-Type: application/octet-stream');
             header('Content-Disposition: attachment; filename="' . $repo_name . '"');
             header('Content-Length: ' . filesize($filepath));
+            header('X-RateLimit-Limit: ' . intval($settings['API_RATE_LIMIT'] ?? 60));
+            header('X-RateLimit-Remaining: ' . $rateInfo['remaining']);
+            header('X-RateLimit-Reset: ' . $rateInfo['reset']);
             readfile($filepath);
             exit;
         } else {

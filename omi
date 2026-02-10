@@ -17,7 +17,14 @@ Search T:omi_settings "REPOS=" >T:omi_var
 Execute <T:omi_var
 Search T:omi_settings "CURL=" >T:omi_var
 Execute <T:omi_var
+Search T:omi_settings "API_ENABLED=" >T:omi_var
+Execute <T:omi_var
 Delete T:omi_settings T:omi_var QUIET
+
+; Set defaults
+If Not Defined API_ENABLED
+  Set API_ENABLED 1
+EndIf
 
 ; Get command and arguments
 Set OMI_CMD {COMMAND}
@@ -157,8 +164,30 @@ LAB PUSH_CHANGES
     Return
   EndIf
 
-  ; Upload using curl
-  $CURL -f -X POST -F "username=$USERNAME" -F "password=$PASSWORD" -F "repo_name=$OMI_DB" -F "repo_file=@$OMI_DB" -F "action=Upload" "$REPOS/"
+  ; Check if API is enabled
+  If "$API_ENABLED" EQ "0"
+    Echo "Error: API is disabled"
+    Return
+  EndIf
+
+  ; Check if user has 2FA enabled (simple check for phpusers.txt)
+  If Exists "phpusers.txt"
+    Search "phpusers.txt" "$USERNAME:" >T:omi_user
+    If Not WARN
+      ; User entry found, check if has OTP (third field)
+      ; For AmigaShell simplicity, just prompt for OTP
+      RequestChoice "2FA Required" "OTP code needed for this user" "OK"
+      RequestString "otp_code" "Enter OTP code (6 digits):" "" "      "
+      $CURL -f -X POST -F "username=$USERNAME" -F "password=$PASSWORD" -F "repo_name=$OMI_DB" -F "repo_file=@$OMI_DB" -F "otp_code=$otp_code" -F "action=Upload" "$REPOS/"
+    Else
+      ; No 2FA
+      $CURL -f -X POST -F "username=$USERNAME" -F "password=$PASSWORD" -F "repo_name=$OMI_DB" -F "repo_file=@$OMI_DB" -F "action=Upload" "$REPOS/"
+    EndIf
+    Delete T:omi_user QUIET
+  Else
+    ; No phpusers.txt, proceed without 2FA
+    $CURL -f -X POST -F "username=$USERNAME" -F "password=$PASSWORD" -F "repo_name=$OMI_DB" -F "repo_file=@$OMI_DB" -F "action=Upload" "$REPOS/"
+  EndIf
 
   If WARN
     Echo "Successfully pushed to $REPOS"
@@ -170,8 +199,30 @@ LAB PUSH_CHANGES
 LAB PULL_CHANGES
   Echo "Pulling $OMI_DB from remote..."
 
-  ; Download using curl with authentication
-  $CURL -f -X POST -d "username=$USERNAME" -d "password=$PASSWORD" -d "repo_name=$OMI_DB" -d "action=pull" -o "$OMI_DB" "$REPOS/"
+  ; Check if API is enabled
+  If "$API_ENABLED" EQ "0"
+    Echo "Error: API is disabled"
+    Return
+  EndIf
+
+  ; Check if user has 2FA enabled (simple check for phpusers.txt)
+  If Exists "phpusers.txt"
+    Search "phpusers.txt" "$USERNAME:" >T:omi_user
+    If Not WARN
+      ; User entry found, check if has OTP (third field)
+      ; For AmigaShell simplicity, just prompt for OTP
+      RequestChoice "2FA Required" "OTP code needed for this user" "OK"
+      RequestString "otp_code" "Enter OTP code (6 digits):" "" "      "
+      $CURL -f -X POST -d "username=$USERNAME" -d "password=$PASSWORD" -d "repo_name=$OMI_DB" -d "otp_code=$otp_code" -d "action=pull" -o "$OMI_DB" "$REPOS/"
+    Else
+      ; No 2FA
+      $CURL -f -X POST -d "username=$USERNAME" -d "password=$PASSWORD" -d "repo_name=$OMI_DB" -d "action=pull" -o "$OMI_DB" "$REPOS/"
+    EndIf
+    Delete T:omi_user QUIET
+  Else
+    ; No phpusers.txt, proceed without 2FA
+    $CURL -f -X POST -d "username=$USERNAME" -d "password=$PASSWORD" -d "repo_name=$OMI_DB" -d "action=pull" -o "$OMI_DB" "$REPOS/"
+  EndIf
 
   If WARN
     Echo "Successfully pulled from $REPOS"
