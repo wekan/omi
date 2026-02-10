@@ -692,7 +692,7 @@ function getMediaType(filename) {
 }
 
 // Simple markdown to HTML converter (basic support)
-function markdownToHtml(markdown, filePath = '', repoRoot = '') {
+function markdownToHtml(markdown, filePath = '', repoRoot = '', imageMap = {}) {
   let html = markdown.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   
   // Headers
@@ -708,6 +708,11 @@ function markdownToHtml(markdown, filePath = '', repoRoot = '') {
   
   // Images (process before links to avoid conflict)
   html = html.replace(/!\[(.*?)\]\((.*?)\)/g, (match, alt, src) => {
+    // Check if image is in the map (already loaded as data URI)
+    if (imageMap[src]) {
+      return `<img src="${imageMap[src]}" alt="${alt}" style="max-width: 100%; height: auto; border: 1px solid #ccc; margin: 10px 0;">`;
+    }
+    
     // If image path is relative (doesn't start with / or http), resolve it relative to current directory
     let resolvedSrc = src;
     if (!src.startsWith('/') && !src.startsWith('http://') && !src.startsWith('https://')) {
@@ -1681,9 +1686,56 @@ ${form}
 <p>Hash: ${escapeHtml(fileEntry.hash)}</p>`;
         }
       } else if (isMarkdownFile(fileEntry.filename)) {
-        // Render markdown (pass file path and repo root for relative image resolution)
+        // Extract image paths from markdown and load them from database
+        const imageMap = {};
+        const imagePattern = /!\[.*?\]\((.*?)\)/g;
+        let match;
+        
+        // Get all files in the repo to find images
+        let allRepoFiles = [];
+        try {
+          allRepoFiles = await getLatestFiles(dbPath, '', sqliteCmd);
+        } catch (e) {
+          // Fallback to current files list if error
+          allRepoFiles = files;
+        }
+        
+        while ((match = imagePattern.exec(displayContent)) !== null) {
+          const imgPath = match[1];
+          // Skip external URLs
+          if (imgPath.startsWith('http://') || imgPath.startsWith('https://') || imgPath.startsWith('/')) {
+            continue;
+          }
+          
+          // Resolve relative path
+          const fileDir = fileEntry.filename.includes('/') ? fileEntry.filename.slice(0, fileEntry.filename.lastIndexOf('/')) : '';
+          const resolvedPath = fileDir ? `${fileDir}/${imgPath}` : imgPath;
+          
+          // Find image in all repo files and load its content
+          const imgEntry = allRepoFiles.find(f => f.filename === resolvedPath);
+          if (imgEntry) {
+            try {
+              const imgContent = await getFileContent(dbPath, imgEntry.hash, sqliteCmd);
+              if (imgContent) {
+                const ext = path.extname(resolvedPath).toLowerCase().slice(1);
+                const mimeTypes = {
+                  'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+                  'gif': 'image/gif', 'bmp': 'image/bmp', 'webp': 'image/webp',
+                  'ico': 'image/x-icon', 'tiff': 'image/tiff', 'tif': 'image/tiff'
+                };
+                const mimeType = mimeTypes[ext] || 'image/jpeg';
+                const base64Data = imgContent.toString('base64');
+                imageMap[imgPath] = `data:${mimeType};base64,${base64Data}`;
+              }
+            } catch (e) {
+              // Image not found, keep original path
+            }
+          }
+        }
+        
+        // Render markdown with embedded images
         contentHtml = `<div style="font-family: Arial, sans-serif; line-height: 1.6;">
-${markdownToHtml(displayContent, fileEntry.filename, repoRoot)}
+${markdownToHtml(displayContent, fileEntry.filename, repoRoot, imageMap)}
 </div>`;
       } else {
         // Show raw text in pre tag
