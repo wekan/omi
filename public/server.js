@@ -1314,6 +1314,18 @@ ${form}
         }
       }
 
+      if (action === 'save_file') {
+        const newContent = postData.file_content || '';
+        try {
+          await commitFileToRepo(dbPath, fileEntry.filename, newContent, username, `Updated: ${path.basename(fileEntry.filename)}`, sqliteCmd);
+          actionMessage = 'File saved successfully';
+          actionMessageIsError = false;
+        } catch {
+          actionMessage = 'Failed to save file';
+          actionMessageIsError = true;
+        }
+      }
+
       files = await getLatestFiles(dbPath, repoPath, sqliteCmd);
     }
 
@@ -1334,10 +1346,19 @@ ${form}
 
       const isText = fileContent && isTextFile(fileContent);
       const displayContent = isText ? fileContent.toString('utf8') : '';
+      const inEditMode = query.edit === '1' && isText;
       const actionMessageHtml = actionMessage
         ? `<p><font color="${actionMessageIsError ? 'red' : 'green'}"><strong>${escapeHtml(actionMessage)}</strong></font></p>`
         : '';
       const fileActions = username ? `
+    <p>
+    <form method="GET" style="display:inline">
+    <input type="submit" formaction="?download=1" value="Download">
+    </form>
+    ${isText ? `<form method="GET" style="display:inline">
+    <input type="hidden" name="edit" value="1">
+    <input type="submit" value="Edit">
+    </form>` : ''}
     <form method="POST" style="display:inline">
     <input type="hidden" name="action" value="delete_file">
     <input type="submit" value="Delete" onclick="return confirm('Delete file ${escapeHtml(fileName)}?')">
@@ -1347,11 +1368,32 @@ ${form}
     <input type="text" name="new_name" size="20" placeholder="New name">
     <input type="submit" value="Rename">
     </form>
+    </p>
     ` : '';
       
-      // Determine content display based on file type
+      // Determine content display based on file type and edit mode
       let contentHtml = '';
-      if (!isText) {
+      if (inEditMode) {
+        // Edit mode - show textarea with markdown reference
+        const markdownRef = `<p><b>Markdown Syntax Reference:</b></p>
+<table border="1" cellpadding="5" style="font-size: 12px; margin-bottom: 20px;">
+<tr><th>Syntax</th><th>Result</th></tr>
+<tr><td># Heading 1</td><td>Large heading</td></tr>
+<tr><td>## Heading 2</td><td>Medium heading</td></tr>
+<tr><td>### Heading 3</td><td>Small heading</td></tr>
+<tr><td>**bold text**</td><td><b>bold text</b></td></tr>
+<tr><td>*italic text*</td><td><i>italic text</i></td></tr>
+<tr><td>\`code\`</td><td><code>code</code></td></tr>
+<tr><td>\`\`\`<br>code block<br>\`\`\`</td><td>Multi-line code</td></tr>
+<tr><td>[link text](url)</td><td>Clickable link</td></tr>
+</table>`;
+        contentHtml = `${markdownRef}<form method="POST">
+<textarea name="file_content" rows="20" cols="80" style="width: 100%; max-width: 800px; font-family: monospace; box-sizing: border-box;">${escapeHtml(displayContent)}</textarea><br><br>
+<input type="hidden" name="action" value="save_file">
+<input type="submit" value="Save">
+<input type="button" value="Cancel" onclick="window.location.href='?'">
+</form>`;
+      } else if (!isText) {
         contentHtml = `<p><strong>Binary file (${fileContent ? fileContent.length : 0} bytes)</strong></p>`;
       } else if (isMarkdownFile(fileEntry.filename)) {
         // Render markdown
@@ -1395,23 +1437,41 @@ ${contentHtml}
   <td>${escapeHtml(dir.datetime)}</td>
   <td>-</td>
   </tr>`).join('\n');
-    const fileRows = organized.files.map(file => `<tr>
-  <td><a href="/${escapeHtml(repoRoot)}/${escapeHtml(file.filename)}">📄 ${escapeHtml(path.basename(file.filename))}</a></td>
-  <td>${Number(file.size).toLocaleString()}</td>
-  <td>${escapeHtml(file.datetime)}</td>
-  <td>${username ? `
-  <form method="POST" style="display:inline">
+    const fileRows = organized.files.map(file => {
+      const isText = isTextFile(Buffer.from(file.data || '', 'base64'));
+      const fileSize = Number(file.size).toLocaleString();
+      const fileDateTime = escapeHtml(file.datetime);
+      const fileBasename = escapeHtml(path.basename(file.filename));
+      const filePathEscaped = escapeHtml(file.filename);
+      const fileLinkPath = `/${escapeHtml(repoRoot)}/${escapeHtml(file.filename)}`;
+      
+      let actionsHtml = '-';
+      if (username) {
+        let editLink = '';
+        if (isText) {
+          editLink = `<a href="${fileLinkPath}?edit=1">[Edit]</a> | `;
+        }
+        actionsHtml = `
+  ${editLink}<form method="POST" style="display:inline">
   <input type="hidden" name="action" value="delete_file">
   <input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}">
-  <input type="submit" value="Delete" onclick="return confirm('Delete file ${escapeHtml(path.basename(file.filename))}?')">
+  <input type="submit" value="Delete" onclick="return confirm('Delete file ${fileBasename}?')">
   </form>
   <form method="POST" style="display:inline">
   <input type="hidden" name="action" value="rename_file">
   <input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}">
   <input type="text" name="new_name" size="12" placeholder="New name">
   <input type="submit" value="Rename">
-  </form>` : '-'}</td>
-  </tr>`).join('\n');
+  </form>`;
+      }
+      
+      return `<tr>
+  <td><a href="${fileLinkPath}">📄 ${fileBasename}</a></td>
+  <td>${fileSize}</td>
+  <td>${fileDateTime}</td>
+  <td>${actionsHtml}</td>
+  </tr>`;
+    }).join('\n');
     const emptyRow = (!organized.dirs.length && !organized.files.length) ? '<tr><td colspan="4">No files in this directory</td></tr>' : '';
 
     const actionMessageHtml = actionMessage

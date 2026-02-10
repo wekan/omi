@@ -1583,13 +1583,19 @@ if (isset($_GET['image'])) {
 <hr>
 <?php else: ?>
 <?php if ($username): ?>
-<p>
-<a href="?download=1">[Download]</a>
+<form method="GET" style="display:inline">
+<input type="submit" formaction="?download=1" value="Download">
+</form>
 <?php if ($isText): ?>
-| <a href="?edit=1">[Edit]</a>
+<form method="GET" style="display:inline">
+<input type="hidden" name="edit" value="1">
+<input type="submit" value="Edit">
+</form>
 <?php endif; ?>
-| <a href="?delete=1">[Delete]</a>
-</p>
+<form method="GET" style="display:inline">
+<input type="hidden" name="delete" value="1">
+<input type="submit" value="Delete" onclick="return confirm('Delete this file?')">
+</form>
 <?php endif; ?>
 <?php if (isset($success_msg)): ?>
 <p><font color="green"><strong><?php echo htmlspecialchars($success_msg); ?></strong></font></p>
@@ -1599,9 +1605,22 @@ if (isset($_GET['image'])) {
 <?php endif; ?>
 <hr>
 <?php if ($in_edit): ?>
+<p><b>Markdown Syntax Reference:</b></p>
+<table border="1" cellpadding="5" style="font-size: 12px; margin-bottom: 20px;">
+<tr><th>Syntax</th><th>Result</th></tr>
+<tr><td># Heading 1</td><td>Large heading</td></tr>
+<tr><td>## Heading 2</td><td>Medium heading</td></tr>
+<tr><td>### Heading 3</td><td>Small heading</td></tr>
+<tr><td>**bold text**</td><td><b>bold text</b></td></tr>
+<tr><td>*italic text*</td><td><i>italic text</i></td></tr>
+<tr><td>`code`</td><td><code>code</code></td></tr>
+<tr><td>```<br>code block<br>```</td><td>Multi-line code</td></tr>
+<tr><td>[link text](url)</td><td>Clickable link</td></tr>
+</table>
 <form method="POST">
-<textarea name="file_content" rows="20" cols="80"><?php echo htmlspecialchars($fileContent); ?></textarea><br>
-<input type="submit" name="save_file" value="Save"> | <a href="?">[Cancel]</a>
+<textarea name="file_content" rows="20" cols="80" style="width: 100%; max-width: 800px; font-family: monospace; box-sizing: border-box;"><?php echo htmlspecialchars($fileContent); ?></textarea><br><br>
+<input type="submit" name="save_file" value="Save">
+<input type="submit" formaction="?" formmethod="GET" value="Cancel">
 </form>
 <?php else: ?>
 <?php if ($isText): ?>
@@ -1909,6 +1928,13 @@ if (isset($_GET['image'])) {
 <td><?php echo htmlspecialchars($file['datetime']); ?></td>
 <td>
 <?php if ($username): ?>
+<?php
+  // Check if file is text to show edit link
+  $isTextFile = true;
+  // For now, we assume text files. In a real implementation, we'd check the file content
+  $fileLink = '/' . htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']);
+?>
+<a href="<?php echo $fileLink; ?>?edit=1">[Edit]</a> |
 <form method="POST" style="display:inline">
 <input type="hidden" name="action" value="delete_file">
 <input type="hidden" name="target" value="<?php echo htmlspecialchars(basename($file['filename'])); ?>">
