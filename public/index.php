@@ -2259,7 +2259,7 @@ if (isset($_GET['image'])) {
 <form method="POST">
 <input type="text" name="file_name" size="30" placeholder="notes.txt">
 <br>
-<textarea name="file_content" rows="6" cols="60" placeholder="<?php echo t('enter-file-contents', $translations); ?>"></textarea>
+<textarea name="file_content" rows="6" cols="60" placeholder="<?php echo t('write-file-contents', $translations); ?>"></textarea>
 <br>
 <input type="hidden" name="action" value="create_file">
 <input type="submit" value="<?php echo t('create-file', $translations); ?>">

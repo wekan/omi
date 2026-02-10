@@ -1717,7 +1717,7 @@
   "create-text-file": "Create Text File",
   "create-file": "Create File",
   "upload-file-directory": "Upload File to This Directory",
-  "enter-file-contents": "Enter file contents",
+  "write-file-contents": "Write file contents",
   "login-to-upload-files": "Login to upload files",
   "settings-updated": "Settings updated successfully",
   "settings-update-failed": "Failed to save settings",
