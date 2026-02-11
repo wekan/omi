@@ -5,13 +5,51 @@
 Difference to Fossil SCM is, that Omi stores deduplicated files to SQLite as blobs without compressing,
 this simplifies implementation and porting to limited CPU resources like Amiga and FreeDOS.
 
-## Omi Logo
+## Features
+- [X] Cross-platform CLI and Web UI
+  - [X] File deduplication via SHA256 hashing
+  - [X] SQLite-based storage
+- CLI
+  - [X] Git-like commands (`init`, `clone`, `add`, `commit`, `push`, `pull`)
+- Web
+  - [X] HTML 3.2 compatible (works with IBrowse, Dillo, Elinks, w3m)
+  - [X] User account management with passwords and 2FA/TOTP
+  - [X] Brute force protection and API rate limiting
+  - [X] Web-based file management (upload, download, edit, delete)
+  - [X] Markdown rendering and SVG viewing
+  - [X] Audio/video player support
+
+## Logo
 
 <img src="public/img/logo.jpg" width="60%" alt="Omi logo" />
 
-## Omi Screenshot
+## Web UI: HTML 3.2 compatible
 
 <img src="public/img/screenshot-phpserver.png" width="100%" alt="Omi PHP Server screenshot" />
+
+### Server Platforms Supported
+- PHP
+- JavaScript/Node.js/Bun/Deno
+- FreePascal
+
+### URLs
+- **Repo default URLs**: PHP `http://localhost:8000`, Node.js `http://localhost:8080/`, FreePascal `http://localhost:3001`
+- **Sign In**: `/sign-in`
+- **Create Account**: `/sign-up`
+- **Browse Repo**: `/reponame`
+- **Manage Users**: `/people` (login required)
+- **Settings**: `/settings` (login required)
+
+## CLI: Bash, FreeDOS .bat, AmigaShell, etc
+```bash
+cd omi/cli
+./omi.sh init              # Initialize repository
+./omi.sh add --all         # Stage files
+./omi.sh commit -m "msg"   # Create commit
+./omi.sh push              # Upload to server
+./omi.sh pull              # Download from server
+./omi.sh list              # Show available repos
+```
 
 ### CLI Platforms Supported
 - **AmigaShell** (Amiga systems) - [cli/omi.amigashell](cli/omi.amigashell)
@@ -23,44 +61,6 @@ this simplifies implementation and porting to limited CPU resources like Amiga a
 - **C# / Mono** (Compiled CLI with .NET compatibility) - [cli/omi.cs](cli/omi.cs)
 - **C89** (Portable C implementation for classic/modern systems) - [cli/omi.c](cli/omi.c)
 - **Tcl 8.5+** (Tclsh scripting language) - [cli/omi.tcl](cli/omi.tcl)
-
-### Web Server Platforms Supported
-- **Web Browser** (PHP interface - HTML 3.2 compatible)
-- **Web Browser** (JavaScript/Node.js/Bun/Deno server - HTML 3.2 compatible)
-- **Web Browser** (FreePascal server - HTML 3.2 compatible, needs fixes for scandinavian characters)
-
-### Features
-- [X] Git-like commands (`init`, `clone`, `add`, `commit`, `push`, `pull`)
-- [X] File deduplication via SHA256 hashing
-- [X] SQLite-based storage
-- [X] Cross-platform CLI and web UI
-- [X] Web-based file management (upload, download, edit, delete)
-- [X] Markdown rendering and SVG viewing
-- [X] Audio/video player support
-- [X] User account management with passwords and 2FA/TOTP
-- [X] Brute force protection and API rate limiting
-- [X] HTML 3.2 compatible (works with IBrowse, Dillo, Elinks, w3m)
-
-## Quick Start
-
-### CLI (Bash)
-```bash
-cd omi/cli
-./omi.sh init              # Initialize repository
-./omi.sh add --all         # Stage files
-./omi.sh commit -m "msg"   # Create commit
-./omi.sh push              # Upload to server
-./omi.sh pull              # Download from server
-./omi.sh list              # Show available repos
-```
-
-### Web UI
-- **Repo URL example**: `http://localhost:8000`
-- **Sign In**: `/sign-in`
-- **Create Account**: `/sign-up`
-- **Browse Repo**: `/reponame`
-- **Manage Users**: `/people` (login required)
-- **Settings**: `/settings` (login required)
 
 ## Documentation
 
@@ -126,4 +126,3 @@ lua build.lua
 
 - [Fossil SCM](https://fossil-scm.org/) - Original DVCS with SQLite
 - [WeDOS](https://github.com/wekan/wedos) - Kanban board (FreeDOS + Bash)
-
