@@ -29,7 +29,7 @@ this simplifies implementation and porting to limited CPU resources like Amiga a
 
 ### Server Platforms Supported
 - PHP
-- JavaScript/Node.js/Bun/Deno
+- JavaScript: Node.js/Bun/Deno
 - FreePascal
 
 ### URLs
