@@ -5,7 +5,13 @@
 Difference to Fossil SCM is, that Omi stores deduplicated files to SQLite as blobs without compressing,
 this simplifies implementation and porting to limited CPU resources like Amiga and FreeDOS.
 
-<img src="public/logo.jpg" width="60%" alt="Omi logo" />
+## Omi Logo
+
+<img src="public/img/logo.jpg" width="60%" alt="Omi logo" />
+
+## Omi Screenshot
+
+<img src="public/img/screenshot-phpserver.png" width="100%" alt="Omi PHP Server screenshot" />
 
 ### CLI Platforms Supported
 - **AmigaShell** (Amiga systems) - [cli/omi.amigashell](cli/omi.amigashell)
