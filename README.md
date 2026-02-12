@@ -5,6 +5,11 @@
 Difference to Fossil SCM is, that Omi stores deduplicated files to SQLite as blobs without compressing,
 this simplifies implementation and porting to limited CPU resources like Amiga and FreeDOS.
 
+CLI uses commands like SQLite and CURL, so for "omi push" it would upload text and files to server, using HTTP(S) FORM, POST, upload field etc.
+There is username, password, 2FA and language at users.txt for login.
+
+Server is like GitHub, so it has login to API and web UI.
+
 ## Features
 - [X] Cross-platform CLI and Web UI
   - [X] File deduplication via SHA256 hashing
