@@ -376,6 +376,19 @@ begin
     Result := Trim(ARequest.QueryFields.Values['sessionId']);
 end;
 
+function AddSessionIdToTarget(const TargetPath, SessionId: string): string;
+begin
+  Result := TargetPath;
+  if Trim(SessionId) = '' then
+    Exit;
+  if Pos('sessionId=', Result) > 0 then
+    Exit;
+  if Pos('?', Result) > 0 then
+    Result := Result + '&sessionId=' + SessionId
+  else
+    Result := Result + '?sessionId=' + SessionId;
+end;
+
 function GetClientIp(ARequest: TRequest): string;
 begin
   Result := Trim(ARequest.CustomHeaders.Values['X-Forwarded-For']);
@@ -2104,7 +2117,7 @@ begin
         if NavTarget <> '' then
         begin
           AResponse.Code := 302;
-          AResponse.Location := NavTarget;
+          AResponse.Location := AddSessionIdToTarget(NavTarget, SessionId);
           AResponse.Content := '';
           Exit;
         end;
@@ -3132,7 +3145,7 @@ begin
       if NavTarget <> '' then
       begin
         AResponse.Code := 302;
-        AResponse.Location := NavTarget;
+        AResponse.Location := AddSessionIdToTarget(NavTarget, SessionId);
         AResponse.Content := '';
         Exit;
       end;

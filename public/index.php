@@ -596,7 +596,21 @@ function verifyAndConsumeActionToken($requiredAction = '') {
 }
 
 function isAllowedNavTarget($target) {
-    return in_array($target, ['/', '/settings', '/people', '/language', '/activity', '/logout'], true);
+    if (in_array($target, ['/', '/settings', '/people', '/language', '/activity', '/logout'], true)) {
+        return true;
+    }
+    return preg_match('#^/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$#', (string)$target) === 1;
+}
+
+function addSessionToTarget($target) {
+    $target = (string)$target;
+    $sidName = session_name();
+    $sidValue = session_id();
+    if ($sidName === '' || $sidValue === '' || strpos($target, $sidName . '=') !== false) {
+        return $target;
+    }
+    $separator = (strpos($target, '?') !== false) ? '&' : '?';
+    return $target . $separator . rawurlencode($sidName) . '=' . rawurlencode($sidValue);
 }
 
 function buildNavButton($target, $label) {
@@ -1408,7 +1422,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nav_target']) && isLo
             $target = '/';
         }
         logActivity(getUsername() ?? '', 'nav-go', 'ok', 'navigate to ' . $target, intval($_SESSION['session_meta']['clickCounter'] ?? 0));
-        header('Location: ' . $target);
+        header('Location: ' . addSessionToTarget($target));
         exit;
     }
     logActivity(getUsername() ?? '', 'nav-go', 'invalid-token', 'navigation denied', intval($_SESSION['session_meta']['clickCounter'] ?? 0));
@@ -2944,7 +2958,7 @@ if (isset($_GET['image'])) {
 <?php else: ?>
 <?php foreach ($repos as $repo): ?>
 <tr>
-<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repo['name'])); ?>"><?php echo htmlspecialchars($repo['name']); ?></a></td>
+<td><?php echo buildNavButton('/' . str_replace('.omi', '', $repo['name']), $repo['name']); ?></td>
 <td><?php echo number_format($repo['size']); ?></td>
 <td><?php echo htmlspecialchars(date('Y-m-d H:i:s', $repo['modified'])); ?></td>
 <td><a href="?download=<?php echo urlencode($repo['name']); ?>"><?php echo t('download', $translations); ?></a> <a href="?log=<?php echo urlencode($repo['name']); ?>"><?php echo t('log', $translations); ?></a></td>

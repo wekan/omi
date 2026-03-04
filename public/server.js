@@ -211,6 +211,59 @@ function buildAuthHiddenFields(req, actionName) {
     `<input type="hidden" name="auth_hash" value="${escapeHtml(hash)}">`;
 }
 
+function isAllowedNavTarget(target) {
+  if (['/', '/settings', '/people', '/language', '/activity', '/logout'].includes(target)) {
+    return true;
+  }
+  return /^\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/.test(String(target || ''));
+}
+
+function appendSessionIdToTarget(target, sessionId) {
+  const cleanTarget = String(target || '/');
+  const sid = String(sessionId || '');
+  if (!sid || cleanTarget.includes('sessionId=')) {
+    return cleanTarget;
+  }
+  const sep = cleanTarget.includes('?') ? '&' : '?';
+  return `${cleanTarget}${sep}sessionId=${encodeURIComponent(sid)}`;
+}
+
+function buildNavButton(req, target, label) {
+  const safeTarget = isAllowedNavTarget(target) ? target : '/';
+  const authFields = buildAuthHiddenFields(req, 'nav-go');
+  if (!authFields) {
+    return `<a href="${escapeHtml(safeTarget)}">${escapeHtml(label)}</a>`;
+  }
+  return `<form method="POST" action="/" style="display:inline;margin:0 2px;">` +
+    authFields +
+    `<input type="hidden" name="nav_target" value="${escapeHtml(safeTarget)}">` +
+    `<input type="submit" value="${escapeHtml(label)}">` +
+    `</form>`;
+}
+
+function buildPrimaryNav(req, translations, username, extraItems = []) {
+  const items = [
+    buildNavButton(req, '/', t('home', translations)),
+    buildNavButton(req, '/language', t('language', translations)),
+    buildNavButton(req, '/settings', t('settings', translations)),
+    buildNavButton(req, '/people', t('people', translations)),
+    buildNavButton(req, '/activity', t('activity', translations))
+  ];
+
+  if (username) {
+    items.push(`<strong>${escapeHtml(username)}</strong>`);
+    items.push(buildNavButton(req, '/logout', t('logout', translations)));
+  } else {
+    items.push(`<a href="/sign-in">${t('login', translations)}</a>`);
+  }
+
+  for (const extra of extraItems) {
+    if (extra) items.push(extra);
+  }
+
+  return `<p>${items.join(' ')}</p>`;
+}
+
 // Check if user is locked due to brute force
 function isUserLocked(username) {
   if (!fs.existsSync(LOCKED_USERS_FILE)) {
@@ -1296,7 +1349,7 @@ async function handleRequest(req, res) {
 <html><head><title>${t('activity', translations)} - Omi Server</title></head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5"><tr><td><h1>${t('activity', translations)}</h1></td><td align="right"><small></small></td></tr></table>
-<p><a href="/">${t('home', translations)}</a> <a href="/language">${t('language', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a> <strong>${escapeHtml(activityUser)}</strong> <a href="/logout">${t('logout', translations)}</a></p>
+${buildPrimaryNav(req, translations, activityUser)}
 <table border="1" width="100%" cellpadding="5" cellspacing="0"><tr bgcolor="#333333"><th><font color="white">${t('actions', translations)}</font></th><th><font color="white">${t('ip-address', translations)}</font></th><th><font color="white">${t('user-agent', translations)}</font></th><th><font color="white">${t('users', translations)}</font></th><th><font color="white">${t('events', translations)}</font></th><th><font color="white">${t('first-unix', translations)}</font></th><th><font color="white">${t('last-unix', translations)}</font></th></tr>${rowsHtml}</table>
 <hr><p><small>Omi Server</small></p>
 </body></html>`;
@@ -1549,9 +1602,6 @@ ${form}
 
     const users = loadUsers();
     const userLanguage = users[username]?.language || 'en';
-    const userDisplay = username
-      ? `<strong>${escapeHtml(username)}</strong> <a href="/language">${t('language', translations)}</a> <a href="/logout">${t('logout', translations)}</a>`
-      : `<a href="/sign-in">${t('login', translations)}</a>`;
     
     // Check if current language is RTL
     const isRTL = languagesData[userLanguage]?.rtl === true;
@@ -1578,7 +1628,7 @@ ${form}
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1>Omi Server - ${t('language', translations)}</h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><a href="/">${t('home', translations)}</a> <a href="/language">${t('language', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a> ${username ? `<strong>${escapeHtml(username)}</strong> <a href="/logout">${t('logout', translations)}</a>` : `<a href="/sign-in">${t('login', translations)}</a>`}</p>
+${buildPrimaryNav(req, translations, username)}
 ${form}
 </body>
 </html>`;
@@ -1616,9 +1666,6 @@ ${form}
 
     const settings = loadSettings();
     username = getUsername(req);
-    const userDisplay = username
-      ? `<strong>${escapeHtml(username)}</strong> <a href="/language">${t('language', translations)}</a> <a href="/logout">${t('logout', translations)}</a>`
-      : `<a href="/sign-in">${t('login', translations)}</a>`;
 
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
@@ -1629,7 +1676,7 @@ ${form}
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1>${t('settings', translations)}</h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><a href="/">${t('home', translations)}</a> <a href="/language">${t('language', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a> ${username ? `<strong>${escapeHtml(username)}</strong> <a href="/logout">${t('logout', translations)}</a>` : `<a href="/sign-in">${t('login', translations)}</a>`}</p>
+${buildPrimaryNav(req, translations, username)}
 <hr>
 <form method="POST">
 ${buildAuthHiddenFields(req, 'settings-save')}
@@ -1672,11 +1719,29 @@ ${buildAuthHiddenFields(req, 'settings-save')}
       fields = await parseFormData(req);
     }
 
+    if (fields.nav_target) {
+      const sessionId = getSessionId(req) || String(fields.sessionId || '');
+      if (!verifyAndConsumeActionToken(req, fields, sessionId, 'nav-go')) {
+        sendHtml(res, 'Invalid navigation action token', 403);
+        return;
+      }
+      const target = isAllowedNavTarget(fields.nav_target) ? String(fields.nav_target) : '/';
+      const location = appendSessionIdToTarget(target, sessionId);
+      res.writeHead(302, { Location: location });
+      res.end();
+      return;
+    }
+
     let homeRequiredAction = '';
     if (fields.action === 'create_repo') {
       homeRequiredAction = 'home-create-repo';
     } else if (fields.action === 'Upload') {
       homeRequiredAction = 'home-upload-repo';
+    } else if (fields.action === 'open_repo') {
+      const targetRepo = normalizeRepoName(fields.repo_name || '');
+      if (targetRepo) {
+        homeRequiredAction = `home-open-repo-${targetRepo.replace(/\.omi$/, '')}`;
+      }
     }
     if (!homeRequiredAction || !verifyAndConsumeActionToken(req, fields, getSessionId(req), homeRequiredAction)) {
       sendHtml(res, 'Invalid home action token', 403);
@@ -1687,6 +1752,21 @@ ${buildAuthHiddenFields(req, 'settings-save')}
       const result = await createEmptyRepository(fields.repo_name || '', getUsername(req));
       repoMessage = result.message;
       repoMessageIsError = !result.ok;
+    } else if (fields.action === 'open_repo') {
+      const targetRepo = normalizeRepoName(fields.repo_name || '');
+      if (!targetRepo) {
+        repoMessage = 'Invalid repository name';
+        repoMessageIsError = true;
+      } else {
+        const repoRoot = targetRepo.replace(/\.omi$/, '');
+        const sessionId = getSessionId(req) || String(fields.sessionId || '');
+        const location = sessionId
+          ? `/${repoRoot}?sessionId=${encodeURIComponent(sessionId)}`
+          : `/${repoRoot}`;
+        res.writeHead(302, { Location: location });
+        res.end();
+        return;
+      }
     } else if (fields.action === 'Upload') {
       const uploadFile = files.repo_file;
       const repoName = normalizeRepoName(fields.repo_name || (uploadFile ? uploadFile.filename : ''));
@@ -2146,7 +2226,7 @@ ${markdownToHtml(displayContent, fileEntry.filename, repoRoot, imageMap)}
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><a href="/">${t('home', translations)}</a> <a href="/language">${t('language', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a> ${username ? `<strong>${escapeHtml(username)}</strong> <a href="/logout">${t('logout', translations)}</a>` : `<a href="/sign-in">${t('login', translations)}</a>`} <a href="/${escapeHtml(repoRoot)}">${t('repository-root', translations)}</a></p>
+${buildPrimaryNav(req, translations, username, [`<a href="/${escapeHtml(repoRoot)}">${t('repository-root', translations)}</a>`])}
 <h2>${t('file', translations)}: ${escapeHtml(fileEntry.filename)}</h2>
 <p><a href="?download=1">${t('download', translations)}</a></p>
 ${showDeleteConfirm ? `<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;">
@@ -2253,10 +2333,6 @@ ${buildAuthHiddenFields(req, 'repo-upload-dir-file')}
 </form>
 ` : `<p><small><a href="/sign-in">${t('login', translations)}</a> ${t('login-to-upload-files', translations)}</small></p>`;
 
-    const userDisplay = username
-      ? `<strong>${escapeHtml(username)}</strong> <a href="/language">${t('language', translations)}</a> <a href="/logout">${t('logout', translations)}</a>`
-      : `<a href="/sign-in">${t('login', translations)}</a>`;
-
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
@@ -2266,7 +2342,7 @@ ${buildAuthHiddenFields(req, 'repo-upload-dir-file')}
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><a href="/">${t('home', translations)}</a> <a href="/language">${t('language', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a> ${username ? `<strong>${escapeHtml(username)}</strong> <a href="/logout">${t('logout', translations)}</a>` : `<a href="/sign-in">${t('login', translations)}</a>`}</p>
+${buildPrimaryNav(req, translations, username)}
 <h2>${t('directory', translations)}: /${directoryTitle}</h2>
 <hr>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
@@ -2301,13 +2377,15 @@ ${actionForms}
   // Default: Show repository list
   const repos = getReposList();
   username = getUsername(req);
-  const userDisplay = username
-    ? `<strong>${escapeHtml(username)}</strong> <a href="/language">${t('language', translations)}</a> <a href="/logout">${t('logout', translations)}</a>`
-    : `<a href="/sign-in">${t('login', translations)}</a>`;
 
   const reposTable = repos.length > 0
     ? repos.map(repo => `<tr>
-<td><a href="/${repo.name.replace(/\.omi$/, '')}">${repo.name.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</a></td>
+<td><form method="POST" style="display:inline">
+${buildAuthHiddenFields(req, `home-open-repo-${repo.name.replace(/\.omi$/, '')}`)}
+<input type="hidden" name="action" value="open_repo">
+<input type="hidden" name="repo_name" value="${escapeHtml(repo.name)}">
+<input type="submit" value="${escapeHtml(repo.name)}">
+</form></td>
 <td>${repo.size.toLocaleString()}</td>
 <td>${new Date(repo.modified * 1000).toISOString().replace('T', ' ').slice(0, 19)}</td>
 <td><a href="?download=${encodeURIComponent(repo.name)}">${t('download', translations)}</a></td>
@@ -2323,7 +2401,7 @@ ${actionForms}
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1>Omi Server - ${t('repositories', translations)}</h1></td><td align="right"><small></small></td></tr>
 </table>
-${username ? `<p><a href="/">${t('home', translations)}</a> <a href="/language">${t('language', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a> <strong>${escapeHtml(username)}</strong> <a href="/logout">${t('logout', translations)}</a></p>` : ''}
+${username ? buildPrimaryNav(req, translations, username) : ''}
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#e8f4f8">
 <td colspan="4">
