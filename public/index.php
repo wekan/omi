@@ -409,6 +409,19 @@ function cleanupOldRateLimitEntries() {
     }
 }
 
+function extractOtpSecret($otpValue) {
+    $otpValue = trim((string)$otpValue);
+    if ($otpValue === '') {
+        return '';
+    }
+
+    if (preg_match('/[?&]secret=([A-Z2-7]+)/i', $otpValue, $matches)) {
+        return strtoupper($matches[1]);
+    }
+
+    return '';
+}
+
 // Simple authentication check with OTP support
 function authenticate($username, $password, $otpCode = '') {
     $users = loadUsers();
@@ -419,14 +432,11 @@ function authenticate($username, $password, $otpCode = '') {
     // Check password
     if ($user['password'] !== $password) return false;
 
-    // Check OTP if enabled for this user
-    if (!empty($user['otp'])) {
-        // Extract secret from otpauth:// URL
-        if (preg_match('/secret=([A-Z2-7]+)/', $user['otp'], $matches)) {
-            $secret = $matches[1];
-            if (empty($otpCode) || !verifyTOTP($secret, $otpCode)) {
-                return 'OTP_REQUIRED';
-            }
+    // Check OTP only when a valid TOTP secret is configured for this user
+    $secret = extractOtpSecret($user['otp'] ?? '');
+    if ($secret !== '') {
+        if (empty($otpCode) || !verifyTOTP($secret, $otpCode)) {
+            return 'OTP_REQUIRED';
         }
     }
 
@@ -603,6 +613,18 @@ function buildNavButton($target, $label) {
            '</form>';
 }
 
+function buildNavRow($items) {
+    $html = '<table border="0" cellpadding="2" cellspacing="0"><tr>';
+    foreach ($items as $item) {
+        if ($item === '' || $item === null) {
+            continue;
+        }
+        $html .= '<td valign="middle">' . $item . '</td>';
+    }
+    $html .= '</tr></table>';
+    return $html;
+}
+
 function renderActivityPage($translations) {
     if (!isLoggedIn()) {
         header('Location: /sign-in');
@@ -654,9 +676,17 @@ function renderActivityPage($translations) {
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo t('activity', $translations); ?></h1></td><td align="right"><small><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?></small></td></tr>
+<tr><td><h1><?php echo t('activity', $translations); ?></h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
+<?php echo buildNavRow([
+    buildNavButton('/', t('home', $translations)),
+    buildNavButton('/language', t('language', $translations)),
+    buildNavButton('/settings', t('settings', $translations)),
+    buildNavButton('/people', t('people', $translations)),
+    buildNavButton('/activity', t('activity', $translations)),
+    '<strong>' . htmlspecialchars($username) . '</strong>',
+    buildNavButton('/logout', t('logout', $translations))
+]); ?>
 <hr>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#333333">
@@ -1593,9 +1623,17 @@ if (strpos($_SERVER['REQUEST_URI'], '/settings') !== false && strpos($_SERVER['R
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo t('settings', $translations); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?><?php else: ?><a href="/sign-in"><?php echo t('login', $translations); ?></a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo t('settings', $translations); ?></h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
+<?php echo buildNavRow([
+    buildNavButton('/', t('home', $translations)),
+    buildNavButton('/language', t('language', $translations)),
+    buildNavButton('/settings', t('settings', $translations)),
+    buildNavButton('/people', t('people', $translations)),
+    buildNavButton('/activity', t('activity', $translations)),
+    $username ? '<strong>' . htmlspecialchars($username) . '</strong>' : '<a href="/sign-in">' . t('login', $translations) . '</a>',
+    $username ? buildNavButton('/logout', t('logout', $translations)) : ''
+]); ?>
 <hr>
 <?php if (isset($error)): ?><p><font color="red"><strong><?php echo htmlspecialchars($error); ?></strong></font></p><?php endif; ?>
 <form method="POST">
@@ -1679,9 +1717,17 @@ if (strpos($_SERVER['REQUEST_URI'], '/language') !== false) {
 </head>
 <body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Omi Server</h1></td><td align="right"><small><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?></small></td></tr>
+<tr><td><h1>Omi Server</h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
+<?php echo buildNavRow([
+    buildNavButton('/', t('home', $translations)),
+    buildNavButton('/language', t('language', $translations)),
+    buildNavButton('/settings', t('settings', $translations)),
+    buildNavButton('/people', t('people', $translations)),
+    buildNavButton('/activity', t('activity', $translations)),
+    '<strong>' . htmlspecialchars($username) . '</strong>',
+    buildNavButton('/logout', t('logout', $translations))
+]); ?>
 <hr>
 <h2><?php echo t('language', $translations); ?></h2>
 <form method="POST">
@@ -1713,8 +1759,14 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
     }
 
     $users = loadUsers();
-    $openEditUser = '';
-    $openOtpUser = '';
+    $saveUsers = function($usersToSave) {
+        $userContent = '';
+        foreach ($usersToSave as $u => $data) {
+            $language = isset($data['language']) && $data['language'] !== '' ? $data['language'] : 'en';
+            $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . ':' . $language . "\n";
+        }
+        return file_put_contents(USERS_FILE, $userContent, LOCK_EX);
+    };
 
     // Handle user operations
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -1733,12 +1785,8 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
 
             if (!empty($newuser) && !empty($newpass)) {
                 if (!isset($users[$newuser])) {
-                    $users[$newuser] = ['password' => $newpass, 'otp' => ''];
-                    $userContent = '';
-                    foreach ($users as $u => $data) {
-                        $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
-                    }
-                    if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
+                    $users[$newuser] = ['password' => $newpass, 'otp' => '', 'language' => 'en'];
+                    if ($saveUsers($users)) {
                         $success = t('save', $translations);
                     } else {
                         $error = t('error', $translations);
@@ -1747,71 +1795,51 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
                     $error = t('error', $translations);
                 }
             }
-        } elseif ($action === 'open_edit') {
-            $openEditUser = $_POST['edituser'] ?? '';
-        } elseif ($action === 'open_otp') {
-            $openOtpUser = $_POST['otpuser'] ?? '';
-        } elseif ($action === 'close_edit') {
-            $openEditUser = '';
-        } elseif ($action === 'close_otp') {
-            $openOtpUser = '';
-        } elseif ($action === 'delete') {
-            $deluser = $_POST['deluser'] ?? '';
-            if (isset($users[$deluser])) {
-                unset($users[$deluser]);
-                $userContent = '';
-                foreach ($users as $u => $data) {
-                    $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
-                }
-                if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
+        } elseif ($action === 'update_username') {
+            $olduser = $_POST['olduser'] ?? '';
+            $renameduser = $_POST['renameduser'] ?? '';
+            if (isset($users[$olduser]) && !empty($renameduser) && !isset($users[$renameduser])) {
+                $users[$renameduser] = $users[$olduser];
+                unset($users[$olduser]);
+                if ($saveUsers($users)) {
                     $success = t('save', $translations);
                 } else {
                     $error = t('error', $translations);
                 }
+            } else {
+                $error = t('error', $translations);
             }
-        } elseif ($action === 'update') {
+        } elseif ($action === 'update_password') {
             $upuser = $_POST['upuser'] ?? '';
             $uppass = $_POST['uppass'] ?? '';
             if (isset($users[$upuser]) && !empty($uppass)) {
                 $users[$upuser]['password'] = $uppass;
-                $userContent = '';
-                foreach ($users as $u => $data) {
-                    $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
-                }
-                if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
+                if ($saveUsers($users)) {
                     $success = t('save', $translations);
                 } else {
                     $error = t('error', $translations);
                 }
+            } else {
+                $error = t('error', $translations);
             }
-        } elseif ($action === 'enable_otp') {
+        } elseif ($action === 'update_otp') {
             $otpuser = $_POST['otpuser'] ?? '';
-            $email = $_POST['email'] ?? '';
+            $newotp = trim($_POST['newotp'] ?? '');
             if (isset($users[$otpuser])) {
-                $secret = generateOTPSecret();
-                $emailPart = !empty($email) ? $email : $otpuser;
-                $otpauth = "otpauth://totp/Omi ($emailPart):$emailPart?secret=$secret&issuer=omi&digits=6&period=30";
-                $users[$otpuser]['otp'] = $otpauth;
-                $userContent = '';
-                foreach ($users as $u => $data) {
-                    $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
-                }
-                if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
+                $users[$otpuser]['otp'] = $newotp;
+                if ($saveUsers($users)) {
                     $success = t('save', $translations);
-                    $_SESSION['otp_setup'] = $otpauth;
                 } else {
                     $error = t('error', $translations);
                 }
+            } else {
+                $error = t('error', $translations);
             }
-        } elseif ($action === 'disable_otp') {
-            $otpuser = $_POST['otpuser'] ?? '';
-            if (isset($users[$otpuser])) {
-                $users[$otpuser]['otp'] = '';
-                $userContent = '';
-                foreach ($users as $u => $data) {
-                    $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
-                }
-                if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
+        } elseif ($action === 'delete') {
+            $deluser = $_POST['deluser'] ?? '';
+            if (isset($users[$deluser])) {
+                unset($users[$deluser]);
+                if ($saveUsers($users)) {
                     $success = t('save', $translations);
                 } else {
                     $error = t('error', $translations);
@@ -1831,45 +1859,22 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo t('user-management', $translations); ?></h1></td><td align="right"><small><strong><?php echo htmlspecialchars(getUsername()); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?></small></td></tr>
+<tr><td><h1><?php echo t('people', $translations); ?></h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
+<?php echo buildNavRow([
+    buildNavButton('/', t('home', $translations)),
+    buildNavButton('/language', t('language', $translations)),
+    buildNavButton('/settings', t('settings', $translations)),
+    buildNavButton('/people', t('people', $translations)),
+    buildNavButton('/activity', t('activity', $translations)),
+    '<strong>' . htmlspecialchars(getUsername()) . '</strong>',
+    buildNavButton('/logout', t('logout', $translations))
+]); ?>
 <hr>
 <?php if (isset($success)): ?><p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p><?php endif; ?>
 <?php if (isset($error)): ?><p><font color="red"><strong><?php echo htmlspecialchars($error); ?></strong></font></p><?php endif; ?>
 
-<h2><?php echo t('manage-users', $translations); ?></h2>
-<table border="1" cellpadding="5" width="100%">
-<tr bgcolor="#333333"><th><font color="white"><?php echo t('username', $translations); ?></font></th><th><font color="white"><?php echo t('otp-status', $translations); ?></font></th><th><font color="white"><?php echo t('actions', $translations); ?></font></th></tr>
-<?php foreach ($users as $u => $data): ?>
-<tr><td><?php echo htmlspecialchars($u); ?></td>
-<td><?php echo !empty($data['otp']) ? '<font color="green">✓ ' . t('enabled', $translations) . '</font>' : '<font color="gray">' . t('disabled', $translations) . '</font>'; ?></td>
-<td>
-<form method="POST" style="display:inline">
-<input type="hidden" name="action" value="delete">
-<?php echo buildAuthHiddenFields('people-delete'); ?>
-<input type="hidden" name="deluser" value="<?php echo htmlspecialchars($u); ?>">
-<input type="submit" value="<?php echo t('delete', $translations); ?>">
-</form> |
-<form method="POST" style="display:inline">
-<?php echo buildAuthHiddenFields('people-open_edit'); ?>
-<input type="hidden" name="action" value="open_edit">
-<input type="hidden" name="edituser" value="<?php echo htmlspecialchars($u); ?>">
-<input type="submit" value="<?php echo t('edit', $translations); ?>">
-</form>
-<?php if ($u === getUsername()): ?>
- <form method="POST" style="display:inline">
-<?php echo buildAuthHiddenFields('people-open_otp'); ?>
-<input type="hidden" name="action" value="open_otp">
-<input type="hidden" name="otpuser" value="<?php echo htmlspecialchars($u); ?>">
-<input type="submit" value="<?php echo t('otp', $translations); ?>">
-</form>
-<?php endif; ?>
-</td></tr>
-<?php endforeach; ?>
-</table>
-
-<h2><?php echo t('add-new-user', $translations); ?></h2>
+<h2>New User</h2>
 <form method="POST">
 <?php echo buildAuthHiddenFields('people-add'); ?>
 <table border="0" cellpadding="5">
@@ -1879,68 +1884,51 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
 </table>
 </form>
 
-<?php if (!empty($openEditUser) && isset($users[$openEditUser])): ?>
-<h2><?php echo t('edit-user-password', $translations); ?></h2>
-<div style="border:1px solid #ccc;padding:10px;margin:10px 0">
-<form method="POST">
-<?php echo buildAuthHiddenFields('people-update'); ?>
-<table border="0" cellpadding="5">
-<tr><td><?php echo t('username', $translations); ?>:</td><td><strong><?php echo htmlspecialchars($openEditUser); ?></strong></td></tr>
-<tr><td><?php echo t('new-password', $translations); ?>:</td><td><input type="password" name="uppass" size="30" required></td></tr>
-<tr><td colspan="2"><input type="hidden" name="action" value="update"><input type="hidden" name="upuser" value="<?php echo htmlspecialchars($openEditUser); ?>"><input type="submit" value="<?php echo t('update', $translations); ?>"></td></tr>
+<h2>Users</h2>
+<table border="1" cellpadding="5" width="100%">
+<tr bgcolor="#333333"><th><font color="white">Users</font></th><th><font color="white"><?php echo t('password', $translations); ?></font></th><th><font color="white"><?php echo t('otp', $translations); ?></font></th><th><font color="white"><?php echo t('actions', $translations); ?></font></th></tr>
+<?php foreach ($users as $u => $data): ?>
+<tr>
+<td>
+<?php echo htmlspecialchars($u); ?><br>
+<form method="POST" style="display:inline">
+<?php echo buildAuthHiddenFields('people-update_username'); ?>
+<input type="hidden" name="action" value="update_username">
+<input type="hidden" name="olduser" value="<?php echo htmlspecialchars($u); ?>">
+<input type="text" name="renameduser" size="24" value="<?php echo htmlspecialchars($u); ?>" required>
+<br><input type="submit" value="<?php echo t('save', $translations); ?>">
+</form>
+</td>
+<td>
+<form method="POST" style="display:inline">
+<?php echo buildAuthHiddenFields('people-update_password'); ?>
+<input type="hidden" name="action" value="update_password">
+<input type="hidden" name="upuser" value="<?php echo htmlspecialchars($u); ?>">
+<input type="password" name="uppass" size="24" required>
+<br><input type="submit" value="<?php echo t('save', $translations); ?>">
+</form>
+</td>
+<td>
+<?php echo !empty($data['otp']) ? 'Yes' : t('no', $translations); ?><br>
+<form method="POST" style="display:inline">
+<?php echo buildAuthHiddenFields('people-update_otp'); ?>
+<input type="hidden" name="action" value="update_otp">
+<input type="hidden" name="otpuser" value="<?php echo htmlspecialchars($u); ?>">
+<input type="text" name="newotp" size="24" value="<?php echo htmlspecialchars($data['otp'] ?? ''); ?>">
+<br><input type="submit" value="<?php echo t('save', $translations); ?>">
+</form>
+</td>
+<td>
+<form method="POST" style="display:inline">
+<?php echo buildAuthHiddenFields('people-delete'); ?>
+<input type="hidden" name="action" value="delete">
+<input type="hidden" name="deluser" value="<?php echo htmlspecialchars($u); ?>">
+<input type="submit" value="<?php echo t('delete', $translations); ?>">
+</form>
+</td>
+</tr>
+<?php endforeach; ?>
 </table>
-</form>
-<form method="POST" style="display:inline">
-<?php echo buildAuthHiddenFields('people-close_edit'); ?>
-<input type="hidden" name="action" value="close_edit">
-<input type="submit" value="<?php echo t('cancel', $translations); ?>">
-</form>
-</div>
-<?php endif; ?>
-
-<?php if (isset($_SESSION['otp_setup'])): ?>
-<div style="border:2px solid green;padding:15px;margin:10px 0;background:#e8f5e9">
-<p><strong><font color="green"><?php echo t('otp-enabled-success', $translations); ?></font></strong></p>
-<p><?php echo t('otp-url-instructions', $translations); ?></p>
-<p style="word-break:break-all;font-family:monospace;background:white;padding:10px;border:1px solid #ccc"><?php echo htmlspecialchars($_SESSION['otp_setup']); ?></p>
-<p><small><?php echo t('otp-save-url', $translations); ?></small></p>
-</div>
-<?php unset($_SESSION['otp_setup']); endif; ?>
-
-<?php if (!empty($openOtpUser) && $openOtpUser === getUsername() && isset($users[$openOtpUser])): ?>
-<h2><?php echo t('manage-otp', $translations); ?></h2>
-<div style="border:1px solid #ccc;padding:10px;margin:10px 0">
-<h3><?php echo t('otp-for-user', $translations); ?>: <?php echo htmlspecialchars($openOtpUser); ?></h3>
-<?php if (empty($users[$openOtpUser]['otp'])): ?>
-<form method="POST">
-<?php echo buildAuthHiddenFields('people-enable_otp'); ?>
-<table border="0" cellpadding="5">
-<tr><td><?php echo t('email-optional', $translations); ?>:</td><td><input type="text" name="email" size="30" placeholder="<?php echo htmlspecialchars($openOtpUser); ?>" value="<?php echo htmlspecialchars($openOtpUser); ?>"></td></tr>
-<tr><td colspan="2"><small><?php echo t('otp-email-help', $translations); ?></small></td></tr>
-<tr><td colspan="2">
-<input type="hidden" name="action" value="enable_otp">
-<input type="hidden" name="otpuser" value="<?php echo htmlspecialchars($openOtpUser); ?>">
-<input type="submit" value="<?php echo t('enable-otp', $translations); ?>">
-</td></tr>
-</table>
-</form>
-<?php else: ?>
-<p><font color="green">✓ <?php echo t('otp-enabled', $translations); ?></font></p>
-<p><small><?php echo t('otp-url-stored', $translations); ?></small></p>
-<form method="POST" style="display:inline">
-<input type="hidden" name="action" value="disable_otp">
-<?php echo buildAuthHiddenFields('people-disable_otp'); ?>
-<input type="hidden" name="otpuser" value="<?php echo htmlspecialchars($openOtpUser); ?>">
-<input type="submit" value="<?php echo t('disable-otp', $translations); ?>">
-</form>
-<?php endif; ?>
-<form method="POST" style="display:inline">
-<?php echo buildAuthHiddenFields('people-close_otp'); ?>
-<input type="hidden" name="action" value="close_otp">
-<input type="submit" value="<?php echo t('close', $translations); ?>">
-</form>
-</div>
-<?php endif; ?>
 
 <hr>
 <p><small>Omi Server</small></p>
@@ -2005,9 +1993,18 @@ if (isset($_GET['log'])) {
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo t('commit-history', $translations); ?> - <?php echo htmlspecialchars($reponame); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?><?php else: ?><a href="/sign-in"><?php echo t('login', $translations); ?></a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo t('commit-history', $translations); ?> - <?php echo htmlspecialchars($reponame); ?></h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?> <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $reponame)); ?>"><?php echo t('repository-root', $translations); ?></a></p>
+<?php echo buildNavRow([
+    buildNavButton('/', t('home', $translations)),
+    buildNavButton('/language', t('language', $translations)),
+    buildNavButton('/settings', t('settings', $translations)),
+    buildNavButton('/people', t('people', $translations)),
+    buildNavButton('/activity', t('activity', $translations)),
+    $username ? '<strong>' . htmlspecialchars($username) . '</strong>' : '<a href="/sign-in">' . t('login', $translations) . '</a>',
+    $username ? buildNavButton('/logout', t('logout', $translations)) : '',
+    '<a href="/' . htmlspecialchars(str_replace('.omi', '', $reponame)) . '">' . t('repository-root', $translations) . '</a>'
+]); ?>
 <hr>
 <?php if (empty($commits)): ?>
 <p><?php echo t('no-commits', $translations); ?></p>
@@ -2099,9 +2096,18 @@ if (isset($_GET['image'])) {
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?><?php else: ?><a href="/sign-in"><?php echo t('login', $translations); ?></a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?> <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>"><?php echo t('repository-root', $translations); ?></a></p>
+<?php echo buildNavRow([
+    buildNavButton('/', t('home', $translations)),
+    buildNavButton('/language', t('language', $translations)),
+    buildNavButton('/settings', t('settings', $translations)),
+    buildNavButton('/people', t('people', $translations)),
+    buildNavButton('/activity', t('activity', $translations)),
+    $username ? '<strong>' . htmlspecialchars($username) . '</strong>' : '<a href="/sign-in">' . t('login', $translations) . '</a>',
+    $username ? buildNavButton('/logout', t('logout', $translations)) : '',
+    '<a href="/' . htmlspecialchars(str_replace('.omi', '', $repoName)) . '">' . t('repository-root', $translations) . '</a>'
+]); ?>
 <h2><?php echo t('image', $translations); ?>: <?php echo htmlspecialchars($imagePath); ?></h2>
 <hr>
 <div style="text-align:center">
@@ -2236,9 +2242,19 @@ if (isset($_GET['image'])) {
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?><?php else: ?><a href="/sign-in"><?php echo t('login', $translations); ?></a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><?php echo buildNavButton('/', t('home', $translations)); ?> <a href="?log=<?php echo urlencode($repoName); ?>"><?php echo t('log', $translations); ?></a> <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>"><?php echo t('repository-root', $translations); ?></a> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
+<?php echo buildNavRow([
+    buildNavButton('/', t('home', $translations)),
+    buildNavButton('/language', t('language', $translations)),
+    buildNavButton('/settings', t('settings', $translations)),
+    buildNavButton('/people', t('people', $translations)),
+    buildNavButton('/activity', t('activity', $translations)),
+    $username ? '<strong>' . htmlspecialchars($username) . '</strong>' : '<a href="/sign-in">' . t('login', $translations) . '</a>',
+    $username ? buildNavButton('/logout', t('logout', $translations)) : '',
+    '<a href="?log=' . urlencode($repoName) . '">' . t('log', $translations) . '</a>',
+    '<a href="/' . htmlspecialchars(str_replace('.omi', '', $repoName)) . '">' . t('repository-root', $translations) . '</a>'
+]); ?>
 <h2><?php echo t('file', $translations); ?>: <?php echo htmlspecialchars($repoPath); ?></h2>
 <?php if ($show_delete_confirm): ?>
 <!-- Delete confirmation form (HTML 3.2 compatible, no JavaScript) -->
@@ -2700,9 +2716,18 @@ if (isset($_GET['image'])) {
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?><?php else: ?><a href="/sign-in"><?php echo t('login', $translations); ?></a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><?php echo buildNavButton('/', t('home', $translations)); ?> <a href="?log=<?php echo urlencode($repoName); ?>"><?php echo t('log', $translations); ?></a> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
+<?php echo buildNavRow([
+    buildNavButton('/', t('home', $translations)),
+    buildNavButton('/language', t('language', $translations)),
+    buildNavButton('/settings', t('settings', $translations)),
+    buildNavButton('/people', t('people', $translations)),
+    buildNavButton('/activity', t('activity', $translations)),
+    $username ? '<strong>' . htmlspecialchars($username) . '</strong>' : '<a href="/sign-in">' . t('login', $translations) . '</a>',
+    $username ? buildNavButton('/logout', t('logout', $translations)) : '',
+    '<a href="?log=' . urlencode($repoName) . '">' . t('log', $translations) . '</a>'
+]); ?>
 <h2><?php echo t('directory', $translations); ?>: /<?php echo htmlspecialchars($repoPath); ?></h2>
 <hr>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
@@ -2881,10 +2906,18 @@ if (isset($_GET['image'])) {
 </head>
 <body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Omi Server - <?php echo t('repositories', $translations); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?><?php else: ?><a href="/sign-in"><?php echo t('login', $translations); ?></a><?php endif; ?></small></td></tr>
+<tr><td><h1>Omi Server - <?php echo t('repositories', $translations); ?></h1></td><td align="right"><small></small></td></tr>
 </table>
 <?php if ($username): ?>
-<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
+<?php echo buildNavRow([
+    buildNavButton('/', t('home', $translations)),
+    buildNavButton('/language', t('language', $translations)),
+    buildNavButton('/settings', t('settings', $translations)),
+    buildNavButton('/people', t('people', $translations)),
+    buildNavButton('/activity', t('activity', $translations)),
+    '<strong>' . htmlspecialchars($username) . '</strong>',
+    buildNavButton('/logout', t('logout', $translations))
+]); ?>
 <?php endif; ?>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#e8f4f8">

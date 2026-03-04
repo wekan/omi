@@ -555,6 +555,19 @@ begin
     '</form>';
 end;
 
+function BuildNavRow(const Items: array of string): string;
+var
+  I: Integer;
+begin
+  Result := '<table border="0" cellpadding="2" cellspacing="0"><tr>';
+  for I := Low(Items) to High(Items) do
+  begin
+    if Trim(Items[I]) <> '' then
+      Result := Result + '<td valign="middle">' + Items[I] + '</td>';
+  end;
+  Result := Result + '</tr></table>';
+end;
+
 function BuildAuthHiddenFields(ARequest: TRequest; const ActionName: string): string;
 var
   SessionId, Username, PasswordRef, MetaIp, MetaUa: string;
@@ -932,6 +945,35 @@ begin
     Result := TrueVal
   else
     Result := FalseVal;
+end;
+
+function ExtractOtpSecret(const OtpValue: string): string;
+var
+  LowerOtp, SecretPart: string;
+  StartPos, EndPos, I: Integer;
+begin
+  Result := '';
+  LowerOtp := LowerCase(Trim(OtpValue));
+  if LowerOtp = '' then
+    Exit;
+
+  StartPos := Pos('secret=', LowerOtp);
+  if StartPos = 0 then
+    Exit;
+
+  SecretPart := Copy(Trim(OtpValue), StartPos + Length('secret='), Length(OtpValue));
+  EndPos := Pos('&', SecretPart);
+  if EndPos > 0 then
+    SecretPart := Copy(SecretPart, 1, EndPos - 1);
+  SecretPart := Trim(SecretPart);
+  if SecretPart = '' then
+    Exit;
+
+  for I := 1 to Length(SecretPart) do
+    if not (UpCase(SecretPart[I]) in ['A'..'Z', '2'..'7']) then
+      Exit;
+
+  Result := UpperCase(SecretPart);
 end;
 
 function AuthenticateUser(Username, Password: string): Boolean;
@@ -1756,6 +1798,7 @@ var
   ShowOtp: Boolean;
   UsersMap: TStringList;
   StoredPassword, StoredOtp, StoredLanguage: string;
+  OtpSecret: string;
   UsernameValue, OtpInput, ErrorHtml: string;
   SessionId: string;
 begin
@@ -1786,19 +1829,23 @@ begin
             ErrorMsg := T('invalid-credentials', Translations)
           else if StoredPassword <> Password then
             ErrorMsg := T('invalid-credentials', Translations)
-          else if (StoredOtp <> '') and (OtpCode = '') then
-          begin
-            ErrorMsg := T('otp-required', Translations);
-            ShowOtp := True;
-          end
           else
           begin
-            SessionId := CreateSession(ARequest, Username, StoredPassword);
-            LogActivity(Username, SessionId, 'login', 'ok', 'login success', ARequest, 0);
-            AResponse.Code := 302;
-            AResponse.Location := '/?sessionId=' + HtmlEncode(SessionId);
-            AResponse.Content := '';
-            Exit;
+            OtpSecret := ExtractOtpSecret(StoredOtp);
+            if (OtpSecret <> '') and (OtpCode = '') then
+            begin
+              ErrorMsg := T('otp-required', Translations);
+              ShowOtp := True;
+            end
+            else
+            begin
+              SessionId := CreateSession(ARequest, Username, StoredPassword);
+              LogActivity(Username, SessionId, 'login', 'ok', 'login success', ARequest, 0);
+              AResponse.Code := 302;
+              AResponse.Location := '/?sessionId=' + HtmlEncode(SessionId);
+              AResponse.Content := '';
+              Exit;
+            end;
           end;
         finally
           UsersMap.Free;
@@ -1974,10 +2021,8 @@ begin
             '<html><head><meta charset="UTF-8"><title>' + T('image', Translations) + ': ' + HtmlEncode(ImagePath) + ' - ' + HtmlEncode(ImageRepo) + '</title></head>' +
             '<body bgcolor="#f0f0f0">' +
             '<table width="100%" border="0" cellpadding="5">' +
-            '<tr><td><h1>' + HtmlEncode(ImageRepo) + '</h1></td><td align="right"><small>' +
-            ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') +
-            '</small></td></tr></table>' +
-            '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' + BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' + BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' + BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + '</p>' +
+            '<tr><td><h1>' + HtmlEncode(ImageRepo) + '</h1></td><td align="right"><small></small></td></tr></table>' +
+            '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' + BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' + BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + ' ' + ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') + '</p>' +
             '<h2>' + T('image', Translations) + ': ' + HtmlEncode(ImagePath) + '</h2><hr>' +
             '<div style="text-align:center"><img src="data:' + GetMimeType(ImagePath) + ';base64,' + Base64Encode(FileContent) + '" alt="' + HtmlEncode(ExtractFileName(ImagePath)) + '"></div>' +
             '<hr><p><small>Omi Server</small></p></body></html>';
@@ -2010,10 +2055,8 @@ begin
         '<html dir="' + DirAttr + '"><head><meta charset="UTF-8"><title>' + T('commit-history', Translations) + ' - ' + HtmlEncode(RepoName) + '</title></head>' +
         '<body bgcolor="#f0f0f0" dir="' + DirAttr + '">' +
         '<table width="100%" border="0" cellpadding="5">' +
-        '<tr><td><h1>' + T('commit-history', Translations) + ' - ' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small>' +
-        ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') +
-        '</small></td></tr></table>' +
-        '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' + BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' + BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' + BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + ' ' + BuildNavTargetButton(ARequest, '/', '/' + HtmlEncode(StringReplace(RepoName, '.omi', '', [])), 'home-log-repo-root', T('repository-root', Translations)) + '</p>' +
+        '<tr><td><h1>' + T('commit-history', Translations) + ' - ' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small></small></td></tr></table>' +
+        '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' + BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' + BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + ' ' + ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') + ' ' + BuildNavTargetButton(ARequest, '/', '/' + HtmlEncode(StringReplace(RepoName, '.omi', '', [])), 'home-log-repo-root', T('repository-root', Translations)) + '</p>' +
         '<hr>' +
         '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
         '<tr bgcolor="#333333"><th><font color="white">' + T('commit-id', Translations) + '</font></th><th><font color="white">' + T('message', Translations) + '</font></th><th><font color="white">' + T('author', Translations) + '</font></th><th><font color="white">' + T('date', Translations) + '</font></th><th><font color="white">' + T('files', Translations) + '</font></th></tr>' +
@@ -2133,20 +2176,26 @@ begin
     Repos := GetReposList;
     if Username <> '' then
     begin
-      HeaderRight := '<strong>' + HtmlEncode(Username) + '</strong> ' +
-        BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' +
-        BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations));
-      MainNav := BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' +
-        BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' +
-        BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' +
-        BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations));
+      HeaderRight := '';
+      MainNav := BuildNavRow([
+        BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)),
+        BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)),
+        BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)),
+        BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)),
+        BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)),
+        '<strong>' + HtmlEncode(Username) + '</strong>',
+        BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations))
+      ]);
       CreateRepoAuth := BuildAuthHiddenFields(ARequest, 'home-create-repo');
       UploadRepoAuth := BuildAuthHiddenFields(ARequest, 'home-upload-repo');
     end
     else
     begin
-      HeaderRight := '<a href="/sign-in">' + T('login', Translations) + '</a>';
-      MainNav := '<a href="/">' + T('home', Translations) + '</a>';
+      HeaderRight := '';
+      MainNav := BuildNavRow([
+        '<a href="/">' + T('home', Translations) + '</a>',
+        '<a href="/sign-in">' + T('login', Translations) + '</a>'
+      ]);
       CreateRepoAuth := '';
       UploadRepoAuth := '';
     end;
@@ -2437,13 +2486,16 @@ begin
       if SettingsMap.Values['CURL'] = '' then
         SettingsMap.Values['CURL'] := 'curl';
 
-      HeaderRight := '<strong>' + HtmlEncode(Username) + '</strong> ' +
-        BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' +
-        BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations));
-      MainNav := BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' +
-        BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' +
-        BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' +
-        BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations));
+      HeaderRight := '';
+      MainNav := BuildNavRow([
+        BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)),
+        BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)),
+        BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)),
+        BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)),
+        BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)),
+        '<strong>' + HtmlEncode(Username) + '</strong>',
+        BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations))
+      ]);
       SaveAuth := BuildAuthHiddenFields(ARequest, 'settings-save');
 
       Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
@@ -2542,13 +2594,16 @@ begin
   try
     LangData := LoadLanguagesData;
     try
-      HeaderRight := '<strong>' + HtmlEncode(Username) + '</strong> | ' +
-        BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' +
-        BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations));
-      MainNav := BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' +
-        BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' +
-        BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' +
-        BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations));
+      HeaderRight := '';
+      MainNav := BuildNavRow([
+        BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)),
+        BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)),
+        BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)),
+        BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)),
+        BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)),
+        '<strong>' + HtmlEncode(Username) + '</strong>',
+        BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations))
+      ]);
 
       FormHtml := '<form method="POST">' + BuildAuthHiddenFields(ARequest, 'language-save') + '<table border="1" cellpadding="5">' +
         '<tr bgcolor="#333333"><th><font color="white">' + T('language', Translations) + '</font></th></tr>';
@@ -2665,13 +2720,16 @@ begin
 
   Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
     '<html><head><meta charset="UTF-8"><title>' + TE('activity', Translations) + ' - Omi Server</title></head><body bgcolor="#f0f0f0">' +
-    '<table width="100%" border="0" cellpadding="5"><tr><td><h1>' + TE('activity', Translations) + '</h1></td><td align="right"><small><strong>' + HtmlEncode(Username) + '</strong> | ' +
-    BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' +
-    BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)) + '</small></td></tr></table>' +
-    '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' +
-    BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' +
-    BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' +
-    BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + '</p>' +
+    '<table width="100%" border="0" cellpadding="5"><tr><td><h1>' + TE('activity', Translations) + '</h1></td><td align="right"><small></small></td></tr></table>' +
+    BuildNavRow([
+      BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)),
+      BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)),
+      BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)),
+      BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)),
+      BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)),
+      '<strong>' + HtmlEncode(Username) + '</strong>',
+      BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations))
+    ]) +
     '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
     '<tr bgcolor="#333333"><th><font color="white">' + TE('ip-address', Translations) + '</font></th><th><font color="white">' + TE('user-agent', Translations) + '</font></th><th><font color="white">' + TE('users', Translations) + '</font></th><th><font color="white">' + TE('events', Translations) + '</font></th><th><font color="white">' + TE('first-unix', Translations) + '</font></th><th><font color="white">' + TE('last-unix', Translations) + '</font></th></tr>' +
     Rows + '</table><hr><p><small>Omi Server</small></p></body></html>';
@@ -2700,12 +2758,10 @@ var
   UpUser, UpPass: string;
   DelUser: string;
   OtpUser: string;
-  EmailValue: string;
-  Secret: string;
-  OtpUrl: string;
+  OldUser: string;
+  RenamedUser: string;
+  NewOtp: string;
   UsersTable: string;
-  EditSections: string;
-  OtpSections: string;
   SelfUser: string;
   SessionId: string;
   PostedAuthAction: string;
@@ -2714,20 +2770,7 @@ var
   UserPassword: string;
   UserOtp: string;
   UserLang: string;
-  OpenEditUser: string;
-  OpenOtpUser: string;
-
-  function GenerateSecret(LengthValue: Integer): string;
-  const
-    Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-  var
-    J: Integer;
-  begin
-    Result := '';
-    Randomize;
-    for J := 1 to LengthValue do
-      Result := Result + Chars[Random(32) + 1];
-  end;
+  UserValue: string;
 
 begin
   Username := GetUsernameFromRequest(ARequest);
@@ -2750,8 +2793,6 @@ begin
   try
     SuccessMsg := '';
     ErrorMsg := '';
-    OpenEditUser := '';
-    OpenOtpUser := '';
     Action := ARequest.ContentFields.Values['action'];
 
     if (ARequest.Method = 'POST') and (Action <> '') then
@@ -2783,21 +2824,26 @@ begin
         else
           ErrorMsg := T('error', Translations);
       end
-      else if Action = 'open_edit' then
+      else if Action = 'update_username' then
       begin
-        OpenEditUser := ARequest.ContentFields.Values['edituser'];
-      end
-      else if Action = 'open_otp' then
-      begin
-        OpenOtpUser := ARequest.ContentFields.Values['otpuser'];
-      end
-      else if Action = 'close_edit' then
-      begin
-        OpenEditUser := '';
-      end
-      else if Action = 'close_otp' then
-      begin
-        OpenOtpUser := '';
+        OldUser := Trim(ARequest.ContentFields.Values['olduser']);
+        RenamedUser := Trim(ARequest.ContentFields.Values['renameduser']);
+        if (OldUser <> '') and (RenamedUser <> '') and GetUserData(UsersMap, OldUser, Password, Otp, Language) then
+        begin
+          if SameText(OldUser, RenamedUser) or (UsersMap.Values[RenamedUser] = '') then
+          begin
+            UserValue := Password + USER_VALUE_SEP + Otp + USER_VALUE_SEP + Language;
+            if not SameText(OldUser, RenamedUser) then
+              UsersMap.Values[OldUser] := '';
+            UsersMap.Values[RenamedUser] := UserValue;
+            SaveUsersMap(UsersMap);
+            SuccessMsg := T('save', Translations);
+          end
+          else
+            ErrorMsg := T('error', Translations);
+        end
+        else
+          ErrorMsg := T('error', Translations);
       end
       else if Action = 'delete' then
       begin
@@ -2811,7 +2857,7 @@ begin
         else
           ErrorMsg := T('error', Translations);
       end
-      else if Action = 'update' then
+      else if Action = 'update_password' then
       begin
         UpUser := ARequest.ContentFields.Values['upuser'];
         UpPass := ARequest.ContentFields.Values['uppass'];
@@ -2824,29 +2870,13 @@ begin
         else
           ErrorMsg := T('error', Translations);
       end
-      else if Action = 'enable_otp' then
+      else if Action = 'update_otp' then
       begin
         OtpUser := ARequest.ContentFields.Values['otpuser'];
-        EmailValue := ARequest.ContentFields.Values['email'];
+        NewOtp := Trim(ARequest.ContentFields.Values['newotp']);
         if GetUserData(UsersMap, OtpUser, Password, Otp, Language) then
         begin
-          Secret := GenerateSecret(32);
-          if EmailValue = '' then
-            EmailValue := OtpUser;
-          OtpUrl := 'otpauth://totp/Omi (' + EmailValue + '):' + EmailValue + '?secret=' + Secret + '&issuer=omi&digits=6&period=30';
-          UsersMap.Values[OtpUser] := Password + USER_VALUE_SEP + OtpUrl + USER_VALUE_SEP + Language;
-          SaveUsersMap(UsersMap);
-          SuccessMsg := T('save', Translations);
-        end
-        else
-          ErrorMsg := T('error', Translations);
-      end
-      else if Action = 'disable_otp' then
-      begin
-        OtpUser := ARequest.ContentFields.Values['otpuser'];
-        if GetUserData(UsersMap, OtpUser, Password, Otp, Language) then
-        begin
-          UsersMap.Values[OtpUser] := Password + USER_VALUE_SEP + '' + USER_VALUE_SEP + Language;
+          UsersMap.Values[OtpUser] := Password + USER_VALUE_SEP + NewOtp + USER_VALUE_SEP + Language;
           SaveUsersMap(UsersMap);
           SuccessMsg := T('save', Translations);
         end
@@ -2856,8 +2886,6 @@ begin
     end;
 
     UsersTable := '';
-    EditSections := '';
-    OtpSections := '';
 
     for I := 0 to UsersMap.Count - 1 do
     begin
@@ -2867,97 +2895,66 @@ begin
       if not GetUserData(UsersMap, UserKey, Password, Otp, Language) then
         Continue;
 
-      UsersTable := UsersTable + '<tr><td>' + HtmlEncode(UserKey) + '</td>' +
-        '<td>' + ifthen(Otp <> '', '<font color="green">✓ ' + T('enabled', Translations) + '</font>', '<font color="gray">' + T('disabled', Translations) + '</font>') + '</td>' +
+      UsersTable := UsersTable + '<tr><td>' + HtmlEncode(UserKey) + '<br>' +
+        '<form method="POST" style="display:inline">' +
+        BuildAuthHiddenFields(ARequest, 'people-update-username-' + UserKey) +
+        '<input type="hidden" name="action" value="update_username">' +
+        '<input type="hidden" name="olduser" value="' + HtmlEncode(UserKey) + '">' +
+        '<input type="text" name="renameduser" size="24" value="' + HtmlEncode(UserKey) + '" required>' +
+        '<br><input type="submit" value="' + T('save', Translations) + '"></form></td>' +
+        '<td><form method="POST" style="display:inline">' +
+        BuildAuthHiddenFields(ARequest, 'people-update-password-' + UserKey) +
+        '<input type="hidden" name="action" value="update_password">' +
+        '<input type="hidden" name="upuser" value="' + HtmlEncode(UserKey) + '">' +
+        '<input type="password" name="uppass" size="24" required>' +
+        '<br><input type="submit" value="' + T('save', Translations) + '"></form></td>' +
+        '<td>' + ifthen(Otp = '', T('no', Translations), 'Yes') + '<br>' +
+        '<form method="POST" style="display:inline">' +
+        BuildAuthHiddenFields(ARequest, 'people-update-otp-' + UserKey) +
+        '<input type="hidden" name="action" value="update_otp">' +
+        '<input type="hidden" name="otpuser" value="' + HtmlEncode(UserKey) + '">' +
+        '<input type="text" name="newotp" size="24" value="' + HtmlEncode(Otp) + '">' +
+        '<br><input type="submit" value="' + T('save', Translations) + '"></form></td>' +
         '<td><form method="POST" style="display:inline">' +
         BuildAuthHiddenFields(ARequest, 'people-delete-' + UserKey) +
         '<input type="hidden" name="action" value="delete">' +
         '<input type="hidden" name="deluser" value="' + HtmlEncode(UserKey) + '">' +
-        '<input type="submit" value="' + T('delete', Translations) + '"></form> | ' +
-        '<form method="POST" style="display:inline">' +
-        BuildAuthHiddenFields(ARequest, 'people-open-edit-' + UserKey) +
-        '<input type="hidden" name="action" value="open_edit">' +
-        '<input type="hidden" name="edituser" value="' + HtmlEncode(UserKey) + '">' +
-        '<input type="submit" value="' + T('edit', Translations) + '"></form>' +
-        (ifthen(UserKey = Username,
-          ' | <form method="POST" style="display:inline">' +
-          BuildAuthHiddenFields(ARequest, 'people-open-otp-' + UserKey) +
-          '<input type="hidden" name="action" value="open_otp">' +
-          '<input type="hidden" name="otpuser" value="' + HtmlEncode(UserKey) + '">' +
-          '<input type="submit" value="' + T('otp', Translations) + '"></form>',
-          '')) +
-        '</td></tr>';
-
-      if (OpenEditUser <> '') and SameText(OpenEditUser, UserKey) then
-        EditSections := EditSections + '<div style="border:1px solid #ccc;padding:10px;margin:10px 0">' +
-        '<form method="POST"><table border="0" cellpadding="5">' +
-        BuildAuthHiddenFields(ARequest, 'people-update-' + UserKey) +
-        '<tr><td>' + T('username', Translations) + ':</td><td><strong>' + HtmlEncode(UserKey) + '</strong></td></tr>' +
-        '<tr><td>' + T('new-password', Translations) + ':</td><td><input type="password" name="uppass" size="30" required></td></tr>' +
-        '<tr><td colspan="2"><input type="hidden" name="action" value="update">' +
-        '<input type="hidden" name="upuser" value="' + HtmlEncode(UserKey) + '">' +
-        '<input type="submit" value="' + T('update', Translations) + '"></td></tr>' +
-        '</table></form><p>' + BuildActionButton(ARequest, '/people', 'people-close-edit-' + UserKey, T('cancel', Translations)) + '</p></div>';
-
-      if (UserKey = Username) and (OpenOtpUser <> '') and SameText(OpenOtpUser, UserKey) then
-      begin
-        if Otp = '' then
-          OtpSections := OtpSections + '<div style="border:1px solid #ccc;padding:10px;margin:10px 0">' +
-            '<h3>' + T('otp-for-user', Translations) + ': ' + HtmlEncode(UserKey) + '</h3>' +
-            '<form method="POST"><table border="0" cellpadding="5">' +
-            BuildAuthHiddenFields(ARequest, 'people-enable-otp-' + UserKey) +
-            '<tr><td>' + T('email-optional', Translations) + ':</td><td><input type="text" name="email" size="30" value="' + HtmlEncode(UserKey) + '"></td></tr>' +
-            '<tr><td colspan="2"><small>' + T('otp-email-help', Translations) + '</small></td></tr>' +
-            '<tr><td colspan="2"><input type="hidden" name="action" value="enable_otp">' +
-            '<input type="hidden" name="otpuser" value="' + HtmlEncode(UserKey) + '">' +
-            '<input type="submit" value="' + T('enable-otp', Translations) + '"></td></tr>' +
-            '</table></form><p>' + BuildActionButton(ARequest, '/people', 'people-close-otp-' + UserKey, T('close', Translations)) + '</p></div>'
-        else
-          OtpSections := OtpSections + '<div style="border:1px solid #ccc;padding:10px;margin:10px 0">' +
-            '<h3>' + T('otp-for-user', Translations) + ': ' + HtmlEncode(UserKey) + '</h3>' +
-            '<p><font color="green">✓ ' + T('otp-enabled', Translations) + '</font></p>' +
-            '<p><small>' + T('otp-url-stored', Translations) + '</small></p>' +
-            '<form method="POST" style="display:inline">' +
-            BuildAuthHiddenFields(ARequest, 'people-disable-otp-' + UserKey) +
-            '<input type="hidden" name="action" value="disable_otp">' +
-            '<input type="hidden" name="otpuser" value="' + HtmlEncode(UserKey) + '">' +
-            '<input type="submit" value="' + T('disable-otp', Translations) + '"></form>' +
-            '<p>' + BuildActionButton(ARequest, '/people', 'people-close-otp-' + UserKey, T('close', Translations)) + '</p></div>';
-      end;
+        '<input type="submit" value="' + T('delete', Translations) + '"></form></td></tr>';
     end;
 
-    HeaderRight := '<strong>' + HtmlEncode(Username) + '</strong> | ' +
-      BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' +
-      BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations));
-    MainNav := BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' +
-      BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' +
-      BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' +
-      BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations));
+    HeaderRight := '';
+    MainNav := BuildNavRow([
+      BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)),
+      BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)),
+      BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)),
+      BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)),
+      BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)),
+      '<strong>' + HtmlEncode(Username) + '</strong>',
+      BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations))
+    ]);
 
     Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
       '<html><head><meta charset="UTF-8"><title>' + T('people', Translations) + ' - Omi Server</title></head>' +
       '<body bgcolor="#f0f0f0">' +
       '<table width="100%" border="0" cellpadding="5">' +
-      '<tr><td><h1>' + T('user-management', Translations) + '</h1></td><td align="right"><small>' + HeaderRight + '</small></td></tr>' +
+      '<tr><td><h1>' + T('people', Translations) + '</h1></td><td align="right"><small>' + HeaderRight + '</small></td></tr>' +
       '</table>' +
       '<p>' + MainNav + '</p>' +
       '<hr>' +
       ifthen(SuccessMsg <> '', '<p><font color="green"><strong>' + HtmlEncode(SuccessMsg) + '</strong></font></p>', '') +
       ifthen(ErrorMsg <> '', '<p><font color="red"><strong>' + HtmlEncode(ErrorMsg) + '</strong></font></p>', '') +
-      '<h2>' + T('manage-users', Translations) + '</h2>' +
-      '<table border="1" cellpadding="5" width="100%">' +
-      '<tr bgcolor="#333333"><th><font color="white">' + T('username', Translations) + '</font></th><th><font color="white">' + T('otp-status', Translations) + '</font></th><th><font color="white">' + T('actions', Translations) + '</font></th></tr>' +
-      UsersTable +
-      '</table>' +
-      '<h2>' + T('add-new-user', Translations) + '</h2>' +
+      '<h2>New User</h2>' +
       '<form method="POST"><table border="0" cellpadding="5">' +
       BuildAuthHiddenFields(ARequest, 'people-add-user') +
       '<tr><td>' + T('username', Translations) + ':</td><td><input type="text" name="newuser" size="30" required></td></tr>' +
       '<tr><td>' + T('password', Translations) + ':</td><td><input type="password" name="newpass" size="30" required></td></tr>' +
       '<tr><td colspan="2"><input type="hidden" name="action" value="add"><input type="submit" value="' + T('save', Translations) + '"></td></tr>' +
       '</table></form>' +
-      ifthen(EditSections <> '', '<h2>' + T('edit-user-password', Translations) + '</h2>' + EditSections, '') +
-      ifthen(OtpSections <> '', '<h2>' + T('manage-otp', Translations) + '</h2>' + OtpSections, '') +
+      '<h2>Users</h2>' +
+      '<table border="1" cellpadding="5" width="100%">' +
+      '<tr bgcolor="#333333"><th><font color="white">Users</font></th><th><font color="white">' + T('password', Translations) + '</font></th><th><font color="white">' + T('otp', Translations) + '</font></th><th><font color="white">' + T('actions', Translations) + '</font></th></tr>' +
+      UsersTable +
+      '</table>' +
       '<hr><p><small>Omi Server</small></p>' +
       '</body></html>';
 
@@ -3187,10 +3184,8 @@ begin
         '<html><head><meta charset="UTF-8"><title>' + T('file', Translations) + ': ' + HtmlEncode(RepoPath) + ' - ' + HtmlEncode(RepoName) + '</title></head>' +
         '<body bgcolor="#f0f0f0">' +
         '<table width="100%" border="0" cellpadding="5">' +
-        '<tr><td><h1>' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small>' +
-        ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') +
-        '</small></td></tr></table>' +
-        '<p>' + BuildNavTargetButton(ARequest, CurrentPath, '/', 'repo-nav-home', T('home', Translations)) + ' ' + BuildNavTargetButton(ARequest, CurrentPath, '/?log=' + HtmlEncode(RepoName), 'repo-nav-log', T('log', Translations)) + ' ' + BuildNavTargetButton(ARequest, CurrentPath, RepoToRoot(RepoName), 'repo-nav-root', T('repository-root', Translations)) + '</p>' +
+        '<tr><td><h1>' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small></small></td></tr></table>' +
+        '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' + BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' + BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + ' ' + ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') + ' ' + BuildNavTargetButton(ARequest, CurrentPath, '/?log=' + HtmlEncode(RepoName), 'repo-nav-log', T('log', Translations)) + ' ' + BuildNavTargetButton(ARequest, CurrentPath, RepoToRoot(RepoName), 'repo-nav-root', T('repository-root', Translations)) + '</p>' +
         '<h2>' + T('file', Translations) + ': ' + HtmlEncode(RepoPath) + '</h2>';
 
       if ShowDeleteConfirm then
@@ -3546,10 +3541,8 @@ begin
         '<html><head><title>' + HtmlEncode(RepoPath) + ' - ' + HtmlEncode(RepoName) + '</title></head>' +
         '<body bgcolor="#f0f0f0">' +
         '<table width="100%" border="0" cellpadding="5">' +
-        '<tr><td><h1>' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small>' +
-        ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') +
-        '</small></td></tr></table>' +
-        '<p>' + BuildNavTargetButton(ARequest, CurrentPath, '/', 'repo-nav-home-list', T('home', Translations)) + ' ' + BuildNavTargetButton(ARequest, CurrentPath, '/?log=' + HtmlEncode(RepoName), 'repo-nav-log-list', T('log', Translations)) + '</p>' +
+        '<tr><td><h1>' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small></small></td></tr></table>' +
+        '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' + BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' + BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + ' ' + ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') + ' ' + BuildNavTargetButton(ARequest, CurrentPath, '/?log=' + HtmlEncode(RepoName), 'repo-nav-log-list', T('log', Translations)) + '</p>' +
         '<h2>' + T('directory', Translations) + ': /' + HtmlEncode(RepoPath) + '</h2>' +
         '<hr>' +
         '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +

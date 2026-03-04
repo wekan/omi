@@ -506,6 +506,16 @@ function verifyTOTP(secret, code, window = 1) {
   return false;
 }
 
+function extractOtpSecret(otpValue) {
+  const otp = String(otpValue || '').trim();
+  if (!otp) {
+    return '';
+  }
+
+  const match = otp.match(/[?&]secret=([A-Z2-7]+)/i);
+  return match ? match[1].toUpperCase() : '';
+}
+
 // Simple authentication check with OTP support
 function authenticate(username, password, otpCode = '') {
   const users = loadUsers();
@@ -516,14 +526,11 @@ function authenticate(username, password, otpCode = '') {
   // Check password
   if (user.password !== password) return false;
 
-  // Check OTP if enabled for this user
-  if (user.otp) {
-    const match = user.otp.match(/secret=([A-Z2-7]+)/);
-    if (match) {
-      const secret = match[1];
-      if (!otpCode || !verifyTOTP(secret, otpCode)) {
-        return 'OTP_REQUIRED';
-      }
+  // Check OTP only when a valid TOTP secret is configured for this user
+  const secret = extractOtpSecret(user.otp);
+  if (secret) {
+    if (!otpCode || !verifyTOTP(secret, otpCode)) {
+      return 'OTP_REQUIRED';
     }
   }
 
@@ -1288,8 +1295,8 @@ async function handleRequest(req, res) {
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html><head><title>${t('activity', translations)} - Omi Server</title></head>
 <body bgcolor="#f0f0f0">
-<table width="100%" border="0" cellpadding="5"><tr><td><h1>${t('activity', translations)}</h1></td><td align="right"><small><strong>${escapeHtml(activityUser)}</strong> <a href="/logout">${t('logout', translations)}</a></small></td></tr></table>
-<p><a href="/">${t('home', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a></p>
+<table width="100%" border="0" cellpadding="5"><tr><td><h1>${t('activity', translations)}</h1></td><td align="right"><small></small></td></tr></table>
+<p><a href="/">${t('home', translations)}</a> <a href="/language">${t('language', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a> <strong>${escapeHtml(activityUser)}</strong> <a href="/logout">${t('logout', translations)}</a></p>
 <table border="1" width="100%" cellpadding="5" cellspacing="0"><tr bgcolor="#333333"><th><font color="white">${t('actions', translations)}</font></th><th><font color="white">${t('ip-address', translations)}</font></th><th><font color="white">${t('user-agent', translations)}</font></th><th><font color="white">${t('users', translations)}</font></th><th><font color="white">${t('events', translations)}</font></th><th><font color="white">${t('first-unix', translations)}</font></th><th><font color="white">${t('last-unix', translations)}</font></th></tr>${rowsHtml}</table>
 <hr><p><small>Omi Server</small></p>
 </body></html>`;
@@ -1569,11 +1576,9 @@ ${form}
 </head>
 <body bgcolor="#f0f0f0" dir="${dirAttr}">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Omi Server - ${t('language', translations)}</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
+<tr><td><h1>Omi Server - ${t('language', translations)}</h1></td><td align="right"><small></small></td></tr>
 </table>
-<table border="0" cellpadding="5">
-<tr><td><a href="/">${t('home', translations)}</a> <a href="/log">${t('log', translations)}</a></td></tr>
-</table>
+<p><a href="/">${t('home', translations)}</a> <a href="/language">${t('language', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a> ${username ? `<strong>${escapeHtml(username)}</strong> <a href="/logout">${t('logout', translations)}</a>` : `<a href="/sign-in">${t('login', translations)}</a>`}</p>
 ${form}
 </body>
 </html>`;
@@ -1622,9 +1627,9 @@ ${form}
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>${t('settings', translations)}</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
+<tr><td><h1>${t('settings', translations)}</h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><a href="/">${t('home', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a></p>
+<p><a href="/">${t('home', translations)}</a> <a href="/language">${t('language', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a> ${username ? `<strong>${escapeHtml(username)}</strong> <a href="/logout">${t('logout', translations)}</a>` : `<a href="/sign-in">${t('login', translations)}</a>`}</p>
 <hr>
 <form method="POST">
 ${buildAuthHiddenFields(req, 'settings-save')}
@@ -2139,9 +2144,9 @@ ${markdownToHtml(displayContent, fileEntry.filename, repoRoot, imageMap)}
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small>${username ? `<strong>${escapeHtml(username)}</strong> <a href="/language">${t('language', translations)}</a> <a href="/logout">${t('logout', translations)}</a>` : `<a href="/sign-in">${t('login', translations)}</a>`}</small></td></tr>
+<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><a href="/">${t('home', translations)}</a> <a href="/${escapeHtml(repoRoot)}">${t('repository-root', translations)}</a></p>
+<p><a href="/">${t('home', translations)}</a> <a href="/language">${t('language', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a> ${username ? `<strong>${escapeHtml(username)}</strong> <a href="/logout">${t('logout', translations)}</a>` : `<a href="/sign-in">${t('login', translations)}</a>`} <a href="/${escapeHtml(repoRoot)}">${t('repository-root', translations)}</a></p>
 <h2>${t('file', translations)}: ${escapeHtml(fileEntry.filename)}</h2>
 <p><a href="?download=1">${t('download', translations)}</a></p>
 ${showDeleteConfirm ? `<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;">
@@ -2259,9 +2264,9 @@ ${buildAuthHiddenFields(req, 'repo-upload-dir-file')}
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
+<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small></small></td></tr>
 </table>
-<p><a href="/">${t('home', translations)}</a></p>
+<p><a href="/">${t('home', translations)}</a> <a href="/language">${t('language', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a> ${username ? `<strong>${escapeHtml(username)}</strong> <a href="/logout">${t('logout', translations)}</a>` : `<a href="/sign-in">${t('login', translations)}</a>`}</p>
 <h2>${t('directory', translations)}: /${directoryTitle}</h2>
 <hr>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
@@ -2316,8 +2321,9 @@ ${actionForms}
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Omi Server - ${t('repositories', translations)}</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
+<tr><td><h1>Omi Server - ${t('repositories', translations)}</h1></td><td align="right"><small></small></td></tr>
 </table>
+${username ? `<p><a href="/">${t('home', translations)}</a> <a href="/language">${t('language', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a> <strong>${escapeHtml(username)}</strong> <a href="/logout">${t('logout', translations)}</a></p>` : ''}
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#e8f4f8">
 <td colspan="4">
