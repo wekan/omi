@@ -10,6 +10,91 @@ There is username, password, 2FA and language at users.txt for login.
 
 Server is like GitHub, so it has login to API and web UI.
 
+## Server Web Framework: Extremely strict and stateful security system, implemented completely without cookies and JavaScript
+
+Implementations: FreePascal, PHP, Javascript (Node.js/Bun/Deno)
+
+This uses a very strict and secure approach called **Session Binding**.
+By binding a session to multiple variables (IP, User Agent, etc), I make it
+almost impossible to hijack the session, even if someone gets their hands on the token.
+
+Here is an analysis of what this means in practice and how it affects security:
+
+### 1. Defense against "Man-in-the-Middle" attacks
+
+Even if an attacker managed to grab a single one-time token, he would not be able to use it on his own machine because:
+
+* **The IP address does not match.**
+
+* **The User Agent is different.**
+
+* **The token has already been used** (if the original user got there first).
+
+### 2. Challenges in dynamic networks
+
+This "all variables locked" model is the most secure possible, but it can cause so-called **False Positives** situations (user is logged out for no reason):
+
+* **Mobile networks:** The phone's IP address can change mid-session when the user moves from one base station to another or from Wi-Fi to a 5G network.
+* **iCloud Private Relay / VPN:** Some services change the outgoing IP frequently.
+
+### 3. Architecture strength: State-level security
+
+This type of architecture (No-JS, No-Cookies, One-time Tokens, Strict Binding) is usually used only in the most critical systems, such as:
+
+* Military networks.
+* Internal management systems of banks.
+* Anonymous networks (such as Tor services), where cookies and JS are a security risk.
+
+### Summary
+
+This framework is the **antithesis of today's "comfort first" web**.
+While most frameworks rely on the browser being full of JavaScript and cookies,
+this model returns control 100% to the server.
+
+This FreePascal version is a textbook example of how a web application can be built
+completely server-centric so that the client side (browser) does not need to support
+anything other than basic HTML.
+
+It is immune to cookie theft (since there are none) and Cross-Site Scripting (XSS) attacks (since JS is not used).
+
+Two key functions emerge from the code that form the core of this "No-JS, No-Cookies" architecture:
+
+### 1. Session Binding
+
+The `ValidateSessionContext` function performs a strict check on each request. It not only checks
+the validity of the session, but also compares the current request with the stored "metadata":
+
+* **IP address check:** `MetaIp <> GetClientIp(ARequest)`.
+* **User Agent check:** `MetaUa <> GetRequestUserAgent(ARequest)`.
+* **Logout on error:** If either of these changes, the function calls `InvalidateSessionsForUserAndPassword`,
+  which immediately closes all sessions for that user that are bound to the same password.
+
+### 2. Token Rotation
+
+The `VerifyAndConsumeActionToken` function implements the counter mechanism you described:
+
+* **Counter comparison:** It checks whether the `auth_counter` sent by the browser matches the `ClickCounter` value in the server's memory.
+* **Token consumption:** When the request is accepted, the server updates the session metadata and increments the counter by one: `ClickCounter + 1`.
+* **Strong Hash:** The token (`auth_hash`) is generated with the `BuildActionHash` function, which combines the session ID, username,
+  password reference, IP address, User Agent, login time, and **counter value**.
+
+### Implementation Notes
+
+* **Form-based navigation:** Since cookies are not used, navigation is often done via POST requests.
+  For example, `BuildNavTargetButton` creates a hidden form that contains all the necessary `auth_` fields.
+* **Session-ID passing:** If traditional links are used, the session ID is added as a URL parameter
+  with the `AddSessionIdToTarget` function.
+* **Brute-force protection:** There is also a separate check `IsUserLocked` in the code, which prevents
+  login attempts if the username is locked in the `usersbruteforcelocked.txt` file.
+
+### FreePascal
+
+This is a true "low-level" choice for web development and shows the uncompromising nature of the project.
+
+Performance: Binaries compiled with FreePascal are lightning fast and consume a fraction of the memory compared to JS runtimes.
+
+Security: The typed language and native binary make server-side attacks (such as buffer overflow) more difficult if the code is written carefully.
+
 ## Features
 - [X] Cross-platform CLI and Web UI
   - [X] File deduplication via SHA256 hashing
@@ -17,6 +102,7 @@ Server is like GitHub, so it has login to API and web UI.
 - CLI
   - [X] Git-like commands (`init`, `clone`, `add`, `commit`, `push`, `pull`)
 - Web
+  - [X] Everything works without Cookies and JavaScript
   - [X] HTML 3.2 compatible (works with IBrowse, Dillo, Elinks, w3m)
   - [X] User account management with passwords and 2FA/TOTP
   - [X] Brute force protection and API rate limiting
