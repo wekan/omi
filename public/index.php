@@ -2783,7 +2783,7 @@ if (isset($_GET['image'])) {
     if ($isHistoricView) $parentUrl .= '?commit=' . urlencode((string)$selectedCommitId);
 ?>
 <tr>
-<td><a href="<?php echo $parentUrl; ?>"><?php echo t('directory', $translations); ?> ..</a></td>
+<td><a href="<?php echo $parentUrl; ?>">..</a></td>
 <td>-</td>
 <td>-</td>
 <td>-</td>
@@ -2792,7 +2792,7 @@ if (isset($_GET['image'])) {
 <?php if (!empty($organized['dirs'])): ?>
 <?php foreach ($organized['dirs'] as $dir): ?>
 <tr>
-<td><a href="/<?php echo htmlspecialchars($repoRootName . '/' . $dir['path']); ?><?php echo $isHistoricView ? '?commit=' . urlencode((string)$selectedCommitId) : ''; ?>"><?php echo t('directory', $translations); ?> <?php echo htmlspecialchars($dir['name']); ?>/</a></td>
+<td><a href="/<?php echo htmlspecialchars($repoRootName . '/' . $dir['path']); ?><?php echo $isHistoricView ? '?commit=' . urlencode((string)$selectedCommitId) : ''; ?>"><?php echo htmlspecialchars($dir['name']); ?>/</a></td>
 <td>-</td>
 <td><?php echo htmlspecialchars($dir['datetime']); ?></td>
 <td>-</td>

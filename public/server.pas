@@ -2251,59 +2251,59 @@ begin
             RepoMessage := T('repository-name', Translations);
             RepoError := True;
           end
-           else
-           begin
-             DownloadPath := GetRepoPath(RepoName);
-             DownloadData := ReadFileToString(RepoFile.LocalFileName);
-             if DownloadData <> '' then
-             begin
-               if not DirectoryExists(ExtractFileDir(DownloadPath)) then
-                 ForceDirectories(ExtractFileDir(DownloadPath));
-               with TFileStream.Create(DownloadPath, fmCreate) do
-               try
-                 WriteBuffer(DownloadData[1], Length(DownloadData));
-               finally
-                 Free;
-               end;
-               RepoMessage := T('upload', Translations) + ' OK';
-             end
-             else
-             begin
-               RepoMessage := T('upload-failed', Translations);
-               RepoError := True;
-             end;
-           end;
-          end
-          else if Action = 'delete_repo_request' then
+          else
           begin
-            RepoName := NormalizeRepoName(ARequest.ContentFields.Values['repo_name']);
             DownloadPath := GetRepoPath(RepoName);
-            if (RepoName = '') or (not FileExists(DownloadPath)) then
+            DownloadData := ReadFileToString(RepoFile.LocalFileName);
+            if DownloadData <> '' then
             begin
-              RepoMessage := T('error', Translations);
-              RepoError := True;
+              if not DirectoryExists(ExtractFileDir(DownloadPath)) then
+                ForceDirectories(ExtractFileDir(DownloadPath));
+              with TFileStream.Create(DownloadPath, fmCreate) do
+              try
+                WriteBuffer(DownloadData[1], Length(DownloadData));
+              finally
+                Free;
+              end;
+              RepoMessage := T('upload', Translations) + ' OK';
             end
             else
-              PendingDeleteRepo := RepoName;
-          end
-          else if Action = 'delete_repo_confirm' then
-          begin
-            RepoName := NormalizeRepoName(ARequest.ContentFields.Values['repo_name']);
-            DownloadPath := GetRepoPath(RepoName);
-            if (RepoName = '') or (not FileExists(DownloadPath)) then
             begin
-              RepoMessage := T('error', Translations);
-              RepoError := True;
-            end
-            else if DeleteFile(DownloadPath) then
-              RepoMessage := T('delete', Translations)
-            else
-            begin
-              RepoMessage := T('error', Translations);
+              RepoMessage := T('upload-failed', Translations);
               RepoError := True;
             end;
-         end;
-       end;
+          end;
+        end;
+      end
+      else if Action = 'delete_repo_request' then
+      begin
+        RepoName := NormalizeRepoName(ARequest.ContentFields.Values['repo_name']);
+        DownloadPath := GetRepoPath(RepoName);
+        if (RepoName = '') or (not FileExists(DownloadPath)) then
+        begin
+          RepoMessage := T('error', Translations);
+          RepoError := True;
+        end
+        else
+          PendingDeleteRepo := RepoName;
+      end
+      else if Action = 'delete_repo_confirm' then
+      begin
+        RepoName := NormalizeRepoName(ARequest.ContentFields.Values['repo_name']);
+        DownloadPath := GetRepoPath(RepoName);
+        if (RepoName = '') or (not FileExists(DownloadPath)) then
+        begin
+          RepoMessage := T('error', Translations);
+          RepoError := True;
+        end
+        else if DeleteFile(DownloadPath) then
+          RepoMessage := T('delete', Translations)
+        else
+        begin
+          RepoMessage := T('error', Translations);
+          RepoError := True;
+        end;
+      end;
     end;
 
     Repos := GetReposList;
@@ -3500,21 +3500,6 @@ begin
       FileList.Sorted := True;
       FileList.Duplicates := dupIgnore;
 
-      for I := 0 to High(Files) do
-      begin
-        Relative := Files[I].Filename;
-        if RepoPath <> '' then
-        begin
-          if Pos(RepoPath + '/', Relative) = 1 then
-            Relative := Copy(Relative, Length(RepoPath) + 2, Length(Relative));
-        end;
-        SlashPos := Pos('/', Relative);
-        if SlashPos > 0 then
-          DirList.Add(Copy(Relative, 1, SlashPos - 1))
-        else if Relative <> '' then
-          FileList.Add(Relative);
-      end;
-
       if (ARequest.Method = 'POST') and (Username <> '') and not IsHistoricView then
       begin
         Action := ARequest.ContentFields.Values['action'];
@@ -3613,18 +3598,26 @@ begin
         Files := GetLatestFiles(DbPath, RepoPath, SelectedCommitId);
       end;
 
-      TableRows := '';
-
-      if RepoPath <> '' then
+      DirList.Clear;
+      FileList.Clear;
+      for I := 0 to High(Files) do
       begin
-        ParentPath := ExtractFileDir(RepoPath);
-        if ParentPath = '.' then
-          ParentPath := '';
-        RepoRootLink := RepoToRoot(RepoName);
-        if ParentPath <> '' then
-          RepoRootLink := RepoRootLink + '/' + ParentPath;
-        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(RepoRootLink), 'repo-dir-parent', T('directory', Translations) + ' ..') + '</td><td>-</td><td>-</td><td>-</td></tr>';
+        Relative := Files[I].Filename;
+        if RepoPath <> '' then
+        begin
+          if Pos(RepoPath + '/', Relative) = 1 then
+            Relative := Copy(Relative, Length(RepoPath) + 2, Length(Relative));
+        end;
+        if (Relative = '.omidir') or (ExtractFileName(Relative) = '.omidir') then
+          Continue;
+        SlashPos := Pos('/', Relative);
+        if SlashPos > 0 then
+          DirList.Add(Copy(Relative, 1, SlashPos - 1))
+        else if Relative <> '' then
+          FileList.Add(Relative);
       end;
+
+      TableRows := '';
 
       for I := 0 to DirList.Count - 1 do
       begin
@@ -3633,7 +3626,7 @@ begin
         if RepoPath <> '' then
           EntryPath := EntryPath + '/' + RepoPath;
         EntryPath := EntryPath + '/' + DisplayName;
-        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-dir-open-' + IntToStr(I), T('directory', Translations) + ' ' + DisplayName + '/') + '</td><td>-</td><td>-</td><td>-</td></tr>';
+        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-dir-open-' + IntToStr(I), DisplayName + '/') + '</td><td>-</td><td>-</td><td>-</td></tr>';
       end;
 
       for I := 0 to FileList.Count - 1 do
@@ -3704,7 +3697,7 @@ begin
           ParentUrl := RepoToRoot(RepoName);
           if ParentPath <> '' then
             ParentUrl := ParentUrl + '/' + ParentPath;
-          ParentDirRow := '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(ParentUrl), 'repo-parent-row', T('directory', Translations) + ' ..') + '</td><td>-</td><td>-</td><td>-</td></tr>';
+          ParentDirRow := '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(ParentUrl), 'repo-parent-row', '..') + '</td><td>-</td><td>-</td><td>-</td></tr>';
         end;
       end;
 

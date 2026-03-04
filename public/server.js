@@ -2437,7 +2437,7 @@ ${contentHtml}
     const organized = organizeFiles(files, repoPath);
     const directoryTitle = repoPath ? escapeHtml(repoPath) : '';
     const dirRows = organized.dirs.map(dir => `<tr>
-  <td><a href="${escapeHtml(appendCommit('/' + repoRoot + '/' + dir.path))}">${t('directory', translations)} ${escapeHtml(dir.name)}/</a></td>
+  <td><a href="${escapeHtml(appendCommit('/' + repoRoot + '/' + dir.path))}">${escapeHtml(dir.name)}/</a></td>
   <td>-</td>
   <td>${escapeHtml(dir.datetime)}</td>
   <td>-</td>
@@ -2536,7 +2536,7 @@ ${isHistoricView ? `<p><font color="blue"><strong>${t('viewing-commit', translat
 <th><font color="white">${t('actions', translations)}</font></th>
 </tr>
 ${repoPath ? `<tr>
-  <td><a href="${escapeHtml(appendCommit('/' + repoRoot + (repoPath.includes('/') ? '/' + repoPath.split('/').slice(0, -1).join('/') : '')))}">${t('directory', translations)} ..</a></td>
+  <td><a href="${escapeHtml(appendCommit('/' + repoRoot + (repoPath.includes('/') ? '/' + repoPath.split('/').slice(0, -1).join('/') : '')))}">..</a></td>
   <td>-</td>
   <td>-</td>
   <td>-</td>
