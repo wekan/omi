@@ -874,14 +874,19 @@ function parseRequestURI() {
 }
 
 // Get files from latest commit
-function getLatestFiles($db, $path = '') {
+function getLatestFiles($db, $path = '', $commitId = null) {
     try {
         $pdo = new PDO('sqlite:' . $db);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-        // Get latest commit
-        $stmt = $pdo->query("SELECT id FROM commits ORDER BY id DESC LIMIT 1");
-        $commit = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($commitId !== null) {
+            $stmt = $pdo->prepare("SELECT id FROM commits WHERE id = ? LIMIT 1");
+            $stmt->execute([intval($commitId)]);
+            $commit = $stmt->fetch(PDO::FETCH_ASSOC);
+        } else {
+            $stmt = $pdo->query("SELECT id FROM commits ORDER BY id DESC LIMIT 1");
+            $commit = $stmt->fetch(PDO::FETCH_ASSOC);
+        }
 
         if (!$commit) {
             return [];
@@ -2011,10 +2016,10 @@ if (isset($_GET['log'])) {
 </table>
 <?php echo buildNavRow([
     buildNavButton('/', t('home', $translations)),
-    buildNavButton('/language', t('language', $translations)),
-    buildNavButton('/settings', t('settings', $translations)),
-    buildNavButton('/people', t('people', $translations)),
-    buildNavButton('/activity', t('activity', $translations)),
+    $username ? buildNavButton('/language', t('language', $translations)) : '',
+    $username ? buildNavButton('/settings', t('settings', $translations)) : '',
+    $username ? buildNavButton('/people', t('people', $translations)) : '',
+    $username ? buildNavButton('/activity', t('activity', $translations)) : '',
     $username ? '<strong>' . htmlspecialchars($username) . '</strong>' : '<a href="/sign-in">' . t('login', $translations) . '</a>',
     $username ? buildNavButton('/logout', t('logout', $translations)) : '',
     '<a href="/' . htmlspecialchars(str_replace('.omi', '', $reponame)) . '">' . t('repository-root', $translations) . '</a>'
@@ -2030,17 +2035,20 @@ if (isset($_GET['log'])) {
 <th><font color="white"><?php echo t('author', $translations); ?></font></th>
 <th><font color="white"><?php echo t('date', $translations); ?></font></th>
 <th><font color="white"><?php echo t('files', $translations); ?></font></th>
+<th><font color="white"><?php echo t('open', $translations); ?></font></th>
 </tr>
 <?php foreach ($commits as $commit): ?>
 <tr>
-<td><strong><?php echo htmlspecialchars($commit['id']); ?></strong></td>
+<td><strong><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $reponame)); ?>?commit=<?php echo intval($commit['id']); ?>"><?php echo htmlspecialchars($commit['id']); ?></a></strong></td>
 <td><?php echo htmlspecialchars($commit['message']); ?></td>
 <td><?php echo htmlspecialchars($commit['user']); ?></td>
 <td><?php echo htmlspecialchars($commit['datetime']); ?></td>
 <td><?php echo intval($commit['file_count']); ?></td>
+<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $reponame)); ?>?commit=<?php echo intval($commit['id']); ?>">View</a></td>
 </tr>
 <?php endforeach; ?>
 </table>
+<p><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $reponame)); ?>"><?php echo t('latest', $translations); ?></a></p>
 <hr>
 <p><?php echo t('page', $translations); ?> <?php echo $page; ?> / <?php echo $total_pages; ?> (<?php echo t('total', $translations); ?>: <?php echo $total; ?> <?php echo t('commits', $translations); ?>)</p>
 <p>
@@ -2114,10 +2122,10 @@ if (isset($_GET['image'])) {
 </table>
 <?php echo buildNavRow([
     buildNavButton('/', t('home', $translations)),
-    buildNavButton('/language', t('language', $translations)),
-    buildNavButton('/settings', t('settings', $translations)),
-    buildNavButton('/people', t('people', $translations)),
-    buildNavButton('/activity', t('activity', $translations)),
+    $username ? buildNavButton('/language', t('language', $translations)) : '',
+    $username ? buildNavButton('/settings', t('settings', $translations)) : '',
+    $username ? buildNavButton('/people', t('people', $translations)) : '',
+    $username ? buildNavButton('/activity', t('activity', $translations)) : '',
     $username ? '<strong>' . htmlspecialchars($username) . '</strong>' : '<a href="/sign-in">' . t('login', $translations) . '</a>',
     $username ? buildNavButton('/logout', t('logout', $translations)) : '',
     '<a href="/' . htmlspecialchars(str_replace('.omi', '', $repoName)) . '">' . t('repository-root', $translations) . '</a>'
@@ -2184,8 +2192,13 @@ if (isset($_GET['image'])) {
         $repoName = $request['repo'];
         $repoPath = $request['path'];
         $db = $request['db'];
+        $repoRootName = str_replace('.omi', '', $repoName);
+        $selectedCommitId = isset($_GET['commit']) ? intval($_GET['commit']) : 0;
+        $isHistoricView = $selectedCommitId > 0;
+        $commitSuffix = $isHistoricView ? '?commit=' . urlencode((string)$selectedCommitId) : '';
+        $logSuffix = $isHistoricView ? '&commit=' . urlencode((string)$selectedCommitId) : '';
 
-        $files = getLatestFiles($db, $repoPath);
+        $files = getLatestFiles($db, $repoPath, $isHistoricView ? $selectedCommitId : null);
 
         // Check if it's a single file
         $isFile = false;
@@ -2214,7 +2227,7 @@ if (isset($_GET['image'])) {
             }
 
             // Handle delete request (with confirmation)
-            if (isset($_POST['delete_confirm']) && $_POST['delete_confirm'] === '1' && $username) {
+            if (isset($_POST['delete_confirm']) && $_POST['delete_confirm'] === '1' && $username && !$isHistoricView) {
                 if (!verifyAndConsumeActionToken('file-delete-confirm')) {
                     $error_msg = t('file-delete-failed', $translations);
                     logActivity(getUsername() ?? '', 'file-delete-confirm', 'invalid-token', 'file delete denied', intval($_SESSION['session_meta']['clickCounter'] ?? 0));
@@ -2227,10 +2240,10 @@ if (isset($_GET['image'])) {
             }
 
             // Check if delete confirmation is being requested
-            $show_delete_confirm = isset($_GET['delete']) && $_GET['delete'] === '1' && $username;
+            $show_delete_confirm = isset($_GET['delete']) && $_GET['delete'] === '1' && $username && !$isHistoricView;
 
             // Handle edit request
-            if (isset($_POST['save_file']) && $isText && $username) {
+            if (isset($_POST['save_file']) && $isText && $username && !$isHistoricView) {
                 if (!verifyAndConsumeActionToken('file-save')) {
                     $error_msg = t('file-save-failed', $translations);
                     logActivity(getUsername() ?? '', 'file-save', 'invalid-token', 'file save denied', intval($_SESSION['session_meta']['clickCounter'] ?? 0));
@@ -2246,7 +2259,7 @@ if (isset($_GET['image'])) {
             }
 
             // Check if in edit mode
-            $in_edit = isset($_GET['edit']) && $_GET['edit'] === '1' && $username && $isText;
+            $in_edit = isset($_GET['edit']) && $_GET['edit'] === '1' && $username && $isText && !$isHistoricView;
 
             ?>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
@@ -2260,15 +2273,17 @@ if (isset($_GET['image'])) {
 </table>
 <?php echo buildNavRow([
     buildNavButton('/', t('home', $translations)),
-    buildNavButton('/language', t('language', $translations)),
-    buildNavButton('/settings', t('settings', $translations)),
-    buildNavButton('/people', t('people', $translations)),
-    buildNavButton('/activity', t('activity', $translations)),
+    $username ? buildNavButton('/language', t('language', $translations)) : '',
+    $username ? buildNavButton('/settings', t('settings', $translations)) : '',
+    $username ? buildNavButton('/people', t('people', $translations)) : '',
+    $username ? buildNavButton('/activity', t('activity', $translations)) : '',
     $username ? '<strong>' . htmlspecialchars($username) . '</strong>' : '<a href="/sign-in">' . t('login', $translations) . '</a>',
     $username ? buildNavButton('/logout', t('logout', $translations)) : '',
-    '<a href="?log=' . urlencode($repoName) . '">' . t('log', $translations) . '</a>',
-    '<a href="/' . htmlspecialchars(str_replace('.omi', '', $repoName)) . '">' . t('repository-root', $translations) . '</a>'
+    '<a href="?log=' . urlencode($repoName) . $logSuffix . '">' . t('log', $translations) . '</a>',
+    '<a href="/' . htmlspecialchars($repoRootName) . $commitSuffix . '">' . t('repository-root', $translations) . '</a>',
+    $isHistoricView ? '<a href="/' . htmlspecialchars($repoRootName) . '">' . t('latest', $translations) . '</a>' : ''
 ]); ?>
+<?php if ($isHistoricView): ?><p><font color="blue"><strong><?php echo t('viewing-commit', $translations); ?> <?php echo intval($selectedCommitId); ?></strong></font></p><?php endif; ?>
 <h2><?php echo t('file', $translations); ?>: <?php echo htmlspecialchars($repoPath); ?></h2>
 <?php if ($show_delete_confirm): ?>
 <!-- Delete confirmation form (HTML 3.2 compatible, no JavaScript) -->
@@ -2284,7 +2299,7 @@ if (isset($_GET['image'])) {
 </div>
 <hr>
 <?php else: ?>
-<?php if ($username): ?>
+<?php if ($username && !$isHistoricView): ?>
 <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
     <div>
         <form method="GET" style="display:inline">
@@ -2366,8 +2381,13 @@ if (isset($_GET['image'])) {
         $resolvedPath = ($fileDir !== '.') ? $fileDir . '/' . $imgPath : $imgPath;
         
         // Query database for image blob
-        $stmt = $pdo->prepare('SELECT f.hash FROM files f WHERE f.filename = ? AND f.commit_id = (SELECT MAX(id) FROM commits)');
-        $stmt->execute([$resolvedPath]);
+                if ($isHistoricView) {
+                    $stmt = $pdo->prepare('SELECT f.hash FROM files f WHERE f.filename = ? AND f.commit_id = ?');
+                    $stmt->execute([$resolvedPath, $selectedCommitId]);
+                } else {
+                    $stmt = $pdo->prepare('SELECT f.hash FROM files f WHERE f.filename = ? AND f.commit_id = (SELECT MAX(id) FROM commits)');
+                    $stmt->execute([$resolvedPath]);
+                }
         $fileRow = $stmt->fetch(PDO::FETCH_ASSOC);
         
         if ($fileRow) {
@@ -2576,7 +2596,7 @@ if (isset($_GET['image'])) {
         $show_delete_file_confirm = false;
         $delete_confirm_target = '';
 
-        if ($_SERVER['REQUEST_METHOD'] === 'POST' && $username) {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && $username && !$isHistoricView) {
             $action = $_POST['action'] ?? '';
             $tokenAction = 'repo-' . ($action !== '' ? $action : 'upload');
 
@@ -2603,7 +2623,7 @@ if (isset($_GET['image'])) {
                     $upload_error = t('error', $translations);
                 } elseif (deleteFile($db, $targetPath)) {
                     $upload_msg = t('delete', $translations);
-                    $files = getLatestFiles($db, $repoPath);
+                    $files = getLatestFiles($db, $repoPath, $isHistoricView ? $selectedCommitId : null);
                     $organized = organizeFiles($files, $repoPath);
                 } else {
                     $upload_error = t('file-delete-failed', $translations);
@@ -2633,7 +2653,7 @@ if (isset($_GET['image'])) {
                         $fileContent = getFileContent($db, $targetHash);
                         if (commitFile($db, $newPath, $fileContent) && deleteFile($db, $targetPath)) {
                             $upload_msg = t('save', $translations);
-                            $files = getLatestFiles($db, $repoPath);
+                            $files = getLatestFiles($db, $repoPath, $isHistoricView ? $selectedCommitId : null);
                             $organized = organizeFiles($files, $repoPath);
                         } else {
                             $upload_error = t('error', $translations);
@@ -2651,7 +2671,7 @@ if (isset($_GET['image'])) {
                     $markerPath = $dirPath . '/.omidir';
                     if (commitFile($db, $markerPath, '')) {
                         $upload_msg = t('create', $translations);
-                        $files = getLatestFiles($db, $repoPath);
+                        $files = getLatestFiles($db, $repoPath, $isHistoricView ? $selectedCommitId : null);
                         $organized = organizeFiles($files, $repoPath);
                     } else {
                         $upload_error = t('error', $translations);
@@ -2668,7 +2688,7 @@ if (isset($_GET['image'])) {
                     $fullPath = $repoPath ? $repoPath . '/' . $fileName : $fileName;
                     if (commitFile($db, $fullPath, $fileContent)) {
                         $upload_msg = t('create', $translations);
-                        $files = getLatestFiles($db, $repoPath);
+                        $files = getLatestFiles($db, $repoPath, $isHistoricView ? $selectedCommitId : null);
                         $organized = organizeFiles($files, $repoPath);
                     } else {
                         $upload_error = t('error', $translations);
@@ -2696,7 +2716,7 @@ if (isset($_GET['image'])) {
                         if (uploadFile($db, $fullPath, $fileContent)) {
                             $upload_msg = t('upload', $translations);
                             // Refresh file listing
-                            $files = getLatestFiles($db, $repoPath);
+                            $files = getLatestFiles($db, $repoPath, $isHistoricView ? $selectedCommitId : null);
                             $organized = organizeFiles($files, $repoPath);
                         } else {
                             $upload_error = t('error', $translations);
@@ -2734,14 +2754,16 @@ if (isset($_GET['image'])) {
 </table>
 <?php echo buildNavRow([
     buildNavButton('/', t('home', $translations)),
-    buildNavButton('/language', t('language', $translations)),
-    buildNavButton('/settings', t('settings', $translations)),
-    buildNavButton('/people', t('people', $translations)),
-    buildNavButton('/activity', t('activity', $translations)),
+    $username ? buildNavButton('/language', t('language', $translations)) : '',
+    $username ? buildNavButton('/settings', t('settings', $translations)) : '',
+    $username ? buildNavButton('/people', t('people', $translations)) : '',
+    $username ? buildNavButton('/activity', t('activity', $translations)) : '',
     $username ? '<strong>' . htmlspecialchars($username) . '</strong>' : '<a href="/sign-in">' . t('login', $translations) . '</a>',
     $username ? buildNavButton('/logout', t('logout', $translations)) : '',
-    '<a href="?log=' . urlencode($repoName) . '">' . t('log', $translations) . '</a>'
+    '<a href="?log=' . urlencode($repoName) . $logSuffix . '">' . t('log', $translations) . '</a>',
+    $isHistoricView ? '<a href="/' . htmlspecialchars($repoRootName) . '">' . t('latest', $translations) . '</a>' : ''
 ]); ?>
+<?php if ($isHistoricView): ?><p><font color="blue"><strong><?php echo t('viewing-commit', $translations); ?> <?php echo intval($selectedCommitId); ?></strong></font></p><?php endif; ?>
 <h2><?php echo t('directory', $translations); ?>: /<?php echo htmlspecialchars($repoPath); ?></h2>
 <hr>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
@@ -2756,8 +2778,9 @@ if (isset($_GET['image'])) {
   // Calculate parent directory path
   $parentPath = dirname($repoPath);
   if ($parentPath === '.') $parentPath = '';
-  $parentUrl = '/' . htmlspecialchars(str_replace('.omi', '', $repoName));
+    $parentUrl = '/' . htmlspecialchars($repoRootName);
   if ($parentPath) $parentUrl .= '/' . htmlspecialchars($parentPath);
+    if ($isHistoricView) $parentUrl .= '?commit=' . urlencode((string)$selectedCommitId);
 ?>
 <tr>
 <td><a href="<?php echo $parentUrl; ?>"><?php echo t('directory', $translations); ?> ..</a></td>
@@ -2769,7 +2792,7 @@ if (isset($_GET['image'])) {
 <?php if (!empty($organized['dirs'])): ?>
 <?php foreach ($organized['dirs'] as $dir): ?>
 <tr>
-<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $dir['path']); ?>"><?php echo t('directory', $translations); ?> <?php echo htmlspecialchars($dir['name']); ?>/</a></td>
+<td><a href="/<?php echo htmlspecialchars($repoRootName . '/' . $dir['path']); ?><?php echo $isHistoricView ? '?commit=' . urlencode((string)$selectedCommitId) : ''; ?>"><?php echo t('directory', $translations); ?> <?php echo htmlspecialchars($dir['name']); ?>/</a></td>
 <td>-</td>
 <td><?php echo htmlspecialchars($dir['datetime']); ?></td>
 <td>-</td>
@@ -2779,7 +2802,7 @@ if (isset($_GET['image'])) {
 <?php if (!empty($organized['files'])): ?>
 <?php foreach ($organized['files'] as $file): ?>
 <tr>
-<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']); ?>"><?php echo htmlspecialchars(getFileTypeLabel($file['filename'])); ?> <?php echo htmlspecialchars(basename($file['filename'])); ?></a></td>
+<td><a href="/<?php echo htmlspecialchars($repoRootName . '/' . $file['filename']); ?><?php echo $isHistoricView ? '?commit=' . urlencode((string)$selectedCommitId) : ''; ?>"><?php echo htmlspecialchars(getFileTypeLabel($file['filename'])); ?> <?php echo htmlspecialchars(basename($file['filename'])); ?></a></td>
 <td><?php echo number_format($file['size']); ?></td>
 <td><?php echo htmlspecialchars($file['datetime']); ?></td>
 <td>
@@ -2789,12 +2812,13 @@ if (isset($_GET['image'])) {
   $isTextFile = true;
   // Store organized data for later use
   $organized = $organized ?? array('dirs' => array(), 'files' => array());
-  $fileLink = '/' . htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']);
+    $fileLink = '/' . htmlspecialchars($repoRootName . '/' . $file['filename']);
 ?>
 <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
 <div>
 <form method="GET" action="<?php echo $fileLink; ?>" style="display:inline">
 <input type="hidden" name="edit" value="1">
+<?php if ($isHistoricView): ?><input type="hidden" name="commit" value="<?php echo intval($selectedCommitId); ?>"><?php endif; ?>
 <input type="submit" value="<?php echo t('edit', $translations); ?>">
 </form>
 <form method="POST" style="display:inline">
@@ -2848,7 +2872,7 @@ if (isset($_GET['image'])) {
 <?php if (isset($upload_error) && !empty($upload_error)): ?>
 <p><font color="red"><strong><?php echo htmlspecialchars($upload_error); ?></strong></font></p>
 <?php endif; ?>
-<?php if ($username): ?>
+<?php if ($username && !$isHistoricView): ?>
 <p><b><?php echo t('create-directory', $translations); ?></b></p>
 <form method="POST">
 <input type="text" name="dir_name" size="30" placeholder="<?php echo t('directory', $translations); ?>">
@@ -2886,19 +2910,61 @@ if (isset($_GET['image'])) {
     // Default: Show repository list
     $repo_message = null;
     $repo_message_is_error = false;
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isLoggedIn() && ($_POST['action'] ?? '') === 'create_repo') {
-        $repo_error = null;
-        if (!verifyAndConsumeActionToken('create-repo')) {
-            $repo_message = t('error', $translations) . ': ' . t('invalid-action-token', $translations);
-            $repo_message_is_error = true;
-        } else {
-        $repo_name = $_POST['repo_name'] ?? '';
-        if (createEmptyRepository($repo_name, getUsername(), $repo_error)) {
-            $repo_message = t('create', $translations);
-        } else {
-            $repo_message = $repo_error ?: t('error', $translations);
-            $repo_message_is_error = true;
-        }
+    $pending_delete_repo = '';
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isLoggedIn()) {
+        $action = $_POST['action'] ?? '';
+        if ($action === 'create_repo') {
+            $repo_error = null;
+            if (!verifyAndConsumeActionToken('create-repo')) {
+                $repo_message = t('error', $translations) . ': ' . t('invalid-action-token', $translations);
+                $repo_message_is_error = true;
+            } else {
+                $repo_name = $_POST['repo_name'] ?? '';
+                if (createEmptyRepository($repo_name, getUsername(), $repo_error)) {
+                    $repo_message = t('create', $translations);
+                } else {
+                    $repo_message = $repo_error ?: t('error', $translations);
+                    $repo_message_is_error = true;
+                }
+            }
+        } elseif ($action === 'delete_repo_request') {
+            $repo_name = sanitizeRepoName($_POST['repo_name'] ?? '');
+            if (!preg_match('/\.omi$/', $repo_name)) {
+                $repo_name .= '.omi';
+            }
+            if (!verifyAndConsumeActionToken('home-delete-repo-' . str_replace('.omi', '', $repo_name))) {
+                $repo_message = t('error', $translations) . ': ' . t('invalid-action-token', $translations);
+                $repo_message_is_error = true;
+            } else {
+                $repo_file_path = REPOS_DIR . '/' . $repo_name;
+                if (!isPathSafe($repo_file_path) || !file_exists($repo_file_path)) {
+                    $repo_message = t('error', $translations);
+                    $repo_message_is_error = true;
+                } else {
+                    $pending_delete_repo = $repo_name;
+                }
+            }
+        } elseif ($action === 'delete_repo_confirm') {
+            $repo_name = sanitizeRepoName($_POST['repo_name'] ?? '');
+            if (!preg_match('/\.omi$/', $repo_name)) {
+                $repo_name .= '.omi';
+            }
+            if (!verifyAndConsumeActionToken('home-delete-repo-confirm-' . str_replace('.omi', '', $repo_name))) {
+                $repo_message = t('error', $translations) . ': ' . t('invalid-action-token', $translations);
+                $repo_message_is_error = true;
+            } else {
+                $repo_file_path = REPOS_DIR . '/' . $repo_name;
+                if (!isPathSafe($repo_file_path) || !file_exists($repo_file_path)) {
+                    $repo_message = t('error', $translations);
+                    $repo_message_is_error = true;
+                } elseif (@unlink($repo_file_path)) {
+                    $repo_message = t('delete', $translations);
+                    $repo_message_is_error = false;
+                } else {
+                    $repo_message = t('error', $translations);
+                    $repo_message_is_error = true;
+                }
+            }
         }
     }
 
@@ -2945,6 +3011,19 @@ if (isset($_GET['image'])) {
 <?php if ($repo_message): ?>
 <p><font color="<?php echo $repo_message_is_error ? 'red' : 'green'; ?>"><strong><?php echo htmlspecialchars($repo_message); ?></strong></font></p>
 <?php endif; ?>
+<?php if ($pending_delete_repo): ?>
+<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;">
+<p><font color="red"><strong>⚠️ <?php echo t('confirm-delete', $translations); ?></strong></font></p>
+<p><?php echo t('delete-repository-question', $translations); ?> <strong><?php echo htmlspecialchars($pending_delete_repo); ?></strong>?</p>
+<form method="POST" style="display:inline">
+<input type="hidden" name="action" value="delete_repo_confirm">
+<input type="hidden" name="repo_name" value="<?php echo htmlspecialchars($pending_delete_repo); ?>">
+<?php echo buildAuthHiddenFields('home-delete-repo-confirm-' . str_replace('.omi', '', $pending_delete_repo)); ?>
+<input type="submit" value="<?php echo t('confirm-delete', $translations); ?>">
+</form>
+<form method="GET" style="display:inline"><input type="submit" value="<?php echo t('cancel', $translations); ?>"></form>
+</div>
+<?php endif; ?>
 <h2><?php echo t('available-repositories', $translations); ?></h2>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#333333">
@@ -2961,7 +3040,7 @@ if (isset($_GET['image'])) {
 <td><?php echo buildNavButton('/' . str_replace('.omi', '', $repo['name']), $repo['name']); ?></td>
 <td><?php echo number_format($repo['size']); ?></td>
 <td><?php echo htmlspecialchars(date('Y-m-d H:i:s', $repo['modified'])); ?></td>
-<td><a href="?download=<?php echo urlencode($repo['name']); ?>"><?php echo t('download', $translations); ?></a> <a href="?log=<?php echo urlencode($repo['name']); ?>"><?php echo t('log', $translations); ?></a></td>
+<td><a href="?download=<?php echo urlencode($repo['name']); ?>"><?php echo t('download', $translations); ?></a> <a href="?log=<?php echo urlencode($repo['name']); ?>"><?php echo t('log', $translations); ?></a><?php if ($username): ?> <form method="POST" style="display:inline"><input type="hidden" name="action" value="delete_repo_request"><input type="hidden" name="repo_name" value="<?php echo htmlspecialchars($repo['name']); ?>"><?php echo buildAuthHiddenFields('home-delete-repo-' . str_replace('.omi', '', $repo['name'])); ?><input type="submit" value="<?php echo t('delete', $translations); ?>"></form><?php endif; ?></td>
 </tr>
 <?php endforeach; ?>
 <?php endif; ?>

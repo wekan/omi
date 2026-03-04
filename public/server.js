@@ -241,14 +241,19 @@ function buildNavButton(req, target, label) {
     `</form>`;
 }
 
-function buildPrimaryNav(req, translations, username, extraItems = []) {
+function buildPrimaryNav(req, translations, username, extraItems = [], options = {}) {
+  const showRestrictedWhenLoggedOut = options.showRestrictedWhenLoggedOut !== false;
+  const showRestricted = !!username || showRestrictedWhenLoggedOut;
   const items = [
-    buildNavButton(req, '/', t('home', translations)),
-    buildNavButton(req, '/language', t('language', translations)),
-    buildNavButton(req, '/settings', t('settings', translations)),
-    buildNavButton(req, '/people', t('people', translations)),
-    buildNavButton(req, '/activity', t('activity', translations))
+    buildNavButton(req, '/', t('home', translations))
   ];
+
+  if (showRestricted) {
+    items.push(buildNavButton(req, '/language', t('language', translations)));
+    items.push(buildNavButton(req, '/settings', t('settings', translations)));
+    items.push(buildNavButton(req, '/people', t('people', translations)));
+    items.push(buildNavButton(req, '/activity', t('activity', translations)));
+  }
 
   if (username) {
     items.push(`<strong>${escapeHtml(username)}</strong>`);
@@ -261,7 +266,8 @@ function buildPrimaryNav(req, translations, username, extraItems = []) {
     if (extra) items.push(extra);
   }
 
-  return `<p>${items.join(' ')}</p>`;
+  const navCells = items.map(item => `<td style="padding-right:8px; vertical-align:middle; white-space:nowrap;">${item}</td>`).join('');
+  return `<table border="0" cellpadding="0" cellspacing="0"><tr>${navCells}</tr></table>`;
 }
 
 // Check if user is locked due to brute force
@@ -765,6 +771,46 @@ async function getLatestFiles(dbPath, pathPrefix, sqliteCmd) {
       hash,
       datetime,
       size: Number(size || 0)
+    };
+  });
+}
+
+async function getFilesForCommit(dbPath, pathPrefix, commitId, sqliteCmd) {
+  const safeCommitId = Number(commitId);
+  if (!Number.isInteger(safeCommitId) || safeCommitId <= 0) return [];
+
+  let sql = 'SELECT f.filename, f.hash, f.datetime, IFNULL(b.size, 0) FROM files f LEFT JOIN blobs b ON f.hash = b.hash WHERE f.commit_id = ' + safeCommitId;
+  if (pathPrefix) {
+    const escapedPath = escapeSqliteString(pathPrefix);
+    sql += ` AND (f.filename LIKE '${escapedPath}/%' OR f.filename = '${escapedPath}')`;
+  }
+
+  const output = await runSqliteQuery(sqliteCmd, dbPath, sql);
+  if (!output.trim()) return [];
+
+  return output.trim().split('\n').map(line => {
+    const [filename, hash, datetime, size] = line.split('\x1f');
+    return {
+      filename,
+      hash,
+      datetime,
+      size: Number(size || 0)
+    };
+  });
+}
+
+async function getCommitRows(dbPath, sqliteCmd) {
+  const sql = "SELECT c.id, c.message, c.user, c.datetime, COUNT(f.id) FROM commits c LEFT JOIN files f ON c.id=f.commit_id GROUP BY c.id ORDER BY c.id DESC";
+  const output = await runSqliteQuery(sqliteCmd, dbPath, sql);
+  if (!output.trim()) return [];
+  return output.trim().split('\n').map(line => {
+    const [id, message, user, datetime, fileCount] = line.split('\x1f');
+    return {
+      id: Number(id || 0),
+      message: message || '',
+      user: user || '',
+      datetime: datetime || '',
+      fileCount: Number(fileCount || 0)
     };
   });
 }
@@ -1736,6 +1782,7 @@ ${buildAuthHiddenFields(req, 'settings-save')}
 
   let repoMessage = null;
   let repoMessageIsError = false;
+  let pendingDeleteRepo = '';
 
   if (pathname === '/' && req.method === 'POST') {
     if (!isLoggedIn(req)) {
@@ -1777,6 +1824,16 @@ ${buildAuthHiddenFields(req, 'settings-save')}
       const targetRepo = normalizeRepoName(fields.repo_name || '');
       if (targetRepo) {
         homeRequiredAction = `home-open-repo-${targetRepo.replace(/\.omi$/, '')}`;
+      }
+    } else if (fields.action === 'delete_repo_request') {
+      const targetRepo = normalizeRepoName(fields.repo_name || '');
+      if (targetRepo) {
+        homeRequiredAction = `home-delete-repo-${targetRepo.replace(/\.omi$/, '')}`;
+      }
+    } else if (fields.action === 'delete_repo_confirm') {
+      const targetRepo = normalizeRepoName(fields.repo_name || '');
+      if (targetRepo) {
+        homeRequiredAction = `home-delete-repo-confirm-${targetRepo.replace(/\.omi$/, '')}`;
       }
     }
     if (!homeRequiredAction || !verifyAndConsumeActionToken(req, fields, getSessionId(req), homeRequiredAction)) {
@@ -1831,6 +1888,31 @@ ${buildAuthHiddenFields(req, 'settings-save')}
           }
         }
       }
+    } else if (fields.action === 'delete_repo_request') {
+      const targetRepo = normalizeRepoName(fields.repo_name || '');
+      const targetPath = path.join(REPOS_DIR, targetRepo || '');
+      if (!targetRepo || !isPathSafe(targetPath) || !fs.existsSync(targetPath)) {
+        repoMessage = t('error', translations);
+        repoMessageIsError = true;
+      } else {
+        pendingDeleteRepo = targetRepo;
+      }
+    } else if (fields.action === 'delete_repo_confirm') {
+      const targetRepo = normalizeRepoName(fields.repo_name || '');
+      const targetPath = path.join(REPOS_DIR, targetRepo || '');
+      if (!targetRepo || !isPathSafe(targetPath) || !fs.existsSync(targetPath)) {
+        repoMessage = t('error', translations);
+        repoMessageIsError = true;
+      } else {
+        try {
+          fs.unlinkSync(targetPath);
+          repoMessage = t('delete', translations);
+          repoMessageIsError = false;
+        } catch {
+          repoMessage = t('error', translations);
+          repoMessageIsError = true;
+        }
+      }
     }
   }
 
@@ -1861,6 +1943,56 @@ ${buildAuthHiddenFields(req, 'settings-save')}
     return;
   }
 
+  if (pathname === '/' && query.log) {
+    const settings = loadSettings();
+    const sqliteCmd = settings.SQLITE || 'sqlite3';
+    const repoName = normalizeRepoName(query.log);
+    const dbPath = path.join(REPOS_DIR, repoName);
+    username = getUsername(req);
+
+    if (!repoName || !isPathSafe(dbPath) || !fs.existsSync(dbPath)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(t('error', translations));
+      return;
+    }
+
+    let commits = [];
+    try {
+      commits = await getCommitRows(dbPath, sqliteCmd);
+    } catch (error) {
+      sendHtml(res, `<html><body><h1>${t('error', translations)}</h1><p>${escapeHtml(error.message || 'SQLite error')}</p></body></html>`, 500);
+      return;
+    }
+
+    const repoRoot = repoName.replace(/\.omi$/, '');
+    const rowsHtml = commits.length
+      ? commits.map(c => `<tr><td><strong><a href="/${escapeHtml(repoRoot)}?commit=${c.id}">${c.id}</a></strong></td><td>${escapeHtml(c.message)}</td><td>${escapeHtml(c.user)}</td><td>${escapeHtml(c.datetime)}</td><td>${c.fileCount}</td><td><a href="/${escapeHtml(repoRoot)}?commit=${c.id}">View</a></td></tr>`).join('\n')
+      : `<tr><td colspan="6">${t('no-commits', translations)}</td></tr>`;
+
+    const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>${t('commit-history', translations)} - ${escapeHtml(repoName)}</title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>${t('commit-history', translations)} - ${escapeHtml(repoName)}</h1></td><td align="right"><small></small></td></tr>
+</table>
+${buildPrimaryNav(req, translations, username, [`<a href="/${escapeHtml(repoRoot)}">${t('repository-root', translations)}</a>`], { showRestrictedWhenLoggedOut: false })}
+<hr>
+<table border="1" width="100%" cellpadding="5" cellspacing="0">
+<tr bgcolor="#333333"><th><font color="white">${t('commit-id', translations)}</font></th><th><font color="white">${t('message', translations)}</font></th><th><font color="white">${t('author', translations)}</font></th><th><font color="white">${t('date', translations)}</font></th><th><font color="white">${t('files', translations)}</font></th><th><font color="white">${t('open', translations)}</font></th></tr>
+${rowsHtml}
+</table>
+<p><a href="/${escapeHtml(repoRoot)}">${t('latest', translations)}</a></p>
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>`;
+    sendHtml(res, html);
+    return;
+  }
+
   const requestInfo = parseRequestPath(pathname);
   if (requestInfo.type === 'error') {
     sendHtml(res, `<html><body><h1>${t('error', translations)}</h1></body></html>`, 404);
@@ -1875,6 +2007,13 @@ ${buildAuthHiddenFields(req, 'settings-save')}
     const dbPath = requestInfo.db;
     username = getUsername(req);
     const repoRoot = repoName.replace(/\.omi$/, '');
+    const selectedCommitId = Number.parseInt(String(query.commit || '0'), 10);
+    const isHistoricView = Number.isInteger(selectedCommitId) && selectedCommitId > 0;
+    const commitSuffix = isHistoricView ? `?commit=${selectedCommitId}` : '';
+    const appendCommit = (target) => {
+      if (!isHistoricView) return target;
+      return target.includes('?') ? `${target}&commit=${selectedCommitId}` : `${target}?commit=${selectedCommitId}`;
+    };
 
     let actionMessage = null;
     let actionMessageIsError = false;
@@ -1882,7 +2021,9 @@ ${buildAuthHiddenFields(req, 'settings-save')}
 
     let files = [];
     try {
-      files = await getLatestFiles(dbPath, repoPath, sqliteCmd);
+      files = isHistoricView
+        ? await getFilesForCommit(dbPath, repoPath, selectedCommitId, sqliteCmd)
+        : await getLatestFiles(dbPath, repoPath, sqliteCmd);
     } catch (error) {
       sendHtml(res, `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
@@ -1899,7 +2040,7 @@ ${buildAuthHiddenFields(req, 'settings-save')}
     }
     let isFile = files.length === 1 && files[0].filename === repoPath && !/(^|\/)\.omidir$/.test(files[0].filename);
 
-    if (req.method === 'POST' && username) {
+    if (req.method === 'POST' && username && !isHistoricView) {
       const contentType = req.headers['content-type'] || '';
       let fields = {};
       let requestFiles = {};
@@ -2110,19 +2251,20 @@ ${buildAuthHiddenFields(req, 'settings-save')}
 
       const isText = fileContent && isTextFile(fileContent);
       const displayContent = isText ? fileContent.toString('utf8') : '';
-      const inEditMode = query.edit === '1' && isText;
-      const showDeleteConfirm = query.delete === '1' && username;
+      const inEditMode = query.edit === '1' && isText && !isHistoricView;
+      const showDeleteConfirm = query.delete === '1' && username && !isHistoricView;
       const actionMessageHtml = actionMessage
         ? `<p><font color="${actionMessageIsError ? 'red' : 'green'}"><strong>${escapeHtml(actionMessage)}</strong></font></p>`
         : '';
-      const fileActions = username ? `
+      const fileActions = (username && !isHistoricView) ? `
     <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
       <div>
         <form method="GET" style="display:inline">
-        <input type="submit" formaction="?download=1" value="${t('download', translations)}">
+        <input type="submit" formaction="${appendCommit('?download=1')}" value="${t('download', translations)}">
         </form>
         ${isText ? `<form method="GET" style="display:inline">
         <input type="hidden" name="edit" value="1">
+        ${isHistoricView ? `<input type="hidden" name="commit" value="${selectedCommitId}">` : ''}
         <input type="submit" value="${t('edit', translations)}">
         </form>` : ''}
         <form method="POST" style="display:inline">
@@ -2135,6 +2277,7 @@ ${buildAuthHiddenFields(req, 'settings-save')}
       <div>
         <form method="GET" style="display:inline">
         <input type="hidden" name="delete" value="1">
+        ${isHistoricView ? `<input type="hidden" name="commit" value="${selectedCommitId}">` : ''}
         <input type="submit" value="${t('delete', translations)}">
         </form>
       </div>
@@ -2205,7 +2348,9 @@ ${buildAuthHiddenFields(req, 'settings-save')}
         // Get all files in the repo to find images
         let allRepoFiles = [];
         try {
-          allRepoFiles = await getLatestFiles(dbPath, '', sqliteCmd);
+          allRepoFiles = isHistoricView
+            ? await getFilesForCommit(dbPath, '', selectedCommitId, sqliteCmd)
+            : await getLatestFiles(dbPath, '', sqliteCmd);
         } catch (e) {
           // Fallback to current files list if error
           allRepoFiles = files;
@@ -2262,9 +2407,10 @@ ${markdownToHtml(displayContent, fileEntry.filename, repoRoot, imageMap)}
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small></small></td></tr>
 </table>
-${buildPrimaryNav(req, translations, username, [`<a href="/${escapeHtml(repoRoot)}">${t('repository-root', translations)}</a>`])}
+${buildPrimaryNav(req, translations, username, [`<a href="${escapeHtml(appendCommit('/' + repoRoot))}">${t('repository-root', translations)}</a>`, `<a href="${escapeHtml(appendCommit('/?log=' + encodeURIComponent(repoName)))}">${t('log', translations)}</a>`, `${isHistoricView ? `<a href="/${escapeHtml(repoRoot)}">${t('latest', translations)}</a>` : ''}`], { showRestrictedWhenLoggedOut: false })}
+${isHistoricView ? `<p><font color="blue"><strong>${t('viewing-commit', translations)} ${selectedCommitId}</strong></font></p>` : ''}
 <h2>${t('file', translations)}: ${escapeHtml(fileEntry.filename)}</h2>
-<p><a href="?download=1">${t('download', translations)}</a></p>
+<p><a href="${appendCommit('?download=1')}">${t('download', translations)}</a></p>
 ${showDeleteConfirm ? `<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;">
 <p><font color="red"><strong>⚠️ ${t('confirm-delete', translations)}</strong></font></p>
 <p>${t('delete-file-question', translations)} <strong>${escapeHtml(fileEntry.filename)}</strong>?</p>
@@ -2291,7 +2437,7 @@ ${contentHtml}
     const organized = organizeFiles(files, repoPath);
     const directoryTitle = repoPath ? escapeHtml(repoPath) : '';
     const dirRows = organized.dirs.map(dir => `<tr>
-  <td><a href="/${escapeHtml(repoRoot)}/${escapeHtml(dir.path)}">${t('directory', translations)} ${escapeHtml(dir.name)}/</a></td>
+  <td><a href="${escapeHtml(appendCommit('/' + repoRoot + '/' + dir.path))}">${t('directory', translations)} ${escapeHtml(dir.name)}/</a></td>
   <td>-</td>
   <td>${escapeHtml(dir.datetime)}</td>
   <td>-</td>
@@ -2302,11 +2448,11 @@ ${contentHtml}
       const fileDateTime = escapeHtml(file.datetime);
       const fileBasename = escapeHtml(path.basename(file.filename));
       const filePathEscaped = escapeHtml(file.filename);
-      const fileLinkPath = `/${escapeHtml(repoRoot)}/${escapeHtml(file.filename)}`;
+      const fileLinkPath = appendCommit(`/${repoRoot}/${file.filename}`);
       const fileTypeLabel = getFileTypeLabel(file.filename);
       
       let actionsHtml = '-';
-      if (username) {
+      if (username && !isHistoricView) {
         let editLink = '';
         if (isText) {
           editLink = `<form method="GET" action="${fileLinkPath}" style="display:inline"><input type="hidden" name="edit" value="1"><input type="submit" value="${t('edit', translations)}"></form>`;
@@ -2343,7 +2489,7 @@ ${buildAuthHiddenFields(req, 'repo-delete-dir-file-confirm')}
 </div>`
       : '';
 
-    const actionForms = username ? `
+    const actionForms = (username && !isHistoricView) ? `
 <p><b>${t('create-directory', translations)}</b></p>
 <form method="POST">
 ${buildAuthHiddenFields(req, 'repo-create-dir')}
@@ -2378,7 +2524,8 @@ ${buildAuthHiddenFields(req, 'repo-upload-dir-file')}
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small></small></td></tr>
 </table>
-${buildPrimaryNav(req, translations, username)}
+${buildPrimaryNav(req, translations, username, [`<a href="${escapeHtml(appendCommit('/?log=' + encodeURIComponent(repoName)))}">${t('log', translations)}</a>`, `${isHistoricView ? `<a href="/${escapeHtml(repoRoot)}">${t('latest', translations)}</a>` : ''}`], { showRestrictedWhenLoggedOut: false })}
+${isHistoricView ? `<p><font color="blue"><strong>${t('viewing-commit', translations)} ${selectedCommitId}</strong></font></p>` : ''}
 <h2>${t('directory', translations)}: /${directoryTitle}</h2>
 <hr>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
@@ -2389,7 +2536,7 @@ ${buildPrimaryNav(req, translations, username)}
 <th><font color="white">${t('actions', translations)}</font></th>
 </tr>
 ${repoPath ? `<tr>
-  <td><a href="/${escapeHtml(repoRoot)}${repoPath.includes('/') ? '/' + escapeHtml(repoPath.split('/').slice(0, -1).join('/')) : ''}">${t('directory', translations)} ..</a></td>
+  <td><a href="${escapeHtml(appendCommit('/' + repoRoot + (repoPath.includes('/') ? '/' + repoPath.split('/').slice(0, -1).join('/') : '')))}">${t('directory', translations)} ..</a></td>
   <td>-</td>
   <td>-</td>
   <td>-</td>
@@ -2424,9 +2571,13 @@ ${buildAuthHiddenFields(req, `home-open-repo-${repo.name.replace(/\.omi$/, '')}`
 </form></td>
 <td>${repo.size.toLocaleString()}</td>
 <td>${new Date(repo.modified * 1000).toISOString().replace('T', ' ').slice(0, 19)}</td>
-<td><a href="?download=${encodeURIComponent(repo.name)}">${t('download', translations)}</a></td>
+<td><a href="?download=${encodeURIComponent(repo.name)}">${t('download', translations)}</a> <a href="/?log=${encodeURIComponent(repo.name)}">${t('log', translations)}</a>${username ? ` <form method="POST" style="display:inline">${buildAuthHiddenFields(req, `home-delete-repo-${repo.name.replace(/\.omi$/, '')}`)}<input type="hidden" name="action" value="delete_repo_request"><input type="hidden" name="repo_name" value="${escapeHtml(repo.name)}"><input type="submit" value="${t('delete', translations)}"></form>` : ''}</td>
 </tr>`).join('\n')
     : `<tr><td colspan="4">${t('no-repositories', translations)}</td></tr>`;
+
+  const pendingDeleteHtml = pendingDeleteRepo
+    ? `<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;"><p><font color="red"><strong>⚠️ ${t('confirm-delete', translations)}</strong></font></p><p>${t('delete-repository-question', translations)} <strong>${escapeHtml(pendingDeleteRepo)}</strong>?</p><form method="POST" style="display:inline">${buildAuthHiddenFields(req, `home-delete-repo-confirm-${pendingDeleteRepo.replace(/\.omi$/, '')}`)}<input type="hidden" name="action" value="delete_repo_confirm"><input type="hidden" name="repo_name" value="${escapeHtml(pendingDeleteRepo)}"><input type="submit" value="${t('confirm-delete', translations)}"></form> <form method="GET" style="display:inline"><input type="submit" value="${t('cancel', translations)}"></form></div>`
+    : '';
 
   const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
@@ -2446,6 +2597,7 @@ ${username ? buildPrimaryNav(req, translations, username) : ''}
 </tr>
 </table>
 ${repoMessage ? `<p><font color="${repoMessageIsError ? 'red' : 'green'}"><strong>${repoMessage.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong></font></p>` : ''}
+${pendingDeleteHtml}
 <h2>${t('available-repositories', translations)}</h2>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#333333">

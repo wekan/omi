@@ -1375,7 +1375,7 @@ begin
     Result := StrToInt64Def(Output, 0);
 end;
 
-function GetLatestFiles(const DbPath, RepoPath: string): TFileEntryArray;
+function GetLatestFiles(const DbPath, RepoPath: string; CommitId: Int64 = 0): TFileEntryArray;
 var
   Output: string;
   Lines: TStringArray;
@@ -1388,7 +1388,10 @@ var
   CleanRepoPath: string;
 begin
   Result := nil;
-  LatestCommit := GetLatestCommitId(DbPath);
+  if CommitId > 0 then
+    LatestCommit := CommitId
+  else
+    LatestCommit := GetLatestCommitId(DbPath);
   if LatestCommit = 0 then
     Exit;
 
@@ -1478,6 +1481,8 @@ var
   Hash: string;
   CommitId: Int64;
   NowStr: string;
+  Files: TFileEntryArray;
+  I: Integer;
   TempFile: string;
   Proc: TProcess;
   OutputStream: TStringStream;
@@ -1512,11 +1517,21 @@ begin
     if Hash = '' then
       Exit;
 
+    Files := GetLatestFiles(DbPath, '');
+
     InsertBlob(DbPath, Hash, Content);
     CommitId := CreateCommit(DbPath, MessageText, Username);
     if CommitId = 0 then
       Exit;
     NowStr := FormatDateTime('yyyy-mm-dd hh:nn:ss', Now);
+
+    for I := 0 to High(Files) do
+    begin
+      if Files[I].Filename = Filename then
+        Continue;
+      InsertFileRecord(DbPath, Files[I].Filename, Files[I].Hash, Files[I].DateTimeStr, CommitId);
+    end;
+
     InsertFileRecord(DbPath, Filename, Hash, NowStr, CommitId);
     Result := True;
   finally
@@ -1585,10 +1600,10 @@ var
   NowStr: string;
 begin
   Result := False;
+  Files := GetLatestFiles(DbPath, '');
   CommitId := CreateCommit(DbPath, 'Delete file', Username);
   if CommitId = 0 then
     Exit;
-  Files := GetLatestFiles(DbPath, '');
   NowStr := FormatDateTime('yyyy-mm-dd hh:nn:ss', Now);
   for I := 0 to High(Files) do
   begin
@@ -1608,10 +1623,10 @@ var
   Filename: string;
 begin
   Result := False;
+  Files := GetLatestFiles(DbPath, '');
   CommitId := CreateCommit(DbPath, 'Rename file', Username);
   if CommitId = 0 then
     Exit;
-  Files := GetLatestFiles(DbPath, '');
   NowStr := FormatDateTime('yyyy-mm-dd hh:nn:ss', Now);
   for I := 0 to High(Files) do
   begin
@@ -2010,6 +2025,9 @@ var
   SessionId: string;
   NavTarget: string;
   RepoRootPath: string;
+  PendingDeleteRepo: string;
+  DeleteRepoAuth: string;
+  DeleteConfirmAuth: string;
 begin
   Username := GetUsernameFromRequest(ARequest);
   SessionId := GetSessionIdFromRequest(ARequest);
@@ -2089,7 +2107,15 @@ begin
             '<body bgcolor="#f0f0f0">' +
             '<table width="100%" border="0" cellpadding="5">' +
             '<tr><td><h1>' + HtmlEncode(ImageRepo) + '</h1></td><td align="right"><small></small></td></tr></table>' +
-            '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' + BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' + BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + ' ' + ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') + '</p>' +
+            BuildNavRow([
+              BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)),
+              ifthen(Username <> '', BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)), ''),
+              ifthen(Username <> '', BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)), ''),
+              ifthen(Username <> '', BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)), ''),
+              ifthen(Username <> '', BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)), ''),
+              ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong>', '<a href="/sign-in">' + T('login', Translations) + '</a>'),
+              ifthen(Username <> '', BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '')
+            ]) +
             '<h2>' + T('image', Translations) + ': ' + HtmlEncode(ImagePath) + '</h2><hr>' +
             '<div style="text-align:center"><img src="data:' + GetMimeType(ImagePath) + ';base64,' + Base64Encode(FileContent) + '" alt="' + HtmlEncode(ExtractFileName(ImagePath)) + '"></div>' +
             '<hr><p><small>Omi Server</small></p></body></html>';
@@ -2115,7 +2141,7 @@ begin
           Continue;
         LogParts := LogLines[I].Split(['|']);
         if Length(LogParts) >= 5 then
-          TableRows := TableRows + '<tr><td><strong>' + HtmlEncode(LogParts[0]) + '</strong></td><td>' + HtmlEncode(LogParts[1]) + '</td><td>' + HtmlEncode(LogParts[2]) + '</td><td>' + HtmlEncode(LogParts[3]) + '</td><td>' + HtmlEncode(LogParts[4]) + '</td></tr>';
+          TableRows := TableRows + '<tr><td><strong><a href="/' + HtmlEncode(StringReplace(RepoName, '.omi', '', [])) + '?commit=' + HtmlEncode(LogParts[0]) + '">' + HtmlEncode(LogParts[0]) + '</a></strong></td><td>' + HtmlEncode(LogParts[1]) + '</td><td>' + HtmlEncode(LogParts[2]) + '</td><td>' + HtmlEncode(LogParts[3]) + '</td><td>' + HtmlEncode(LogParts[4]) + '</td><td><a href="/' + HtmlEncode(StringReplace(RepoName, '.omi', '', [])) + '?commit=' + HtmlEncode(LogParts[0]) + '">View</a></td></tr>';
       end;
 
       Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
@@ -2123,12 +2149,22 @@ begin
         '<body bgcolor="#f0f0f0" dir="' + DirAttr + '">' +
         '<table width="100%" border="0" cellpadding="5">' +
         '<tr><td><h1>' + T('commit-history', Translations) + ' - ' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small></small></td></tr></table>' +
-        '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' + BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' + BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + ' ' + ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') + ' ' + BuildNavTargetButton(ARequest, '/', '/' + HtmlEncode(StringReplace(RepoName, '.omi', '', [])), 'home-log-repo-root', T('repository-root', Translations)) + '</p>' +
+        BuildNavRow([
+          BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)), ''),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)), ''),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)), ''),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)), ''),
+          ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong>', '<a href="/sign-in">' + T('login', Translations) + '</a>'),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), ''),
+          BuildNavTargetButton(ARequest, '/', '/' + HtmlEncode(StringReplace(RepoName, '.omi', '', [])), 'home-log-repo-root', T('repository-root', Translations))
+        ]) +
         '<hr>' +
         '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
-        '<tr bgcolor="#333333"><th><font color="white">' + T('commit-id', Translations) + '</font></th><th><font color="white">' + T('message', Translations) + '</font></th><th><font color="white">' + T('author', Translations) + '</font></th><th><font color="white">' + T('date', Translations) + '</font></th><th><font color="white">' + T('files', Translations) + '</font></th></tr>' +
+        '<tr bgcolor="#333333"><th><font color="white">' + T('commit-id', Translations) + '</font></th><th><font color="white">' + T('message', Translations) + '</font></th><th><font color="white">' + T('author', Translations) + '</font></th><th><font color="white">' + T('date', Translations) + '</font></th><th><font color="white">' + T('files', Translations) + '</font></th><th><font color="white">' + T('open', Translations) + '</font></th></tr>' +
         TableRows +
         '</table>' +
+        '<p><a href="/' + HtmlEncode(StringReplace(RepoName, '.omi', '', [])) + '">' + T('latest', Translations) + '</a></p>' +
         '<hr><p><small>Omi Server</small></p>' +
         '</body></html>';
       AResponse.Content := PrettyHtml32(Html);
@@ -2154,6 +2190,7 @@ begin
 
     RepoMessage := '';
     RepoError := False;
+    PendingDeleteRepo := '';
     if (ARequest.Method = 'POST') then
     begin
       if Username <> '' then
@@ -2236,6 +2273,35 @@ begin
                RepoError := True;
              end;
            end;
+          end
+          else if Action = 'delete_repo_request' then
+          begin
+            RepoName := NormalizeRepoName(ARequest.ContentFields.Values['repo_name']);
+            DownloadPath := GetRepoPath(RepoName);
+            if (RepoName = '') or (not FileExists(DownloadPath)) then
+            begin
+              RepoMessage := T('error', Translations);
+              RepoError := True;
+            end
+            else
+              PendingDeleteRepo := RepoName;
+          end
+          else if Action = 'delete_repo_confirm' then
+          begin
+            RepoName := NormalizeRepoName(ARequest.ContentFields.Values['repo_name']);
+            DownloadPath := GetRepoPath(RepoName);
+            if (RepoName = '') or (not FileExists(DownloadPath)) then
+            begin
+              RepoMessage := T('error', Translations);
+              RepoError := True;
+            end
+            else if DeleteFile(DownloadPath) then
+              RepoMessage := T('delete', Translations)
+            else
+            begin
+              RepoMessage := T('error', Translations);
+              RepoError := True;
+            end;
          end;
        end;
     end;
@@ -2255,6 +2321,10 @@ begin
       ]);
       CreateRepoAuth := BuildAuthHiddenFields(ARequest, 'home-create-repo');
       UploadRepoAuth := BuildAuthHiddenFields(ARequest, 'home-upload-repo');
+      if PendingDeleteRepo <> '' then
+        DeleteConfirmAuth := BuildAuthHiddenFields(ARequest, 'home-delete-repo-confirm-' + StringReplace(PendingDeleteRepo, '.omi', '', []))
+      else
+        DeleteConfirmAuth := '';
     end
     else
     begin
@@ -2265,6 +2335,7 @@ begin
       ]);
       CreateRepoAuth := '';
       UploadRepoAuth := '';
+      DeleteConfirmAuth := '';
     end;
 
     Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
@@ -2280,6 +2351,7 @@ begin
       '<strong>' + T('protocol', Translations) + ':</strong> HTTP<br>' +
       '<strong>' + T('repositories', Translations) + ':</strong> ' + IntToStr(Length(Repos)) + '</td></tr></table>' +
       ifthen(RepoMessage <> '', '<p><font color="' + ifthen(RepoError, 'red', 'green') + '"><strong>' + HtmlEncode(RepoMessage) + '</strong></font></p>', '') +
+      ifthen(PendingDeleteRepo <> '', '<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;"><p><font color="red"><strong>⚠️ ' + T('confirm-delete', Translations) + '</strong></font></p><p>' + T('delete-repository-question', Translations) + ' <strong>' + HtmlEncode(PendingDeleteRepo) + '</strong>?</p><form method="POST" style="display:inline"><input type="hidden" name="action" value="delete_repo_confirm"><input type="hidden" name="repo_name" value="' + HtmlEncode(PendingDeleteRepo) + '">' + DeleteConfirmAuth + '<input type="submit" value="' + T('confirm-delete', Translations) + '"></form> <form method="GET" style="display:inline"><input type="submit" value="' + T('cancel', Translations) + '"></form></div>', '') +
       '<h2>' + T('available-repositories', Translations) + '</h2>' +
       '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
       '<tr bgcolor="#333333"><th><font color="white">' + T('repository', Translations) + '</font></th><th><font color="white">' + T('size-bytes', Translations) + '</font></th><th><font color="white">' + T('last-modified', Translations) + '</font></th><th><font color="white">' + T('actions', Translations) + '</font></th></tr>';
@@ -2292,11 +2364,13 @@ begin
       begin
         SizeText := IntToStr(Repos[I].Size);
         RepoRootPath := '/' + HtmlEncode(StringReplace(Repos[I].Name, '.omi', '', []));
+        DeleteRepoAuth := BuildAuthHiddenFields(ARequest, 'home-delete-repo-' + StringReplace(Repos[I].Name, '.omi', '', []));
         Html := Html + '<tr><td>' + BuildNavTargetButton(ARequest, '/', RepoRootPath, 'home-open-repo-' + IntToStr(I), Repos[I].Name) + '</td>' +
           '<td>' + HtmlEncode(SizeText) + '</td>' +
           '<td>' + HtmlEncode(FormatDateTime('yyyy-mm-dd hh:nn:ss', FileDateToDateTime(Repos[I].Modified))) + '</td>' +
           '<td>' + BuildNavTargetButton(ARequest, '/', '/?download=' + HtmlEncode(Repos[I].Name), 'home-download-repo-' + IntToStr(I), T('download', Translations)) +
-          ' ' + BuildNavTargetButton(ARequest, '/', '/?log=' + HtmlEncode(Repos[I].Name), 'home-log-repo-' + IntToStr(I), T('log', Translations)) + '</td></tr>';
+          ' ' + BuildNavTargetButton(ARequest, '/', '/?log=' + HtmlEncode(Repos[I].Name), 'home-log-repo-' + IntToStr(I), T('log', Translations)) +
+          ifthen(Username <> '', ' <form method="POST" style="display:inline"><input type="hidden" name="action" value="delete_repo_request"><input type="hidden" name="repo_name" value="' + HtmlEncode(Repos[I].Name) + '">' + DeleteRepoAuth + '<input type="submit" value="' + T('delete', Translations) + '"></form>', '') + '</td></tr>';
       end;
     end;
 
@@ -3107,6 +3181,21 @@ var
   HeaderRight: string;
   MainNav: string;
   CurrentPath: string;
+  CommitParam: string;
+  SelectedCommitId: Int64;
+  IsHistoricView: Boolean;
+
+  function WithCommit(const Target: string): string;
+  begin
+    Result := Target;
+    if (SelectedCommitId > 0) and (Pos('commit=', LowerCase(Result)) = 0) then
+    begin
+      if Pos('?', Result) > 0 then
+        Result := Result + '&commit=' + IntToStr(SelectedCommitId)
+      else
+        Result := Result + '?commit=' + IntToStr(SelectedCommitId);
+    end;
+  end;
 
   function RepoToRoot(const Name: string): string;
   begin
@@ -3164,8 +3253,11 @@ begin
     DownloadFlag := ARequest.QueryFields.Values['download'];
     DeleteFlag := ARequest.QueryFields.Values['delete'];
     EditFlag := ARequest.QueryFields.Values['edit'];
+    CommitParam := ARequest.QueryFields.Values['commit'];
+    SelectedCommitId := StrToInt64Def(CommitParam, 0);
+    IsHistoricView := SelectedCommitId > 0;
 
-    Files := GetLatestFiles(DbPath, RepoPath);
+    Files := GetLatestFiles(DbPath, RepoPath, SelectedCommitId);
     IsFile := False;
     FileHash := '';
 
@@ -3216,7 +3308,7 @@ begin
         Exit;
       end;
 
-      if (ARequest.Method = 'POST') and (ARequest.ContentFields.Values['delete_confirm'] = '1') and (Username <> '') then
+      if (ARequest.Method = 'POST') and (ARequest.ContentFields.Values['delete_confirm'] = '1') and (Username <> '') and not IsHistoricView then
       begin
         if DeleteFileFromRepo(DbPath, RepoPath, Username) then
         begin
@@ -3229,13 +3321,13 @@ begin
           ErrorMsg := T('file-delete-failed', Translations);
       end;
 
-      ShowDeleteConfirm := (DeleteFlag = '1') and (Username <> '');
+      ShowDeleteConfirm := (DeleteFlag = '1') and (Username <> '') and not IsHistoricView;
 
       FileContent := GetFileContentByHash(DbPath, FileHash);
       IsText := IsTextContent(FileContent);
-      InEdit := (EditFlag = '1') and (Username <> '') and IsText;
+      InEdit := (EditFlag = '1') and (Username <> '') and IsText and not IsHistoricView;
 
-      if (ARequest.Method = 'POST') and (ARequest.ContentFields.Values['save_file'] <> '') and IsText and (Username <> '') then
+      if (ARequest.Method = 'POST') and (ARequest.ContentFields.Values['save_file'] <> '') and IsText and (Username <> '') and not IsHistoricView then
       begin
         NewContent := ARequest.ContentFields.Values['file_content'];
         if CommitFile(DbPath, RepoPath, NewContent, Username, 'Edit file') then
@@ -3252,7 +3344,19 @@ begin
         '<body bgcolor="#f0f0f0">' +
         '<table width="100%" border="0" cellpadding="5">' +
         '<tr><td><h1>' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small></small></td></tr></table>' +
-        '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' + BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' + BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + ' ' + ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') + ' ' + BuildNavTargetButton(ARequest, CurrentPath, '/?log=' + HtmlEncode(RepoName), 'repo-nav-log', T('log', Translations)) + ' ' + BuildNavTargetButton(ARequest, CurrentPath, RepoToRoot(RepoName), 'repo-nav-root', T('repository-root', Translations)) + '</p>' +
+        BuildNavRow([
+          BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)), ''),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)), ''),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)), ''),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)), ''),
+          ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong>', '<a href="/sign-in">' + T('login', Translations) + '</a>'),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), ''),
+          BuildNavTargetButton(ARequest, CurrentPath, WithCommit('/?log=' + HtmlEncode(RepoName)), 'repo-nav-log', T('log', Translations)),
+          BuildNavTargetButton(ARequest, CurrentPath, WithCommit(RepoToRoot(RepoName)), 'repo-nav-root', T('repository-root', Translations)),
+          ifthen(IsHistoricView, '<a href="' + HtmlEncode(RepoToRoot(RepoName)) + '">' + T('latest', Translations) + '</a>', '')
+        ]) +
+        ifthen(IsHistoricView, '<p><font color="blue"><strong>' + T('viewing-commit', Translations) + ' ' + IntToStr(SelectedCommitId) + '</strong></font></p>', '') +
         '<h2>' + T('file', Translations) + ': ' + HtmlEncode(RepoPath) + '</h2>';
 
       if ShowDeleteConfirm then
@@ -3267,12 +3371,12 @@ begin
       end
       else
       begin
-        if Username <> '' then
+        if (Username <> '') and not IsHistoricView then
         begin
           Html := Html + '<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">' +
-            '<div>' + BuildNavTargetButton(ARequest, CurrentPath, CurrentPath + '?download=1', 'repo-file-download', T('download', Translations)) +
-            ifthen(IsText, BuildNavTargetButton(ARequest, CurrentPath, CurrentPath + '?edit=1', 'repo-file-edit', T('edit', Translations)), '') +
-            '</div><div>' + BuildNavTargetButton(ARequest, CurrentPath, CurrentPath + '?delete=1', 'repo-file-delete-prompt', T('delete', Translations)) + '</div></div>';
+            '<div>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(CurrentPath + '?download=1'), 'repo-file-download', T('download', Translations)) +
+            ifthen(IsText, BuildNavTargetButton(ARequest, CurrentPath, WithCommit(CurrentPath + '?edit=1'), 'repo-file-edit', T('edit', Translations)), '') +
+            '</div><div>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(CurrentPath + '?delete=1'), 'repo-file-delete-prompt', T('delete', Translations)) + '</div></div>';
         end;
       end;
 
@@ -3411,7 +3515,7 @@ begin
           FileList.Add(Relative);
       end;
 
-      if (ARequest.Method = 'POST') and (Username <> '') then
+      if (ARequest.Method = 'POST') and (Username <> '') and not IsHistoricView then
       begin
         Action := ARequest.ContentFields.Values['action'];
         if Action = 'delete_file' then
@@ -3506,7 +3610,7 @@ begin
             UploadError := T('error', Translations);
         end;
 
-        Files := GetLatestFiles(DbPath, RepoPath);
+        Files := GetLatestFiles(DbPath, RepoPath, SelectedCommitId);
       end;
 
       TableRows := '';
@@ -3519,7 +3623,7 @@ begin
         RepoRootLink := RepoToRoot(RepoName);
         if ParentPath <> '' then
           RepoRootLink := RepoRootLink + '/' + ParentPath;
-        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, RepoRootLink, 'repo-dir-parent', T('directory', Translations) + ' ..') + '</td><td>-</td><td>-</td><td>-</td></tr>';
+        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(RepoRootLink), 'repo-dir-parent', T('directory', Translations) + ' ..') + '</td><td>-</td><td>-</td><td>-</td></tr>';
       end;
 
       for I := 0 to DirList.Count - 1 do
@@ -3529,7 +3633,7 @@ begin
         if RepoPath <> '' then
           EntryPath := EntryPath + '/' + RepoPath;
         EntryPath := EntryPath + '/' + DisplayName;
-        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, EntryPath, 'repo-dir-open-' + IntToStr(I), T('directory', Translations) + ' ' + DisplayName + '/') + '</td><td>-</td><td>-</td><td>-</td></tr>';
+        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-dir-open-' + IntToStr(I), T('directory', Translations) + ' ' + DisplayName + '/') + '</td><td>-</td><td>-</td><td>-</td></tr>';
       end;
 
       for I := 0 to FileList.Count - 1 do
@@ -3540,7 +3644,7 @@ begin
           EntryPath := EntryPath + '/' + RepoPath;
         EntryPath := EntryPath + '/' + DisplayName;
         RowActions := '-';
-        if Username <> '' then
+        if (Username <> '') and not IsHistoricView then
         begin
           // Only show edit button for text files (including markdown)
         IsTextFile := not IsImageFile(DisplayName);
@@ -3557,7 +3661,7 @@ begin
         EditButton := '';
         if IsTextFile then
         begin
-          EditButton := BuildNavTargetButton(ARequest, CurrentPath, EntryPath + '?edit=1', 'repo-file-open-edit-' + IntToStr(I), T('edit', Translations));
+          EditButton := BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath + '?edit=1'), 'repo-file-open-edit-' + IntToStr(I), T('edit', Translations));
         end;
         RowActions := '<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">' +
             '<div>' +
@@ -3578,7 +3682,7 @@ begin
             '</div>' +
             '</div>';
         end;
-        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, EntryPath, 'repo-file-open-' + IntToStr(I), '[' + GetFileTypeLabel(DisplayName) + '] ' + DisplayName) + '</td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
+        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-file-open-' + IntToStr(I), '[' + GetFileTypeLabel(DisplayName) + '] ' + DisplayName) + '</td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
       end;
 
       if TableRows = '' then
@@ -3600,7 +3704,7 @@ begin
           ParentUrl := RepoToRoot(RepoName);
           if ParentPath <> '' then
             ParentUrl := ParentUrl + '/' + ParentPath;
-          ParentDirRow := '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, ParentUrl, 'repo-parent-row', T('directory', Translations) + ' ..') + '</td><td>-</td><td>-</td><td>-</td></tr>';
+          ParentDirRow := '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(ParentUrl), 'repo-parent-row', T('directory', Translations) + ' ..') + '</td><td>-</td><td>-</td><td>-</td></tr>';
         end;
       end;
 
@@ -3609,7 +3713,18 @@ begin
         '<body bgcolor="#f0f0f0">' +
         '<table width="100%" border="0" cellpadding="5">' +
         '<tr><td><h1>' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small></small></td></tr></table>' +
-        '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' + BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' + BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + ' ' + ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') + ' ' + BuildNavTargetButton(ARequest, CurrentPath, '/?log=' + HtmlEncode(RepoName), 'repo-nav-log-list', T('log', Translations)) + '</p>' +
+        BuildNavRow([
+          BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)), ''),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)), ''),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)), ''),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)), ''),
+          ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong>', '<a href="/sign-in">' + T('login', Translations) + '</a>'),
+          ifthen(Username <> '', BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), ''),
+          BuildNavTargetButton(ARequest, CurrentPath, WithCommit('/?log=' + HtmlEncode(RepoName)), 'repo-nav-log-list', T('log', Translations)),
+          ifthen(IsHistoricView, '<a href="' + HtmlEncode(RepoToRoot(RepoName)) + '">' + T('latest', Translations) + '</a>', '')
+        ]) +
+        ifthen(IsHistoricView, '<p><font color="blue"><strong>' + T('viewing-commit', Translations) + ' ' + IntToStr(SelectedCommitId) + '</strong></font></p>', '') +
         '<h2>' + T('directory', Translations) + ': /' + HtmlEncode(RepoPath) + '</h2>' +
         '<hr>' +
         '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
@@ -3620,7 +3735,7 @@ begin
         '<hr>' +
         ifthen(UploadMsg <> '', '<p><font color="green"><strong>' + HtmlEncode(UploadMsg) + '</strong></font></p>', '') +
         ifthen(UploadError <> '', '<p><font color="red"><strong>' + HtmlEncode(UploadError) + '</strong></font></p>', '') +
-        ifthen(Username <> '',
+        ifthen((Username <> '') and not IsHistoricView,
           '<p><b>' + T('create-directory', Translations) + '</b></p>' +
           '<form method="POST">' + BuildAuthHiddenFields(ARequest, 'repo-create-dir') + '<input type="text" name="dir_name" size="30" placeholder="new-folder">' +
           '<input type="hidden" name="action" value="create_dir">' +

@@ -1233,6 +1233,7 @@
   "tickets": "Tickets",
   "ticket-number": "Ticket Number",
   "open": "Open",
+  "latest": "Latest",
   "pending": "Pending",
   "closed": "Closed",
   "resolved": "Resolved",
@@ -1535,6 +1536,8 @@
   "migration-progress-note": "Please wait while we migrate your board to the latest structure...",
   "steps": "steps",
   "view": "View",
+  "viewing-commit": "Viewing commit",
+  "delete-repository-question": "Delete repository",
   "has-swimlanes": "Has Swimlanes",
 
   "step-analyze-board-structure": "Analyze Board Structure",
