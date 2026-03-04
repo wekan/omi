@@ -581,6 +581,60 @@ begin
   Result := Result + '</tr></table>';
 end;
 
+function PrettyHtml32(const Html: string): string;
+var
+  Normalized: string;
+  SourceLines, PrettyLines: TStringList;
+  I, Indent: Integer;
+  LineText: string;
+  IsClosing, IsDeclaration, IsSelfClosing, HasInlineClose: Boolean;
+begin
+  if Pos('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 FINAL//EN">', UpperCase(Html)) = 0 then
+  begin
+    Result := Html;
+    Exit;
+  end;
+
+  Normalized := StringReplace(Html, #13#10, #10, [rfReplaceAll]);
+  Normalized := StringReplace(Normalized, #13, #10, [rfReplaceAll]);
+  Normalized := StringReplace(Normalized, '><', '>' + LineEnding + '<', [rfReplaceAll]);
+
+  SourceLines := TStringList.Create;
+  PrettyLines := TStringList.Create;
+  try
+    SourceLines.Text := Normalized;
+    Indent := 0;
+
+    for I := 0 to SourceLines.Count - 1 do
+    begin
+      LineText := Trim(SourceLines[I]);
+      if LineText = '' then
+        Continue;
+
+      IsClosing := Pos('</', LineText) = 1;
+      IsDeclaration := (Pos('<!', LineText) = 1) or (Pos('<?', LineText) = 1);
+      IsSelfClosing := (Pos('/>', LineText) > 0) or
+        (Pos('<br', LowerCase(LineText)) = 1) or (Pos('<hr', LowerCase(LineText)) = 1) or
+        (Pos('<img', LowerCase(LineText)) = 1) or (Pos('<input', LowerCase(LineText)) = 1) or
+        (Pos('<meta', LowerCase(LineText)) = 1) or (Pos('<link', LowerCase(LineText)) = 1);
+      HasInlineClose := (Pos('</', LineText) > 1) and (Pos('<', LineText) = 1);
+
+      if IsClosing and (Indent > 0) then
+        Dec(Indent);
+
+      PrettyLines.Add(StringOfChar(' ', Indent * 2) + LineText);
+
+      if (not IsClosing) and (not IsDeclaration) and (not IsSelfClosing) and (not HasInlineClose) and (Pos('<', LineText) = 1) then
+        Inc(Indent);
+    end;
+
+    Result := PrettyLines.Text;
+  finally
+    SourceLines.Free;
+    PrettyLines.Free;
+  end;
+end;
+
 function BuildAuthHiddenFields(ARequest: TRequest; const ActionName: string): string;
 var
   SessionId, Username, PasswordRef, MetaIp, MetaUa: string;
@@ -2077,7 +2131,7 @@ begin
         '</table>' +
         '<hr><p><small>Omi Server</small></p>' +
         '</body></html>';
-      AResponse.Content := Html;
+      AResponse.Content := PrettyHtml32(Html);
       AResponse.ContentType := 'text/html; charset=UTF-8';
       Exit;
     end;
@@ -2277,7 +2331,7 @@ begin
       '<hr><p><small>Omi Server</small></p>' +
       '</body></html>';
 
-    AResponse.Content := Html;
+    AResponse.Content := PrettyHtml32(Html);
     AResponse.ContentType := 'text/html; charset=UTF-8';
   finally
     if Assigned(Translations) then
@@ -2394,7 +2448,7 @@ begin
       (ifthen(SuccessMsg <> '', '<p><font color="green"><strong>' + HtmlEncode(SuccessMsg) + '</strong></font></p><p><a href="/sign-in">' + T('login', Translations) + '</a></p>', '')) +
       FormHtml +
       '</body></html>';
-    AResponse.Content := Html;
+    AResponse.Content := PrettyHtml32(Html);
     AResponse.ContentType := 'text/html; charset=UTF-8';
   finally
     if Assigned(Translations) then
@@ -2412,7 +2466,7 @@ begin
     Html := '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + T('forgot-password', Translations) + '</title></head>' +
       '<body><h1>' + T('forgot-password', Translations) + '</h1>' +
       '<p>' + T('not-implemented', Translations) + '</p></body></html>';
-    AResponse.Content := Html;
+    AResponse.Content := PrettyHtml32(Html);
     AResponse.ContentType := 'text/html; charset=UTF-8';
   finally
     if Assigned(Translations) then
@@ -2538,7 +2592,7 @@ begin
     finally
       SettingsMap.Free;
     end;
-    AResponse.Content := Html;
+    AResponse.Content := PrettyHtml32(Html);
     AResponse.ContentType := 'text/html; charset=UTF-8';
   finally
     if Assigned(Translations) then
@@ -2653,7 +2707,7 @@ begin
     finally
       LangData.Free;
     end;
-    AResponse.Content := Html;
+    AResponse.Content := PrettyHtml32(Html);
     AResponse.ContentType := 'text/html; charset=UTF-8';
   finally
     if Assigned(Translations) then
@@ -2748,7 +2802,7 @@ begin
     Rows + '</table><hr><p><small>Omi Server</small></p></body></html>';
 
   AResponse.ContentType := 'text/html; charset=UTF-8';
-  AResponse.Content := Html;
+  AResponse.Content := PrettyHtml32(Html);
   finally
     if Assigned(Translations) then
       Translations.Free;
@@ -2971,7 +3025,7 @@ begin
       '<hr><p><small>Omi Server</small></p>' +
       '</body></html>';
 
-    AResponse.Content := Html;
+    AResponse.Content := PrettyHtml32(Html);
     AResponse.ContentType := 'text/html; charset=UTF-8';
   finally
     UsersMap.Free;
@@ -3329,7 +3383,7 @@ begin
       end;
 
       Html := Html + '<hr><p><small>Omi Server</small></p></body></html>';
-      AResponse.Content := Html;
+      AResponse.Content := PrettyHtml32(Html);
       AResponse.ContentType := 'text/html; charset=UTF-8';
       Exit;
     end;
@@ -3584,7 +3638,7 @@ begin
         '<hr><p><small>Omi Server</small></p>' +
         '</body></html>';
 
-      AResponse.Content := Html;
+      AResponse.Content := PrettyHtml32(Html);
       AResponse.ContentType := 'text/html; charset=UTF-8';
     finally
       DirList.Free;

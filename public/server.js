@@ -1232,10 +1232,46 @@ function getUsername(req) {
   return context ? context.username : null;
 }
 
+function prettyHtml32(html) {
+  const source = String(html || '');
+  if (!/<!DOCTYPE\s+HTML\s+PUBLIC\s+"-\/\/W3C\/\/DTD HTML 3\.2 Final\/\/EN">/i.test(source)) {
+    return source;
+  }
+
+  const compact = source
+    .replace(/\r\n?/g, '\n')
+    .replace(/>\s+</g, '><')
+    .trim();
+
+  const chunks = compact.split(/(?=<)/g).map(item => item.trim()).filter(Boolean);
+  let indent = 0;
+  const lines = [];
+
+  for (const chunk of chunks) {
+    const isClosing = /^<\//.test(chunk);
+    const isDeclaration = /^<!/.test(chunk) || /^<\?/.test(chunk);
+    const isSelfClosing = /\/>$/.test(chunk) || /^<(br|hr|img|input|meta|link)\b/i.test(chunk);
+    const hasInlineClose = /<\/[^>]+>\s*$/.test(chunk) && /^<[^/!][^>]*>/.test(chunk);
+
+    if (isClosing && indent > 0) {
+      indent -= 1;
+    }
+
+    lines.push(`${'  '.repeat(Math.max(indent, 0))}${chunk}`);
+
+    if (!isClosing && !isDeclaration && !isSelfClosing && !hasInlineClose) {
+      indent += 1;
+    }
+  }
+
+  return `${lines.join('\n')}\n`;
+}
+
 // Send HTML response
 function sendHtml(res, html, statusCode = 200) {
+  const body = prettyHtml32(html);
   res.writeHead(statusCode, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end(html);
+  res.end(body);
 }
 
 // Send JSON response
