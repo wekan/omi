@@ -1757,6 +1757,7 @@ ${buildAuthHiddenFields(req, 'settings-save')}
 
     let actionMessage = null;
     let actionMessageIsError = false;
+    let pendingDeleteTarget = '';
 
     let files = [];
     try {
@@ -1796,7 +1797,8 @@ ${buildAuthHiddenFields(req, 'settings-save')}
         else if (action === 'rename_file') repoRequiredAction = 'repo-rename-file';
         else if (action === 'save_file') repoRequiredAction = 'repo-save-file';
       } else {
-        if (action === 'delete_file') repoRequiredAction = 'repo-delete-dir-file';
+        if (action === 'delete_file_request') repoRequiredAction = 'repo-delete-dir-file-request';
+        else if (action === 'delete_file_confirm') repoRequiredAction = 'repo-delete-dir-file-confirm';
         else if (action === 'rename_file') repoRequiredAction = 'repo-rename-dir-file';
         else if (action === 'create_dir') repoRequiredAction = 'repo-create-dir';
         else if (action === 'create_file') repoRequiredAction = 'repo-create-file';
@@ -1862,7 +1864,15 @@ ${buildAuthHiddenFields(req, 'settings-save')}
         }
       } else {
         // Directory-specific operations
-        if (action === 'delete_file') {
+        if (action === 'delete_file_request') {
+          const targetName = sanitizePathSegment(fields.target || '');
+          if (!targetName) {
+            actionMessage = 'File name is required';
+            actionMessageIsError = true;
+          } else {
+            pendingDeleteTarget = targetName;
+          }
+        } else if (action === 'delete_file_confirm') {
           const targetName = sanitizePathSegment(fields.target || '');
           if (!targetName) {
             actionMessage = 'File name is required';
@@ -1980,6 +1990,7 @@ ${buildAuthHiddenFields(req, 'settings-save')}
       const isText = fileContent && isTextFile(fileContent);
       const displayContent = isText ? fileContent.toString('utf8') : '';
       const inEditMode = query.edit === '1' && isText;
+      const showDeleteConfirm = query.delete === '1' && username;
       const actionMessageHtml = actionMessage
         ? `<p><font color="${actionMessageIsError ? 'red' : 'green'}"><strong>${escapeHtml(actionMessage)}</strong></font></p>`
         : '';
@@ -2001,10 +2012,9 @@ ${buildAuthHiddenFields(req, 'settings-save')}
         </form>
       </div>
       <div>
-        <form method="POST" style="display:inline">
-        ${buildAuthHiddenFields(req, 'repo-delete-file')}
-        <input type="hidden" name="action" value="delete_file">
-        <input type="submit" value="${t('delete', translations)}" onclick="return confirm('Delete file ${escapeHtml(fileName)}?')">
+        <form method="GET" style="display:inline">
+        <input type="hidden" name="delete" value="1">
+        <input type="submit" value="${t('delete', translations)}">
         </form>
       </div>
     </div>
@@ -2033,7 +2043,7 @@ ${buildAuthHiddenFields(req, 'settings-save')}
 <textarea name="file_content" rows="20" cols="80" style="width: 100%; max-width: 800px; font-family: monospace; box-sizing: border-box;">${escapeHtml(displayContent)}</textarea><br><br>
 <input type="hidden" name="action" value="save_file">
 <input type="submit" value="Save">
-<input type="button" value="Cancel" onclick="window.location.href='?'">
+<input type="submit" formaction="?" formmethod="GET" value="Cancel">
 </form>`;
       } else if (!isText) {
         // Check if it's an image file
@@ -2134,6 +2144,17 @@ ${markdownToHtml(displayContent, fileEntry.filename, repoRoot, imageMap)}
 <p><a href="/">${t('home', translations)}</a> <a href="/${escapeHtml(repoRoot)}">${t('repository-root', translations)}</a></p>
 <h2>${t('file', translations)}: ${escapeHtml(fileEntry.filename)}</h2>
 <p><a href="?download=1">${t('download', translations)}</a></p>
+${showDeleteConfirm ? `<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;">
+<p><font color="red"><strong>⚠️ ${t('confirm-delete', translations)}</strong></font></p>
+<p>${t('delete-file-question', translations)} <strong>${escapeHtml(fileEntry.filename)}</strong>?</p>
+<p>${t('delete-file-warning', translations)}</p>
+<form method="POST" style="display:inline">
+${buildAuthHiddenFields(req, 'repo-delete-file')}
+<input type="hidden" name="action" value="delete_file">
+<input type="submit" value="${t('confirm-delete', translations)}">
+</form>
+<form method="GET" style="display:inline"><input type="submit" value="${t('cancel', translations)}"></form>
+</div>` : ''}
 ${fileActions}
 <hr>
 ${actionMessageHtml}
@@ -2169,7 +2190,7 @@ ${contentHtml}
         if (isText) {
           editLink = `<form method="GET" action="${fileLinkPath}" style="display:inline"><input type="hidden" name="edit" value="1"><input type="submit" value="${t('edit', translations)}"></form>`;
         }
-        const deleteForm = `<form method="POST" style="display:inline">${buildAuthHiddenFields(req, 'repo-delete-dir-file')}<input type="hidden" name="action" value="delete_file"><input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}"><input type="submit" value="${t('delete', translations)}" onclick="return confirm('Delete file ${fileBasename}?')"></form>`;
+        const deleteForm = `<form method="POST" style="display:inline">${buildAuthHiddenFields(req, 'repo-delete-dir-file-request')}<input type="hidden" name="action" value="delete_file_request"><input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}"><input type="submit" value="${t('delete', translations)}"></form>`;
         const renameForm = `<form method="POST" style="display:inline">${buildAuthHiddenFields(req, 'repo-rename-dir-file')}<input type="hidden" name="action" value="rename_file"><input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}"><input type="text" name="new_name" size="12" placeholder="${t('new-name', translations)}"><input type="submit" value="${t('rename', translations)}"></form>`;
         actionsHtml = `<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;"><div>${editLink}${renameForm}</div><div>${deleteForm}</div></div>`;
       }
@@ -2185,6 +2206,20 @@ ${contentHtml}
 
     const actionMessageHtml = actionMessage
       ? `<p><font color="${actionMessageIsError ? 'red' : 'green'}"><strong>${escapeHtml(actionMessage)}</strong></font></p>`
+      : '';
+    const deleteConfirmHtml = pendingDeleteTarget
+      ? `<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;">
+<p><font color="red"><strong>⚠️ ${t('confirm-delete', translations)}</strong></font></p>
+<p>${t('delete-file-question', translations)} <strong>${escapeHtml(pendingDeleteTarget)}</strong>?</p>
+<p>${t('delete-file-warning', translations)}</p>
+<form method="POST" style="display:inline">
+${buildAuthHiddenFields(req, 'repo-delete-dir-file-confirm')}
+<input type="hidden" name="action" value="delete_file_confirm">
+<input type="hidden" name="target" value="${escapeHtml(pendingDeleteTarget)}">
+<input type="submit" value="${t('confirm-delete', translations)}">
+</form>
+<form method="GET" style="display:inline"><input type="submit" value="${t('cancel', translations)}"></form>
+</div>`
       : '';
 
     const actionForms = username ? `
@@ -2248,6 +2283,7 @@ ${emptyRow}
 </table>
 <hr>
 ${actionMessageHtml}
+${deleteConfirmHtml}
 ${actionForms}
 <hr>
 <p><small>Omi Server</small></p>

@@ -2270,7 +2270,7 @@ if (isset($_GET['image'])) {
     <div>
         <form method="GET" style="display:inline">
         <input type="hidden" name="delete" value="1">
-        <input type="submit" value="<?php echo t('delete', $translations); ?>" onclick="return confirm('Delete this file?')">
+        <input type="submit" value="<?php echo t('delete', $translations); ?>">
         </form>
     </div>
 </div>
@@ -2543,6 +2543,8 @@ if (isset($_GET['image'])) {
         $username = getUsername();
         $upload_msg = '';
         $upload_error = '';
+        $show_delete_file_confirm = false;
+        $delete_confirm_target = '';
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && $username) {
             $action = $_POST['action'] ?? '';
@@ -2553,7 +2555,16 @@ if (isset($_GET['image'])) {
                 logActivity(getUsername() ?? '', $tokenAction, 'invalid-token', 'repo action denied', intval($_SESSION['session_meta']['clickCounter'] ?? 0));
             } else {
 
-            if ($action === 'delete_file') {
+            if ($action === 'delete_file_request') {
+                $target = trim($_POST['target'] ?? '');
+                $target = str_replace(['../', '..\\', '/', '\\'], '_', $target);
+                if (empty($target)) {
+                    $upload_error = t('error', $translations);
+                } else {
+                    $show_delete_file_confirm = true;
+                    $delete_confirm_target = $target;
+                }
+            } elseif ($action === 'delete_file_confirm') {
                 $target = trim($_POST['target'] ?? '');
                 $target = str_replace(['../', '..\\', '/', '\\'], '_', $target);
                 $targetPath = $repoPath ? $repoPath . '/' . $target : $target;
@@ -2757,10 +2768,10 @@ if (isset($_GET['image'])) {
 </div>
 <div>
 <form method="POST" style="display:inline">
-<input type="hidden" name="action" value="delete_file">
-<?php echo buildAuthHiddenFields('repo-delete_file'); ?>
+<input type="hidden" name="action" value="delete_file_request">
+<?php echo buildAuthHiddenFields('repo-delete_file_request'); ?>
 <input type="hidden" name="target" value="<?php echo htmlspecialchars(basename($file['filename'])); ?>">
-<input type="submit" value="<?php echo t('delete', $translations); ?>" onclick="return confirm('Delete file <?php echo htmlspecialchars(basename($file['filename'])); ?>?')">
+<input type="submit" value="<?php echo t('delete', $translations); ?>">
 </form>
 </div>
 </div>
@@ -2776,6 +2787,22 @@ if (isset($_GET['image'])) {
 <?php endif; ?>
 </table>
 <hr>
+<?php if ($show_delete_file_confirm && !empty($delete_confirm_target)): ?>
+<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;">
+<p><font color="red"><strong>⚠️ <?php echo t('confirm-delete', $translations); ?></strong></font></p>
+<p><?php echo t('delete-file-question', $translations); ?> <strong><?php echo htmlspecialchars($delete_confirm_target); ?></strong>?</p>
+<p><?php echo t('delete-file-warning', $translations); ?></p>
+<form method="POST" style="display:inline">
+<input type="hidden" name="action" value="delete_file_confirm">
+<?php echo buildAuthHiddenFields('repo-delete_file_confirm'); ?>
+<input type="hidden" name="target" value="<?php echo htmlspecialchars($delete_confirm_target); ?>">
+<input type="submit" value="<?php echo t('confirm-delete', $translations); ?>">
+</form>
+<form method="GET" style="display:inline">
+<input type="submit" value="<?php echo t('cancel', $translations); ?>">
+</form>
+</div>
+<?php endif; ?>
 <?php if (isset($upload_msg) && !empty($upload_msg)): ?>
 <p><font color="green"><strong><?php echo htmlspecialchars($upload_msg); ?></strong></font></p>
 <?php endif; ?>

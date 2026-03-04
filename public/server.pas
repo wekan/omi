@@ -1743,7 +1743,7 @@ begin
     '.content{background:white;padding:20px;white-space:pre-wrap;font-family:monospace;}</style>' +
     '</head><body>' +
     '<h1>' + FullPath + '</h1>' +
-    '<div><a href="javascript:history.back()">' + T('back', Translations) + '</a></div>' +
+    '<div><a href="/">' + T('back', Translations) + '</a></div>' +
     '<div class="content">' + Content + '</div>' +
     '</body></html>';
 end;
