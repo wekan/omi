@@ -23,6 +23,8 @@ const USERS_FILE = path.join(__dirname, '..', 'users.txt');
 const LOCKED_USERS_FILE = path.join(__dirname, '..', 'usersbruteforcelocked.txt');
 const FAILED_ATTEMPTS_FILE = path.join(__dirname, '..', 'usersfailedattempts.txt');
 const API_RATE_LIMIT_FILE = path.join(__dirname, '..', 'api_rate_limit.txt');
+const ACTIVITY_LOG_FILE = path.join(__dirname, '..', 'activity.log');
+const SESSION_INVALIDATE_FILE = path.join(__dirname, '..', 'session_invalidate_flags.json');
 
 // Ensure repos directory exists
 if (!fs.existsSync(REPOS_DIR)) {
@@ -31,6 +33,7 @@ if (!fs.existsSync(REPOS_DIR)) {
 
 // Session storage (in-memory for simplicity; production should use persistent storage)
 const sessions = new Map();
+const sessionMeta = new Map();
 
 // Load settings from settings.txt
 function loadSettings() {
@@ -46,6 +49,166 @@ function loadSettings() {
     }
   }
   return settings;
+}
+
+function getLogoutIdleSeconds() {
+  const settings = loadSettings();
+  const hours = parseInt(settings.LOGOUT_ON_HOURS || '0', 10);
+  if (Number.isFinite(hours) && hours > 0) {
+    return hours * 60 * 60;
+  }
+  return 24 * 60 * 60;
+}
+
+function getClientIp(req) {
+  const xff = (req.headers['x-forwarded-for'] || '').toString().trim();
+  if (xff) {
+    return xff.split(',')[0].trim();
+  }
+  return (req.socket?.remoteAddress || '0.0.0.0').toString();
+}
+
+function getUserAgent(req) {
+  return (req.headers['user-agent'] || '').toString();
+}
+
+function hashText(value) {
+  return createHash('sha256').update(String(value)).digest('hex');
+}
+
+function getPasswordRef(username) {
+  const users = loadUsers();
+  if (!users[username]) return '';
+  return hashText(users[username].password || '');
+}
+
+function loadInvalidateFlags() {
+  try {
+    if (!fs.existsSync(SESSION_INVALIDATE_FILE)) return {};
+    return JSON.parse(fs.readFileSync(SESSION_INVALIDATE_FILE, 'utf-8')) || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveInvalidateFlags(flags) {
+  fs.writeFileSync(SESSION_INVALIDATE_FILE, JSON.stringify(flags), 'utf-8');
+}
+
+function invalidateSessionsForUserPassword(username, passwordRef) {
+  for (const [sid, meta] of sessionMeta.entries()) {
+    if (meta.username === username && meta.passwordRef === passwordRef) {
+      sessions.delete(sid);
+      sessionMeta.delete(sid);
+    }
+  }
+  const flags = loadInvalidateFlags();
+  flags[`${username}|${passwordRef}`] = Math.floor(Date.now() / 1000);
+  saveInvalidateFlags(flags);
+}
+
+function logActivity(req, username, sessionId, actionName, statusText, detailText, clickCounter) {
+  const row = {
+    ts: Math.floor(Date.now() / 1000),
+    username: username || '',
+    sessionId: sessionId || '',
+    ip: getClientIp(req),
+    userAgent: getUserAgent(req),
+    action: actionName || '',
+    status: statusText || '',
+    detail: detailText || '',
+    clickCounter: Number.isFinite(clickCounter) ? clickCounter : -1
+  };
+  try {
+    fs.appendFileSync(ACTIVITY_LOG_FILE, JSON.stringify(row) + '\n');
+  } catch {
+    // ignore logging failures
+  }
+}
+
+function buildActionHash(meta, actionName, clickCounter, sessionId) {
+  return hashText(`${actionName}|${meta.username}|${meta.passwordRef}|${meta.ip}|${meta.userAgent}|${meta.loginAt}|${clickCounter}|${sessionId}`);
+}
+
+function getSessionId(req) {
+  try {
+    const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    const querySessionId = parsedUrl.searchParams.get('sessionId');
+    if (querySessionId) return querySessionId;
+  } catch {
+    // ignore URL parse errors
+  }
+  return '';
+}
+
+function ensureSessionContext(req, sessionId) {
+  const username = sessions.get(sessionId);
+  const meta = sessionMeta.get(sessionId);
+  if (!username || !meta) return null;
+
+  const nowTs = Math.floor(Date.now() / 1000);
+  const flags = loadInvalidateFlags();
+  const key = `${meta.username}|${meta.passwordRef}`;
+  if ((flags[key] || 0) > (meta.loginAt || 0)) {
+    sessions.delete(sessionId);
+    sessionMeta.delete(sessionId);
+    return null;
+  }
+
+  if ((nowTs - (meta.lastActivityAt || meta.loginAt || nowTs)) > getLogoutIdleSeconds()) {
+    logActivity(req, meta.username, sessionId, 'session-check', 'idle-timeout', 'idle timeout reached', meta.clickCounter || 0);
+    sessions.delete(sessionId);
+    sessionMeta.delete(sessionId);
+    return null;
+  }
+
+  if (meta.ip !== getClientIp(req) || meta.userAgent !== getUserAgent(req)) {
+    logActivity(req, meta.username, sessionId, 'session-check', 'context-mismatch', 'ip/user-agent mismatch', meta.clickCounter || 0);
+    invalidateSessionsForUserPassword(meta.username, meta.passwordRef);
+    return null;
+  }
+
+  meta.lastActivityAt = nowTs;
+  sessionMeta.set(sessionId, meta);
+  return { username, meta };
+}
+
+function verifyAndConsumeActionToken(req, postData, sessionId, requiredAction = '') {
+  if (!sessionId && postData && postData.sessionId) {
+    sessionId = String(postData.sessionId);
+  }
+  const context = ensureSessionContext(req, sessionId);
+  if (!context) return false;
+  const { meta } = context;
+  const action = String(postData.auth_action || '');
+  const hash = String(postData.auth_hash || '');
+  const postedCounter = parseInt(postData.auth_counter || '-1', 10);
+
+  if (!action || !hash || !Number.isFinite(postedCounter)) return false;
+  if (requiredAction && action !== requiredAction) return false;
+  if (postedCounter !== (meta.clickCounter || 0)) return false;
+
+  const expected = buildActionHash(meta, action, postedCounter, sessionId);
+  if (expected !== hash) return false;
+
+  meta.clickCounter = (meta.clickCounter || 0) + 1;
+  meta.lastActivityAt = Math.floor(Date.now() / 1000);
+  sessionMeta.set(sessionId, meta);
+  logActivity(req, meta.username, sessionId, action, 'ok', 'token accepted', meta.clickCounter);
+  return true;
+}
+
+function buildAuthHiddenFields(req, actionName) {
+  const sessionId = getSessionId(req);
+  const context = sessionId ? ensureSessionContext(req, sessionId) : null;
+  if (!context) return '';
+  const { meta } = context;
+  const counter = meta.clickCounter || 0;
+  const hash = buildActionHash(meta, actionName, counter, sessionId);
+  return `<input type="hidden" name="sessionId" value="${escapeHtml(sessionId)}">` +
+    `<input type="hidden" name="auth_action" value="${escapeHtml(actionName)}">` +
+    `<input type="hidden" name="auth_counter" value="${counter}">` +
+    `<input type="hidden" name="auth_hash" value="${escapeHtml(hash)}">`;
 }
 
 // Check if user is locked due to brute force
@@ -190,26 +353,90 @@ function getBrowserLanguage(req) {
 
 // Load translation file
 function loadTranslations(language = 'en') {
+  const fallbackFile = path.join(__dirname, 'i18n', 'en.i18n.json');
+  let fallback = {};
+  try {
+    if (fs.existsSync(fallbackFile)) {
+      fallback = JSON.parse(fs.readFileSync(fallbackFile, 'utf-8')) || {};
+    }
+  } catch {
+    fallback = {};
+  }
+
+  if (language === 'en') {
+    return fallback;
+  }
+
   const langFile = path.join(__dirname, 'i18n', `${language}.i18n.json`);
   try {
     if (fs.existsSync(langFile)) {
-      return JSON.parse(fs.readFileSync(langFile, 'utf-8'));
+      const selected = JSON.parse(fs.readFileSync(langFile, 'utf-8')) || {};
+      return { ...fallback, ...selected };
     }
-  } catch (e) {
-    // Fallback to English if file doesn't exist or is invalid
+  } catch {
+    // ignore invalid locale file and keep fallback
   }
-  // Load English as fallback
-  const fallbackFile = path.join(__dirname, 'i18n', 'en.i18n.json');
-  try {
-    return JSON.parse(fs.readFileSync(fallbackFile, 'utf-8'));
-  } catch (e) {
-    return {};
-  }
+
+  return fallback;
 }
 
 // Get translation
+function resolveTranslationKey(key) {
+  const normalized = String(key || '').toLowerCase();
+  const explicitMap = {
+    'language-selection': 'language',
+    'select-language': 'language',
+    'save-language': 'save',
+    'language-updated': 'save',
+    'list-repos-json': 'repositories',
+    'settings-update-failed': 'error',
+    'repository-created': 'create',
+    'repository-create-failed': 'error',
+    'file-saved-success': 'save',
+    'file-save-failed': 'error',
+    'file-delete-failed': 'error',
+    'invalid-action-token': 'error',
+    'invalid-logout-token': 'error'
+  };
+  if (explicitMap[normalized]) return explicitMap[normalized];
+
+  if (normalized.includes('create')) return 'create';
+  if (normalized.includes('delete')) return 'delete';
+  if (normalized.includes('upload')) return 'upload';
+  if (normalized.includes('download')) return 'download';
+  if (normalized.includes('repository')) return 'repository';
+  if (normalized.includes('directory') || normalized === 'root') return 'repository';
+  if (normalized === 'files' || normalized === 'no-files' || normalized === 'no-files-directory') return 'file';
+  if (normalized.includes('file')) return 'file';
+  if (normalized.includes('otp')) return 'otp';
+  if (normalized.includes('password')) return 'password';
+  if (normalized.includes('email')) return 'email';
+  if (normalized.includes('name')) return 'name';
+  if (normalized.includes('user')) return 'username';
+  if (normalized.includes('author') || normalized.includes('message') || normalized.includes('image')) return 'activity';
+  if (normalized.includes('commit') || normalized.includes('activity')) return 'activity';
+  if (normalized.includes('login')) return 'login';
+  if (normalized.includes('logout')) return 'logout';
+  if (normalized.includes('setting')) return 'settings';
+  if (normalized === 'update') return 'save';
+  if (normalized.includes('enable') || normalized.includes('disable') || normalized.includes('updated') || normalized.includes('saved')) return 'save';
+  if (normalized.includes('failed') || normalized.includes('invalid') || normalized.includes('not-implemented')) return 'error';
+
+  return key;
+}
+
 function t(key, translations = {}) {
-  return translations[key] || key;
+  if (Object.prototype.hasOwnProperty.call(translations, key)) {
+    const value = translations[key];
+    if (value !== key) {
+      return value;
+    }
+  }
+  const resolvedKey = resolveTranslationKey(key);
+  if (Object.prototype.hasOwnProperty.call(translations, resolvedKey)) {
+    return translations[resolvedKey];
+  }
+  return resolvedKey;
 }
 
 // Generate TOTP secret
@@ -630,7 +857,7 @@ function parseRequestPath(pathname) {
   const repoPart = parts.shift();
   let repoName = sanitizeRepoName(repoPart);
   if (!repoName) {
-    return { type: 'error', message: 'Repository not found' };
+    return { type: 'error', message: 'error' };
   }
   if (!repoName.endsWith('.omi')) {
     repoName += '.omi';
@@ -638,7 +865,7 @@ function parseRequestPath(pathname) {
 
   const repoPath = path.join(REPOS_DIR, repoName);
   if (!isPathSafe(repoPath) || !fs.existsSync(repoPath)) {
-    return { type: 'error', message: 'Repository not found' };
+    return { type: 'error', message: 'error' };
   }
 
   const cleanParts = parts.map(sanitizePathSegment).filter(Boolean);
@@ -838,19 +1065,6 @@ function svgContainsXMLDanger(svgContent) {
 }
 
 // Parse cookies
-function parseCookies(cookieString) {
-  const cookies = {};
-  if (!cookieString) return cookies;
-  
-  for (const cookie of cookieString.split(';')) {
-    const [name, value] = cookie.split('=').map(s => s.trim());
-    if (name) {
-      cookies[name] = decodeURIComponent(value || '');
-    }
-  }
-  return cookies;
-}
-
 // Parse form data
 async function parseFormData(req) {
   return new Promise((resolve) => {
@@ -934,9 +1148,8 @@ async function parseMultipartForm(req) {
 }
 
 // Set session cookie
-function setSessionCookie(res, sessionId) {
-  const maxAge = 24 * 60 * 60; // 24 hours
-  res.setHeader('Set-Cookie', `sessionId=${sessionId}; Path=/; Max-Age=${maxAge}; HttpOnly`);
+function setSessionCookie(req, res, sessionId) {
+  return;
 }
 
 // Generate session ID
@@ -946,16 +1159,17 @@ function generateSessionId() {
 
 // Check if user is logged in (via session)
 function isLoggedIn(req) {
-  const cookies = parseCookies(req.headers.cookie || '');
-  const sessionId = cookies.sessionId;
-  return sessionId && sessions.has(sessionId);
+  const sessionId = getSessionId(req);
+  if (!sessionId) return false;
+  return !!ensureSessionContext(req, sessionId);
 }
 
 // Get username from session
 function getUsername(req) {
-  const cookies = parseCookies(req.headers.cookie || '');
-  const sessionId = cookies.sessionId;
-  return sessionId && sessions.has(sessionId) ? sessions.get(sessionId) : null;
+  const sessionId = getSessionId(req);
+  if (!sessionId) return null;
+  const context = ensureSessionContext(req, sessionId);
+  return context ? context.username : null;
 }
 
 // Send HTML response
@@ -966,7 +1180,7 @@ function sendHtml(res, html, statusCode = 200) {
 
 // Send JSON response
 function sendJson(res, data, statusCode = 200) {
-  res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(data));
 }
 
@@ -1018,12 +1232,68 @@ async function handleRequest(req, res) {
 
   // Handle logout
   if (pathname === '/logout') {
-    const cookies = parseCookies(req.headers.cookie || '');
-    if (cookies.sessionId) {
-      sessions.delete(cookies.sessionId);
+    const sessionId = getSessionId(req);
+    if (sessionId) {
+      const context = ensureSessionContext(req, sessionId);
+      if (context) {
+        logActivity(req, context.username, sessionId, 'logout', 'ok', 'logout success', context.meta.clickCounter || 0);
+      }
+      sessions.delete(sessionId);
+      sessionMeta.delete(sessionId);
     }
     res.writeHead(302, { 'Location': '/' });
     res.end();
+    return;
+  }
+
+  if (pathname === '/activity') {
+    const activityUser = getUsername(req);
+    if (!activityUser) {
+      res.writeHead(302, { Location: '/sign-in' });
+      res.end();
+      return;
+    }
+
+    const toSqliteDateTime = (unixTs) => {
+      const ts = Number(unixTs || 0);
+      if (!Number.isFinite(ts) || ts <= 0) return '';
+      return new Date(ts * 1000).toISOString().slice(0, 19).replace('T', ' ');
+    };
+
+    const grouped = new Map();
+    if (fs.existsSync(ACTIVITY_LOG_FILE)) {
+      const rows = fs.readFileSync(ACTIVITY_LOG_FILE, 'utf-8').split('\n').filter(Boolean);
+      for (const row of rows) {
+        try {
+          const item = JSON.parse(row);
+          const key = `${item.ip}|${item.userAgent}|${item.action || ''}`;
+          if (!grouped.has(key)) {
+            grouped.set(key, { ip: item.ip || '', ua: item.userAgent || '', action: item.action || '', users: new Set(), count: 0, first: item.ts || 0, last: item.ts || 0 });
+          }
+          const group = grouped.get(key);
+          group.count += 1;
+          group.users.add(item.username || '');
+          group.first = Math.min(group.first, item.ts || group.first);
+          group.last = Math.max(group.last, item.ts || group.last);
+        } catch {
+          // ignore broken activity rows
+        }
+      }
+    }
+
+    const rowsHtml = [...grouped.values()].map(group =>
+      `<tr><td>${escapeHtml(group.action)}</td><td>${escapeHtml(group.ip)}</td><td>${escapeHtml(group.ua)}</td><td>${escapeHtml([...group.users].join(', '))}</td><td>${group.count}</td><td>${escapeHtml(toSqliteDateTime(group.first))}</td><td>${escapeHtml(toSqliteDateTime(group.last))}</td></tr>`
+    ).join('\n') || `<tr><td colspan="7">${t('no-activity-yet', translations)}</td></tr>`;
+
+    const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html><head><title>${t('activity', translations)} - Omi Server</title></head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5"><tr><td><h1>${t('activity', translations)}</h1></td><td align="right"><small><strong>${escapeHtml(activityUser)}</strong> <a href="/logout">${t('logout', translations)}</a></small></td></tr></table>
+<p><a href="/">${t('home', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a> <a href="/activity">${t('activity', translations)}</a></p>
+<table border="1" width="100%" cellpadding="5" cellspacing="0"><tr bgcolor="#333333"><th><font color="white">${t('actions', translations)}</font></th><th><font color="white">${t('ip-address', translations)}</font></th><th><font color="white">${t('user-agent', translations)}</font></th><th><font color="white">${t('users', translations)}</font></th><th><font color="white">${t('events', translations)}</font></th><th><font color="white">${t('first-unix', translations)}</font></th><th><font color="white">${t('last-unix', translations)}</font></th></tr>${rowsHtml}</table>
+<hr><p><small>Omi Server</small></p>
+</body></html>`;
+    sendHtml(res, html);
     return;
   }
 
@@ -1047,8 +1317,19 @@ async function handleRequest(req, res) {
           clearFailedAttempts(username);
           const sessionId = generateSessionId();
           sessions.set(sessionId, username);
-          setSessionCookie(res, sessionId);
-          res.writeHead(302, { 'Location': '/' });
+          const nowTs = Math.floor(Date.now() / 1000);
+          const passwordRef = getPasswordRef(username);
+          sessionMeta.set(sessionId, {
+            username,
+            passwordRef,
+            loginAt: nowTs,
+            lastActivityAt: nowTs,
+            ip: getClientIp(req),
+            userAgent: getUserAgent(req),
+            clickCounter: 0
+          });
+          logActivity(req, username, sessionId, 'login', 'ok', 'login success', 0);
+          res.writeHead(302, { 'Location': `/?sessionId=${encodeURIComponent(sessionId)}` });
           res.end();
           return;
         } else if (authResult === 'OTP_REQUIRED') {
@@ -1065,7 +1346,7 @@ async function handleRequest(req, res) {
       }
 
       const usernameValue = username ? ` value="${username.replace(/"/g, '&quot;')}"` : '';
-      const otpInput = show_otp ? `<tr><td>${t('otp', translations)}:</td><td><input type="text" name="otp" size="10" maxlength="6" required pattern="[0-9]{6}" placeholder="6-digit code"></td></tr>` : '';
+      const otpInput = show_otp ? `<tr><td>${t('otp', translations)}:</td><td><input type="text" name="otp" size="10" maxlength="6" required pattern="[0-9]{6}" placeholder="${t('otp', translations)}"></td></tr>` : '';
       const errorMsg = error ? `<p><font color="red"><strong>${t('error', translations)}: ${error.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong></font></p>` : '';
       const isRTL = languagesData[selectedLanguage]?.rtl === true;
       const dirAttr = isRTL ? 'rtl' : 'ltr';
@@ -1078,7 +1359,7 @@ async function handleRequest(req, res) {
 <body bgcolor="#f0f0f0" dir="${dirAttr}">
 <h1>Omi Server - ${t('login', translations)}</h1>
 <table border="0" cellpadding="5">
-<tr><td colspan="2"><a href="/">[${t('home', translations)}]</a></td></tr>
+<tr><td colspan="2"><a href="/">${t('home', translations)}</a></td></tr>
 </table>
 ${errorMsg}
 <form method="POST">
@@ -1108,7 +1389,7 @@ ${otpInput}
 <body bgcolor="#f0f0f0" dir="${dirAttr}">
 <h1>Omi Server - ${t('login', translations)}</h1>
 <table border="0" cellpadding="5">
-<tr><td colspan="2"><a href="/">[${t('home', translations)}]</a></td></tr>
+<tr><td colspan="2"><a href="/">${t('home', translations)}</a></td></tr>
 </table>
 <form method="POST">
 <table border="1" cellpadding="5">
@@ -1184,7 +1465,7 @@ ${otpInput}
 <body bgcolor="#f0f0f0" dir="${dirAttr}">
 <h1>Omi Server - ${t('create-account', translations)}</h1>
 <table border="0" cellpadding="5">
-<tr><td colspan="2"><a href="/">[${t('home', translations)}]</a></td></tr>
+<tr><td colspan="2"><a href="/">${t('home', translations)}</a></td></tr>
 </table>
 ${errorMsg}
 ${successMsg}
@@ -1207,7 +1488,7 @@ ${form}
 <body bgcolor="#f0f0f0" dir="${dirAttr}">
 <h1>Omi Server - ${t('create-account', translations)}</h1>
 <table border="0" cellpadding="5">
-<tr><td colspan="2"><a href="/">[${t('home', translations)}]</a></td></tr>
+<tr><td colspan="2"><a href="/">${t('home', translations)}</a></td></tr>
 </table>
 <form method="POST">
 <table border="1" cellpadding="5">
@@ -1236,6 +1517,10 @@ ${form}
 
     if (req.method === 'POST') {
       const postData = await parseFormData(req);
+      if (!verifyAndConsumeActionToken(req, postData, getSessionId(req), 'language-save')) {
+        sendHtml(res, `${t('error', translations)}: ${t('invalid-action-token', translations)}`, 403);
+        return;
+      }
       const selectedLanguage = postData.language || 'en';
       
       // Load users, update language, and save
@@ -1255,42 +1540,40 @@ ${form}
       return;
     }
 
-    const successMsg = req.url.includes('success') ? `<p style="color: green;">${t('language-updated', translations)}</p>` : '';
     const users = loadUsers();
     const userLanguage = users[username]?.language || 'en';
     const userDisplay = username
-      ? `<strong>${escapeHtml(username)}</strong> | <a href="/language">[${t('language', translations)}]</a> | <a href="/logout">[${t('logout', translations)}]</a>`
-      : `<a href="/sign-in">[${t('login', translations)}]</a>`;
+      ? `<strong>${escapeHtml(username)}</strong> <a href="/language">${t('language', translations)}</a> <a href="/logout">${t('logout', translations)}</a>`
+      : `<a href="/sign-in">${t('login', translations)}</a>`;
     
     // Check if current language is RTL
     const isRTL = languagesData[userLanguage]?.rtl === true;
     const dirAttr = isRTL ? 'rtl' : 'ltr';
 
     // Build form with radio buttons for all languages
-    let form = '<form method="POST"><table border="1" cellpadding="5">\n';
-    form += `<tr><td colspan="2"><b>${t('select-language', translations)}:</b></td></tr>\n`;
+    let form = `<form method="POST">${buildAuthHiddenFields(req, 'language-save')}<table border="1" cellpadding="5">\n`;
+    form += `<tr><td colspan="2"><b>${t('language', translations)}:</b></td></tr>\n`;
     for (const [langCode, langInfo] of Object.entries(languagesData)) {
       const isSelected = langCode === userLanguage ? 'checked' : '';
       const rtlIndicator = (langInfo.rtl === true) ? ' (RTL)' : '';
       const langName = `${langInfo.name || langCode} (${langCode})${rtlIndicator}`;
       form += `<tr><td><input type="radio" name="language" value="${langCode}" ${isSelected}></td><td>${langName}</td></tr>\n`;
     }
-    form += `<tr><td colspan="2"><input type="submit" value="${t('save-language', translations)}"></td></tr>\n`;
+    form += `<tr><td colspan="2"><input type="submit" value="${t('save', translations)}"></td></tr>\n`;
     form += '</table></form>\n';
 
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html dir="${dirAttr}">
 <head>
-<title>${t('language-selection', translations)} - Omi Server</title>
+<title>${t('language', translations)} - Omi Server</title>
 </head>
 <body bgcolor="#f0f0f0" dir="${dirAttr}">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Omi Server - ${t('language-selection', translations)}</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
+<tr><td><h1>Omi Server - ${t('language', translations)}</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
 </table>
 <table border="0" cellpadding="5">
-<tr><td><a href="/">[${t('home', translations)}]</a> | <a href="/log">[${t('log', translations)}]</a></td></tr>
+<tr><td><a href="/">${t('home', translations)}</a> <a href="/log">${t('log', translations)}</a></td></tr>
 </table>
-${successMsg}
 ${form}
 </body>
 </html>`;
@@ -1309,6 +1592,10 @@ ${form}
 
     if (req.method === 'POST') {
       const postData = await parseFormData(req);
+      if (!verifyAndConsumeActionToken(req, postData, getSessionId(req), 'settings-save')) {
+        sendHtml(res, 'Invalid settings action token', 403);
+        return;
+      }
       let content = '';
       for (const key of ['SQLITE', 'USERNAME', 'PASSWORD', 'REPOS', 'CURL']) {
         if (key in postData) {
@@ -1318,17 +1605,15 @@ ${form}
 
       try {
         fs.writeFileSync(SETTINGS_FILE, content);
-        const success = 'Settings updated successfully';
       } catch {
-        const error = 'Failed to save settings';
       }
     }
 
     const settings = loadSettings();
     username = getUsername(req);
     const userDisplay = username
-      ? `<strong>${escapeHtml(username)}</strong> | <a href="/language">[${t('language', translations)}]</a> | <a href="/logout">[${t('logout', translations)}]</a>`
-      : `<a href="/sign-in">[${t('login', translations)}]</a>`;
+      ? `<strong>${escapeHtml(username)}</strong> <a href="/language">${t('language', translations)}</a> <a href="/logout">${t('logout', translations)}</a>`
+      : `<a href="/sign-in">${t('login', translations)}</a>`;
 
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
@@ -1339,9 +1624,10 @@ ${form}
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1>${t('settings', translations)}</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
 </table>
-<p><a href="/">[${t('home', translations)}]</a> | <a href="/settings">[${t('settings', translations)}]</a> | <a href="/people">[${t('people', translations)}]</a></p>
+<p><a href="/">${t('home', translations)}</a> <a href="/settings">${t('settings', translations)}</a> <a href="/people">${t('people', translations)}</a></p>
 <hr>
 <form method="POST">
+${buildAuthHiddenFields(req, 'settings-save')}
 <table border="1" cellpadding="5">
 <tr><td>SQLITE executable:</td><td><input type="text" name="SQLITE" size="50" value="${(settings.SQLITE || 'sqlite3').replace(/"/g, '&quot;')}"></td></tr>
 <tr><td>USERNAME:</td><td><input type="text" name="USERNAME" size="50" value="${(settings.USERNAME || '').replace(/"/g, '&quot;')}"></td></tr>
@@ -1379,6 +1665,17 @@ ${form}
       files = form.files || {};
     } else {
       fields = await parseFormData(req);
+    }
+
+    let homeRequiredAction = '';
+    if (fields.action === 'create_repo') {
+      homeRequiredAction = 'home-create-repo';
+    } else if (fields.action === 'Upload') {
+      homeRequiredAction = 'home-upload-repo';
+    }
+    if (!homeRequiredAction || !verifyAndConsumeActionToken(req, fields, getSessionId(req), homeRequiredAction)) {
+      sendHtml(res, 'Invalid home action token', 403);
+      return;
     }
 
     if (fields.action === 'create_repo') {
@@ -1422,7 +1719,7 @@ ${form}
 
     if (!repoName || !isPathSafe(repoPath) || !fs.existsSync(repoPath)) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Repository not found');
+      res.end(t('error', translations));
       return;
     }
 
@@ -1445,7 +1742,7 @@ ${form}
 
   const requestInfo = parseRequestPath(pathname);
   if (requestInfo.type === 'error') {
-    sendHtml(res, `<html><body><h1>Error: ${escapeHtml(requestInfo.message)}</h1></body></html>`, 404);
+    sendHtml(res, `<html><body><h1>${t('error', translations)}</h1></body></html>`, 404);
     return;
   }
 
@@ -1493,6 +1790,24 @@ ${form}
       }
 
       const action = fields.action || '';
+      let repoRequiredAction = '';
+      if (isFile) {
+        if (action === 'delete_file') repoRequiredAction = 'repo-delete-file';
+        else if (action === 'rename_file') repoRequiredAction = 'repo-rename-file';
+        else if (action === 'save_file') repoRequiredAction = 'repo-save-file';
+      } else {
+        if (action === 'delete_file') repoRequiredAction = 'repo-delete-dir-file';
+        else if (action === 'rename_file') repoRequiredAction = 'repo-rename-dir-file';
+        else if (action === 'create_dir') repoRequiredAction = 'repo-create-dir';
+        else if (action === 'create_file') repoRequiredAction = 'repo-create-file';
+        else if (requestFiles.upload_file) repoRequiredAction = 'repo-upload-dir-file';
+      }
+
+      if (!repoRequiredAction || !verifyAndConsumeActionToken(req, fields, getSessionId(req), repoRequiredAction)) {
+        sendHtml(res, 'Invalid repository action token', 403);
+        return;
+      }
+
       
       // File-specific operations
       if (isFile) {
@@ -1679,6 +1994,7 @@ ${form}
         <input type="submit" value="${t('edit', translations)}">
         </form>` : ''}
         <form method="POST" style="display:inline">
+        ${buildAuthHiddenFields(req, 'repo-rename-file')}
         <input type="hidden" name="action" value="rename_file">
         <input type="text" name="new_name" size="20" placeholder="${t('new-name', translations)}">
         <input type="submit" value="${t('rename', translations)}">
@@ -1686,6 +2002,7 @@ ${form}
       </div>
       <div>
         <form method="POST" style="display:inline">
+        ${buildAuthHiddenFields(req, 'repo-delete-file')}
         <input type="hidden" name="action" value="delete_file">
         <input type="submit" value="${t('delete', translations)}" onclick="return confirm('Delete file ${escapeHtml(fileName)}?')">
         </form>
@@ -1712,6 +2029,7 @@ ${form}
 <tr><td>![alt](https://example.com/img.jpg)</td><td>Image from URL</td></tr>
 </table>`;
         contentHtml = `${markdownRef}<form method="POST">
+      ${buildAuthHiddenFields(req, 'repo-save-file')}
 <textarea name="file_content" rows="20" cols="80" style="width: 100%; max-width: 800px; font-family: monospace; box-sizing: border-box;">${escapeHtml(displayContent)}</textarea><br><br>
 <input type="hidden" name="action" value="save_file">
 <input type="submit" value="Save">
@@ -1735,7 +2053,7 @@ ${form}
             'tif': 'image/tiff'
           };
           const mimeType = mimeTypes[ext] || 'image/jpeg';
-          contentHtml = `<p><strong>Binary file (${fileContent.length} bytes)</strong></p>
+          contentHtml = `<p><strong>${t('file', translations)} (${fileContent.length} bytes)</strong></p>
 <p>Hash: ${escapeHtml(fileEntry.hash)}</p>
 <hr>
 <p><b>Image File</b></p>
@@ -1744,7 +2062,7 @@ ${form}
 </div>
 <p><small>Image file size: ${Number(fileContent.length).toLocaleString()} bytes</small></p>`;
         } else {
-          contentHtml = `<p><strong>Binary file (${fileContent ? fileContent.length : 0} bytes)</strong></p>
+          contentHtml = `<p><strong>${t('file', translations)} (${fileContent ? fileContent.length : 0} bytes)</strong></p>
 <p>Hash: ${escapeHtml(fileEntry.hash)}</p>`;
         }
       } else if (isMarkdownFile(fileEntry.filename)) {
@@ -1811,11 +2129,11 @@ ${markdownToHtml(displayContent, fileEntry.filename, repoRoot, imageMap)}
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small>${username ? `<strong>${escapeHtml(username)}</strong> | <a href="/language">[${t('language', translations)}]</a> | <a href="/logout">[${t('logout', translations)}]</a>` : `<a href="/sign-in">[${t('login', translations)}]</a>`}</small></td></tr>
+<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small>${username ? `<strong>${escapeHtml(username)}</strong> <a href="/language">${t('language', translations)}</a> <a href="/logout">${t('logout', translations)}</a>` : `<a href="/sign-in">${t('login', translations)}</a>`}</small></td></tr>
 </table>
-<p><a href="/">[${t('home', translations)}]</a> | <a href="/${escapeHtml(repoRoot)}">[${t('repository-root', translations)}]</a></p>
+<p><a href="/">${t('home', translations)}</a> <a href="/${escapeHtml(repoRoot)}">${t('repository-root', translations)}</a></p>
 <h2>${t('file', translations)}: ${escapeHtml(fileEntry.filename)}</h2>
-<p><a href="?download=1">[${t('download', translations)}]</a></p>
+<p><a href="?download=1">${t('download', translations)}</a></p>
 ${fileActions}
 <hr>
 ${actionMessageHtml}
@@ -1851,8 +2169,8 @@ ${contentHtml}
         if (isText) {
           editLink = `<form method="GET" action="${fileLinkPath}" style="display:inline"><input type="hidden" name="edit" value="1"><input type="submit" value="${t('edit', translations)}"></form>`;
         }
-        const deleteForm = `<form method="POST" style="display:inline"><input type="hidden" name="action" value="delete_file"><input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}"><input type="submit" value="${t('delete', translations)}" onclick="return confirm('Delete file ${fileBasename}?')"></form>`;
-        const renameForm = `<form method="POST" style="display:inline"><input type="hidden" name="action" value="rename_file"><input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}"><input type="text" name="new_name" size="12" placeholder="${t('new-name', translations)}"><input type="submit" value="${t('rename', translations)}"></form>`;
+        const deleteForm = `<form method="POST" style="display:inline">${buildAuthHiddenFields(req, 'repo-delete-dir-file')}<input type="hidden" name="action" value="delete_file"><input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}"><input type="submit" value="${t('delete', translations)}" onclick="return confirm('Delete file ${fileBasename}?')"></form>`;
+        const renameForm = `<form method="POST" style="display:inline">${buildAuthHiddenFields(req, 'repo-rename-dir-file')}<input type="hidden" name="action" value="rename_file"><input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}"><input type="text" name="new_name" size="12" placeholder="${t('new-name', translations)}"><input type="submit" value="${t('rename', translations)}"></form>`;
         actionsHtml = `<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;"><div>${editLink}${renameForm}</div><div>${deleteForm}</div></div>`;
       }
       
@@ -1872,12 +2190,14 @@ ${contentHtml}
     const actionForms = username ? `
 <p><b>${t('create-directory', translations)}</b></p>
 <form method="POST">
+${buildAuthHiddenFields(req, 'repo-create-dir')}
 <input type="text" name="dir_name" size="30" placeholder="new-folder">
 <input type="hidden" name="action" value="create_dir">
 <input type="submit" value="${t('create-directory', translations)}">
 </form>
 <p><b>${t('create-text-file', translations)}</b></p>
 <form method="POST">
+${buildAuthHiddenFields(req, 'repo-create-file')}
 <input type="text" name="file_name" size="30" placeholder="notes.txt">
 <br>
 <textarea name="file_content" rows="6" cols="60" placeholder="${t('write-file-contents', translations)}"></textarea>
@@ -1887,14 +2207,15 @@ ${contentHtml}
 </form>
 <p><b>${t('upload-file-directory', translations)}</b></p>
 <form method="POST" enctype="multipart/form-data">
+${buildAuthHiddenFields(req, 'repo-upload-dir-file')}
 <input type="file" name="upload_file" required>
 <input type="submit" value="${t('upload', translations)}">
 </form>
-` : `<p><small><a href="/sign-in">[${t('login', translations)}]</a> ${t('login-to-upload-files', translations)}</small></p>`;
+` : `<p><small><a href="/sign-in">${t('login', translations)}</a> ${t('login-to-upload-files', translations)}</small></p>`;
 
     const userDisplay = username
-      ? `<strong>${escapeHtml(username)}</strong> | <a href="/language">[${t('language', translations)}]</a> | <a href="/logout">[${t('logout', translations)}]</a>`
-      : `<a href="/sign-in">[${t('login', translations)}]</a>`;
+      ? `<strong>${escapeHtml(username)}</strong> <a href="/language">${t('language', translations)}</a> <a href="/logout">${t('logout', translations)}</a>`
+      : `<a href="/sign-in">${t('login', translations)}</a>`;
 
     const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
@@ -1905,7 +2226,7 @@ ${contentHtml}
 <table width="100%" border="0" cellpadding="5">
 <tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small>${userDisplay}</small></td></tr>
 </table>
-<p><a href="/">[${t('home', translations)}]</a></p>
+<p><a href="/">${t('home', translations)}</a></p>
 <h2>${t('directory', translations)}: /${directoryTitle}</h2>
 <hr>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
@@ -1940,15 +2261,15 @@ ${actionForms}
   const repos = getReposList();
   username = getUsername(req);
   const userDisplay = username
-    ? `<strong>${escapeHtml(username)}</strong> | <a href="/language">[${t('language', translations)}]</a> | <a href="/logout">[${t('logout', translations)}]</a>`
-    : `<a href="/sign-in">[${t('login', translations)}]</a>`;
+    ? `<strong>${escapeHtml(username)}</strong> <a href="/language">${t('language', translations)}</a> <a href="/logout">${t('logout', translations)}</a>`
+    : `<a href="/sign-in">${t('login', translations)}</a>`;
 
   const reposTable = repos.length > 0
     ? repos.map(repo => `<tr>
 <td><a href="/${repo.name.replace(/\.omi$/, '')}">${repo.name.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</a></td>
 <td>${repo.size.toLocaleString()}</td>
 <td>${new Date(repo.modified * 1000).toISOString().replace('T', ' ').slice(0, 19)}</td>
-<td><a href="?download=${encodeURIComponent(repo.name)}">[${t('download', translations)}]</a></td>
+<td><a href="?download=${encodeURIComponent(repo.name)}">${t('download', translations)}</a></td>
 </tr>`).join('\n')
     : `<tr><td colspan="4">${t('no-repositories', translations)}</td></tr>`;
 
@@ -1981,6 +2302,7 @@ ${reposTable}
 </table>
 ${username ? `<h2>${t('create-repository', translations)}</h2>
 <form method="POST">
+${buildAuthHiddenFields(req, 'home-create-repo')}
 <table border="0" cellpadding="5">
 <tr><td>${t('repository-name', translations)}:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
 <tr><td colspan="2"><input type="hidden" name="action" value="create_repo"><input type="submit" value="${t('create-repository', translations)}"></td></tr>
@@ -1988,12 +2310,13 @@ ${username ? `<h2>${t('create-repository', translations)}</h2>
 </form>
 <h2>${t('upload-repository', translations)}</h2>
 <form method="POST" enctype="multipart/form-data">
+${buildAuthHiddenFields(req, 'home-upload-repo')}
 <table border="0" cellpadding="5">
 <tr><td>${t('repository-name', translations)}:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
 <tr><td>${t('file', translations)}:</td><td><input type="file" name="repo_file"></td></tr>
 <tr><td colspan="2"><input type="submit" name="action" value="${t('upload', translations)}"></td></tr>
 </table>
-</form>` : `<p><a href="/sign-in">[${t('sign-in-to-upload', translations)}]</a></p>`}
+</form>` : `<p><a href="/sign-in">${t('sign-in-to-upload', translations)}</a></p>`}
 <h2>${t('api-endpoints', translations)}</h2>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr><td><strong>${t('list-repos-json', translations)}:</strong></td><td>GET /?format=json</td></tr>

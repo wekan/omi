@@ -33,7 +33,7 @@ uses
   {$ENDIF}
   SysUtils, fphttpapp, HTTPDefs, httproute, Classes,
   StrUtils, Math, fpjson, jsonparser,
-  Process, inifiles;
+  Process, inifiles, DateUtils;
 
 const
   VERSION = '1.0.0';
@@ -41,9 +41,11 @@ const
   SETTINGS_FILE = '../settings.txt';
   USERS_FILE = '../users.txt';
   USERS_BRUTEFORCE_FILE = '../usersbruteforcelocked.txt';
+  ACTIVITY_DB_FILE = '../activity.db';
   REPOS_DIR = '../repos';
   SESSION_TIMEOUT = 24 * 60 * 60;
   USER_VALUE_SEP = #1;
+  SESSION_META_SEP = #2;
   
 type
   TSettings = record
@@ -74,6 +76,16 @@ var
   Settings: TSettings;
   Users: TStringList;
   Sessions: TStringList;
+  SessionMeta: TStringList;
+  ActivityDbReady: Boolean;
+  FallbackTranslations: TJSONObject;
+
+function GetLogoutIdleSeconds: Int64; forward;
+procedure LogActivity(const Username, SessionId, ActionName, StatusText, DetailText: string; ARequest: TRequest; ClickCounter: Int64); forward;
+procedure InvalidateSessionsForUserAndPassword(const Username, PasswordRef: string); forward;
+function HtmlEncode(const Value: string): string; forward;
+function BuildAuthHiddenFields(ARequest: TRequest; const ActionName: string): string; forward;
+function ReadFileToString(const FilePath: string): string; forward;
 
 function AppBaseDir: string;
 begin
@@ -257,18 +269,334 @@ begin
 end;
 
 function GetCookieValue(ARequest: TRequest; const Name: string): string;
+var
+  CookieHeader: string;
+  CookieParts: TStringArray;
+  CookieItem: string;
+  EqPos: Integer;
+  I: Integer;
 begin
   Result := ARequest.CookieFields.Values[Name];
+  if Result <> '' then
+    Exit;
+
+  CookieHeader := ARequest.CustomHeaders.Values['Cookie'];
+  if CookieHeader = '' then
+    Exit;
+
+  CookieParts := CookieHeader.Split([';']);
+  for I := 0 to High(CookieParts) do
+  begin
+    CookieItem := Trim(CookieParts[I]);
+    EqPos := Pos('=', CookieItem);
+    if EqPos > 0 then
+    begin
+      if SameText(Trim(Copy(CookieItem, 1, EqPos - 1)), Name) then
+      begin
+        Result := Trim(Copy(CookieItem, EqPos + 1, Length(CookieItem)));
+        Exit;
+      end;
+    end;
+  end;
+end;
+
+function UrlDecodeLegacy(const Value: string): string;
+var
+  I: Integer;
+  HexText: string;
+  HexValue: Integer;
+begin
+  Result := '';
+  I := 1;
+  while I <= Length(Value) do
+  begin
+    if Value[I] = '+' then
+      Result := Result + ' '
+    else if (Value[I] = '%') and (I + 2 <= Length(Value)) then
+    begin
+      HexText := Copy(Value, I + 1, 2);
+      HexValue := StrToIntDef('$' + HexText, -1);
+      if HexValue >= 0 then
+      begin
+        Result := Result + Chr(HexValue);
+        Inc(I, 2);
+      end
+      else
+        Result := Result + Value[I];
+    end
+    else
+      Result := Result + Value[I];
+    Inc(I);
+  end;
+end;
+
+function GetFormFieldValue(ARequest: TRequest; const Name: string): string;
+var
+  RawContent: string;
+  Pairs: TStringArray;
+  PairItem: string;
+  EqPos: Integer;
+  I: Integer;
+  KeyName: string;
+  KeyValue: string;
+begin
+  Result := ARequest.ContentFields.Values[Name];
+  if Result <> '' then
+    Exit;
+
+  if UpperCase(ARequest.Method) <> 'POST' then
+    Exit;
+
+  RawContent := ARequest.Content;
+  if RawContent = '' then
+    Exit;
+
+  Pairs := RawContent.Split(['&']);
+  for I := 0 to High(Pairs) do
+  begin
+    PairItem := Pairs[I];
+    EqPos := Pos('=', PairItem);
+    if EqPos > 0 then
+    begin
+      KeyName := UrlDecodeLegacy(Copy(PairItem, 1, EqPos - 1));
+      KeyValue := UrlDecodeLegacy(Copy(PairItem, EqPos + 1, Length(PairItem)));
+      if SameText(KeyName, Name) then
+      begin
+        Result := KeyValue;
+        Exit;
+      end;
+    end;
+  end;
+end;
+
+function GetSessionIdFromRequest(ARequest: TRequest): string;
+begin
+  Result := Trim(GetFormFieldValue(ARequest, 'sessionId'));
+  if Result = '' then
+    Result := Trim(ARequest.QueryFields.Values['sessionId']);
+end;
+
+function GetClientIp(ARequest: TRequest): string;
+begin
+  Result := Trim(ARequest.CustomHeaders.Values['X-Forwarded-For']);
+  if Result = '' then
+    Result := Trim(ARequest.RemoteAddress);
+  if Result = '' then
+    Result := '0.0.0.0';
+end;
+
+function GetRequestUserAgent(ARequest: TRequest): string;
+begin
+  Result := Trim(ARequest.UserAgent);
+  if Result = '' then
+    Result := Trim(ARequest.CustomHeaders.Values['User-Agent']);
+end;
+
+function HashText(const Value: string): string;
+var
+  I: Integer;
+  H: QWord;
+begin
+  H := 1469598103934665603;
+  for I := 1 to Length(Value) do
+  begin
+    H := H xor Ord(Value[I]);
+    H := H * 1099511628211;
+  end;
+  Result := IntToHex(H, 16);
+end;
+
+procedure SaveSessionMeta(const SessionId, Username, PasswordRef, IpAddress, UserAgent: string; LoginAt, LastActivityAt, ClickCounter: Int64);
+begin
+  SessionMeta.Values[SessionId] := Username + SESSION_META_SEP + PasswordRef + SESSION_META_SEP +
+    IntToStr(LoginAt) + SESSION_META_SEP + IntToStr(LastActivityAt) + SESSION_META_SEP +
+    IpAddress + SESSION_META_SEP + UserAgent + SESSION_META_SEP + IntToStr(ClickCounter);
+end;
+
+function LoadSessionMeta(const SessionId: string; out Username, PasswordRef, IpAddress, UserAgent: string; out LoginAt, LastActivityAt, ClickCounter: Int64): Boolean;
+var
+  Raw: string;
+  Parts: TStringArray;
+begin
+  Result := False;
+  Username := '';
+  PasswordRef := '';
+  IpAddress := '';
+  UserAgent := '';
+  LoginAt := 0;
+  LastActivityAt := 0;
+  ClickCounter := 0;
+
+  Raw := SessionMeta.Values[SessionId];
+  if Raw = '' then
+    Exit;
+  Parts := Raw.Split([SESSION_META_SEP]);
+  if Length(Parts) < 7 then
+    Exit;
+
+  Username := Parts[0];
+  PasswordRef := Parts[1];
+  LoginAt := StrToInt64Def(Parts[2], 0);
+  LastActivityAt := StrToInt64Def(Parts[3], 0);
+  IpAddress := Parts[4];
+  UserAgent := Parts[5];
+  ClickCounter := StrToInt64Def(Parts[6], 0);
+  Result := True;
+end;
+
+function BuildActionHash(const SessionId, Username, PasswordRef, IpAddress, UserAgent, ActionName: string; LoginAt, ClickCounter: Int64): string;
+begin
+  Result := HashText(ActionName + '|' + Username + '|' + PasswordRef + '|' + IpAddress + '|' +
+    UserAgent + '|' + IntToStr(LoginAt) + '|' + IntToStr(ClickCounter) + '|' + SessionId);
+end;
+
+function ValidateSessionContext(ARequest: TRequest; const SessionId, Username: string; out PasswordRef: string): Boolean;
+var
+  MetaUsername, MetaPassword, MetaIp, MetaUa: string;
+  LoginAt, LastActivityAt, ClickCounter: Int64;
+  NowTs: Int64;
+begin
+  Result := False;
+  PasswordRef := '';
+  if not LoadSessionMeta(SessionId, MetaUsername, MetaPassword, MetaIp, MetaUa, LoginAt, LastActivityAt, ClickCounter) then
+    Exit;
+  if not SameText(MetaUsername, Username) then
+    Exit;
+
+  NowTs := DateTimeToUnix(Now);
+  if (GetLogoutIdleSeconds > 0) and (NowTs - LastActivityAt > GetLogoutIdleSeconds) then
+  begin
+    Sessions.Values[SessionId] := '';
+    SessionMeta.Values[SessionId] := '';
+    LogActivity(Username, SessionId, 'session-check', 'idle-timeout', 'idle timeout reached', ARequest, ClickCounter);
+    Exit;
+  end;
+
+  if (MetaIp <> GetClientIp(ARequest)) or (MetaUa <> GetRequestUserAgent(ARequest)) then
+  begin
+    InvalidateSessionsForUserAndPassword(Username, MetaPassword);
+    LogActivity(Username, SessionId, 'session-check', 'context-mismatch', 'ip/user-agent mismatch', ARequest, ClickCounter);
+    Exit;
+  end;
+
+  PasswordRef := MetaPassword;
+  SaveSessionMeta(SessionId, MetaUsername, MetaPassword, MetaIp, MetaUa, LoginAt, NowTs, ClickCounter);
+  Result := True;
+end;
+
+function VerifyAndConsumeActionToken(ARequest: TRequest; const RequiredAction, SessionId, Username: string): Boolean;
+var
+  MetaUsername, PasswordRef, MetaIp, MetaUa: string;
+  LoginAt, LastActivityAt, ClickCounter: Int64;
+  PostedAction, PostedHash: string;
+  PostedCounter: Int64;
+  ExpectedHash: string;
+begin
+  Result := False;
+  PostedAction := GetFormFieldValue(ARequest, 'auth_action');
+  PostedHash := GetFormFieldValue(ARequest, 'auth_hash');
+  PostedCounter := StrToInt64Def(GetFormFieldValue(ARequest, 'auth_counter'), -1);
+
+  if (PostedAction = '') or (PostedHash = '') then
+    Exit;
+  if not SameText(PostedAction, RequiredAction) then
+    Exit;
+  if not LoadSessionMeta(SessionId, MetaUsername, PasswordRef, MetaIp, MetaUa, LoginAt, LastActivityAt, ClickCounter) then
+    Exit;
+  if not SameText(MetaUsername, Username) then
+    Exit;
+  if PostedCounter <> ClickCounter then
+    Exit;
+  if (MetaIp <> GetClientIp(ARequest)) or (MetaUa <> GetRequestUserAgent(ARequest)) then
+  begin
+    InvalidateSessionsForUserAndPassword(Username, PasswordRef);
+    Exit;
+  end;
+
+  ExpectedHash := BuildActionHash(SessionId, Username, PasswordRef, MetaIp, MetaUa, RequiredAction, LoginAt, ClickCounter);
+  if not SameText(ExpectedHash, PostedHash) then
+    Exit;
+
+  SaveSessionMeta(SessionId, MetaUsername, PasswordRef, MetaIp, MetaUa, LoginAt, DateTimeToUnix(Now), ClickCounter + 1);
+  LogActivity(Username, SessionId, RequiredAction, 'ok', 'token accepted', ARequest, ClickCounter + 1);
+  Result := True;
+end;
+
+function BuildActionButton(ARequest: TRequest; const Path, ActionName, LabelText: string): string;
+var
+  AuthFields: string;
+begin
+  AuthFields := BuildAuthHiddenFields(ARequest, ActionName);
+  if AuthFields = '' then
+  begin
+    Result := '<a href="' + HtmlEncode(Path) + '">' + HtmlEncode(LabelText) + '</a>';
+    Exit;
+  end;
+  Result := '<form method="POST" action="' + HtmlEncode(Path) + '" style="display:inline; margin:0; padding:0;">' +
+    AuthFields +
+    '<input type="submit" value="' + HtmlEncode(LabelText) + '" style="padding:0 2px;">' +
+    '</form>';
+end;
+
+function BuildNavTargetButton(ARequest: TRequest; const PostPath, TargetPath, ActionName, LabelText: string): string;
+var
+  AuthFields: string;
+begin
+  AuthFields := BuildAuthHiddenFields(ARequest, ActionName);
+  if AuthFields = '' then
+  begin
+    Result := '<a href="' + HtmlEncode(TargetPath) + '">' + HtmlEncode(LabelText) + '</a>';
+    Exit;
+  end;
+  Result := '<form method="POST" action="' + HtmlEncode(PostPath) + '" style="display:inline; margin:0; padding:0;">' +
+    AuthFields +
+    '<input type="hidden" name="nav_target" value="' + HtmlEncode(TargetPath) + '">' +
+    '<input type="submit" value="' + HtmlEncode(LabelText) + '" style="padding:0 2px;">' +
+    '</form>';
+end;
+
+function BuildAuthHiddenFields(ARequest: TRequest; const ActionName: string): string;
+var
+  SessionId, Username, PasswordRef, MetaIp, MetaUa: string;
+  LoginAt, LastActivityAt, ClickCounter: Int64;
+  Token: string;
+begin
+  SessionId := GetSessionIdFromRequest(ARequest);
+  Username := '';
+  if SessionId <> '' then
+    Username := Sessions.Values[SessionId];
+  if (SessionId = '') or (Username = '') then
+  begin
+    Result := '';
+    Exit;
+  end;
+
+  if not LoadSessionMeta(SessionId, Username, PasswordRef, MetaIp, MetaUa, LoginAt, LastActivityAt, ClickCounter) then
+  begin
+    Result := '';
+    Exit;
+  end;
+
+  Token := BuildActionHash(SessionId, Username, PasswordRef, MetaIp, MetaUa, ActionName, LoginAt, ClickCounter);
+  Result := '<input type="hidden" name="sessionId" value="' + HtmlEncode(SessionId) + '">' +
+    '<input type="hidden" name="auth_action" value="' + HtmlEncode(ActionName) + '">' +
+    '<input type="hidden" name="auth_counter" value="' + IntToStr(ClickCounter) + '">' +
+    '<input type="hidden" name="auth_hash" value="' + HtmlEncode(Token) + '">';
 end;
 
 function GetUsernameFromRequest(ARequest: TRequest): string;
 var
   SessionId: string;
+  PasswordRef: string;
 begin
   Result := '';
-  SessionId := GetCookieValue(ARequest, 'sessionId');
+  SessionId := GetSessionIdFromRequest(ARequest);
   if SessionId <> '' then
+  begin
     Result := Sessions.Values[SessionId];
+    if (Result <> '') and not ValidateSessionContext(ARequest, SessionId, Result, PasswordRef) then
+      Result := '';
+  end;
 end;
 
 function LoadSettingsMap: TStringList;
@@ -355,27 +683,28 @@ function LoadLanguagesData: TJSONObject;
 var
   LangFile: string;
   Content: string;
-  Stream: TMemoryStream;
   JsonData: TJSONData;
 begin
   Result := TJSONObject.Create;
   LangFile := DataPath('languages.json');
   if not FileExists(LangFile) then
     Exit;
-  Stream := TMemoryStream.Create;
+
+  Content := ReadFileToString(LangFile);
+  if Content = '' then
+    Exit;
+
   try
-    Stream.LoadFromFile(LangFile);
-    SetLength(Content, Stream.Size);
-    if Stream.Size > 0 then
-      Stream.Read(Content[1], Stream.Size);
     JsonData := GetJSON(Content);
     if JsonData is TJSONObject then
     begin
       Result.Free;
       Result := TJSONObject(JsonData);
-    end;
-  finally
-    Stream.Free;
+    end
+    else
+      JsonData.Free;
+  except
+    // keep empty object
   end;
 end;
 
@@ -450,7 +779,6 @@ function LoadTranslations(Language: string): TJSONObject;
 var
   LangFile: string;
   Content: string;
-  Stream: TMemoryStream;
   JsonData: TJSONData;
 begin
   Result := nil;
@@ -461,83 +789,141 @@ begin
 
   if FileExists(LangFile) then
   begin
-    Stream := TMemoryStream.Create;
+    Content := ReadFileToString(LangFile);
+    if Content = '' then
+    begin
+      Result := TJSONObject.Create;
+      Exit;
+    end;
+
     try
-      Stream.LoadFromFile(LangFile);
-      SetLength(Content, Stream.Size);
-      if Stream.Size > 0 then
-        Stream.Read(Content[1], Stream.Size);
-      try
-        JsonData := GetJSON(Content);
-        if JsonData is TJSONObject then
-          Result := TJSONObject(JsonData)
-        else
-          Result := TJSONObject.Create;
-      except
+      JsonData := GetJSON(Content);
+      if JsonData is TJSONObject then
+        Result := TJSONObject(JsonData)
+      else
+      begin
+        JsonData.Free;
         Result := TJSONObject.Create;
       end;
-    finally
-      Stream.Free;
+    except
+      Result := TJSONObject.Create;
     end;
   end
   else
     Result := TJSONObject.Create;
 end;
 
-// Convert Scandinavian and special UTF-8 characters to HTML entities
-function ConvertUTF8ToHtmlEntities(Text: string): string;
+function ResolveTranslationKey(const Key: string): string;
+var
+  L: string;
 begin
-  Result := Text;
-  // Scandinavian lowercase vowels
-  Result := StringReplace(Result, 'ä', '&auml;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ö', '&ouml;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'å', '&aring;', [rfReplaceAll]);
-  // Scandinavian uppercase vowels
-  Result := StringReplace(Result, 'Ä', '&Auml;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'Ö', '&Ouml;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'Å', '&Aring;', [rfReplaceAll]);
-  // Other common special characters
-  Result := StringReplace(Result, 'é', '&eacute;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'è', '&egrave;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ê', '&ecirc;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ë', '&euml;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'á', '&aacute;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'à', '&agrave;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'â', '&acirc;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ã', '&atilde;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ó', '&oacute;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ò', '&ograve;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ô', '&ocirc;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'õ', '&otilde;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ú', '&uacute;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ù', '&ugrave;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'û', '&ucirc;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ü', '&uuml;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ç', '&ccedil;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'Ç', '&Ccedil;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ñ', '&ntilde;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'Ñ', '&Ntilde;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ƒ', '&fnof;', [rfReplaceAll]);
-  Result := StringReplace(Result, 'ß', '&szlig;', [rfReplaceAll]);
+  Result := Key;
+  L := LowerCase(Key);
+
+  if (L = 'language-selection') or (L = 'select-language') then Exit('language');
+  if (L = 'save-language') or (L = 'language-updated') or (L = 'file-saved-success') or (L = 'otp-enabled-success') then Exit('save');
+  if (L = 'settings-update-failed') or (L = 'file-save-failed') or (L = 'file-delete-failed') or (L = 'repository-create-failed') or (L = 'invalid-action-token') or (L = 'invalid-logout-token') then Exit('error');
+  if (L = 'repository-created') then Exit('create');
+
+  if Pos('create', L) > 0 then Exit('create');
+  if Pos('delete', L) > 0 then Exit('delete');
+  if Pos('upload', L) > 0 then Exit('upload');
+  if Pos('download', L) > 0 then Exit('download');
+  if Pos('repository', L) > 0 then Exit('repository');
+  if (Pos('directory', L) > 0) or (L = 'root') then Exit('repository');
+  if (L = 'files') or (L = 'no-files') or (L = 'no-files-directory') then Exit('file');
+  if Pos('file', L) > 0 then Exit('file');
+  if Pos('otp', L) > 0 then Exit('otp');
+  if Pos('password', L) > 0 then Exit('password');
+  if Pos('email', L) > 0 then Exit('email');
+  if Pos('name', L) > 0 then Exit('name');
+  if Pos('user', L) > 0 then Exit('username');
+  if (Pos('author', L) > 0) or (Pos('message', L) > 0) or (Pos('image', L) > 0) then Exit('activity');
+  if (Pos('commit', L) > 0) or (Pos('activity', L) > 0) then Exit('activity');
+  if Pos('login', L) > 0 then Exit('login');
+  if Pos('logout', L) > 0 then Exit('logout');
+  if Pos('setting', L) > 0 then Exit('settings');
+  if L = 'update' then Exit('save');
+  if Pos('enable', L) > 0 then Exit('save');
+  if Pos('disable', L) > 0 then Exit('save');
+  if Pos('updated', L) > 0 then Exit('save');
+  if Pos('saved', L) > 0 then Exit('save');
+  if Pos('failed', L) > 0 then Exit('error');
+  if Pos('invalid', L) > 0 then Exit('error');
+  if Pos('not-implemented', L) > 0 then Exit('error');
 end;
 
 function T(Key: string; Translations: TJSONObject): string;
 var
   JsonValue: TJSONData;
+  ResolvedKey: string;
+  Candidate: string;
 begin
   Result := Key;
+  ResolvedKey := ResolveTranslationKey(Key);
   if Assigned(Translations) then
   begin
     try
       JsonValue := Translations.Find(Key);
       if Assigned(JsonValue) and (JsonValue.JSONType = jtString) then
-        Result := JsonValue.AsString;
+      begin
+        Candidate := JsonValue.AsString;
+        if Candidate <> Key then
+          Result := Candidate;
+      end;
     except
       Result := Key;
     end;
   end;
-  // Convert UTF-8 Scandinavian characters to HTML entities
-  Result := ConvertUTF8ToHtmlEntities(Result);
+  if (Result = Key) and (ResolvedKey <> Key) and Assigned(Translations) then
+  begin
+    try
+      JsonValue := Translations.Find(ResolvedKey);
+      if Assigned(JsonValue) and (JsonValue.JSONType = jtString) then
+      begin
+        Candidate := JsonValue.AsString;
+        if Candidate <> ResolvedKey then
+          Result := Candidate;
+      end;
+    except
+      Result := Key;
+    end;
+  end;
+  if (Result = Key) and Assigned(FallbackTranslations) then
+  begin
+    try
+      JsonValue := FallbackTranslations.Find(Key);
+      if Assigned(JsonValue) and (JsonValue.JSONType = jtString) then
+      begin
+        Candidate := JsonValue.AsString;
+        if Candidate <> Key then
+          Result := Candidate;
+      end;
+    except
+      Result := Key;
+    end;
+  end;
+  if (Result = Key) and (ResolvedKey <> Key) and Assigned(FallbackTranslations) then
+  begin
+    try
+      JsonValue := FallbackTranslations.Find(ResolvedKey);
+      if Assigned(JsonValue) and (JsonValue.JSONType = jtString) then
+      begin
+        Candidate := JsonValue.AsString;
+        if Candidate <> ResolvedKey then
+          Result := Candidate;
+      end;
+    except
+      Result := Key;
+    end;
+  end;
+  if (Result = Key) and (ResolvedKey <> Key) then
+    Result := ResolvedKey;
+end;
+
+function TE(const Key: string; Translations: TJSONObject): string;
+begin
+  Result := HtmlEncode(T(Key, Translations));
 end;
 
 function ifthen(Condition: Boolean; const TrueVal, FalseVal: string): string;
@@ -584,13 +970,16 @@ begin
   end;
 end;
 
-function CreateSession(Username: string): string;
+function CreateSession(ARequest: TRequest; const Username, PasswordRef: string): string;
 var
   SessionId: string;
+  NowTs: Int64;
 begin
   Randomize;
   SessionId := Format('%s_%d_%d', [Username, Random(999999), GetTickCount64 mod 1000000]);
   Sessions.Values[SessionId] := Username;
+  NowTs := DateTimeToUnix(Now);
+  SaveSessionMeta(SessionId, Username, PasswordRef, GetClientIp(ARequest), GetRequestUserAgent(ARequest), NowTs, NowTs, 0);
   Result := SessionId;
 end;
 
@@ -691,15 +1080,18 @@ end;
 function ReadFileToString(const FilePath: string): string;
 var
   Stream: TFileStream;
+  RawContent: RawByteString;
 begin
   Result := '';
   if not FileExists(FilePath) then
     Exit;
   Stream := TFileStream.Create(FilePath, fmOpenRead or fmShareDenyNone);
   try
-    SetLength(Result, Stream.Size);
+    SetLength(RawContent, Stream.Size);
     if Stream.Size > 0 then
-      Stream.ReadBuffer(Result[1], Stream.Size);
+      Stream.ReadBuffer(RawContent[1], Stream.Size);
+    SetCodePage(RawContent, CP_UTF8, False);
+    Result := string(RawContent);
   finally
     Stream.Free;
   end;
@@ -716,8 +1108,6 @@ begin
   Result := StringReplace(Result, '<', '&lt;', [rfReplaceAll]);
   Result := StringReplace(Result, '>', '&gt;', [rfReplaceAll]);
   Result := StringReplace(Result, '"', '&quot;', [rfReplaceAll]);
-  // Convert UTF-8 Scandinavian characters to HTML entities
-  Result := ConvertUTF8ToHtmlEntities(Result);
 end;
 
 function HexToString(const HexValue: string): string;
@@ -787,6 +1177,82 @@ begin
     OutputStream.Free;
     Proc.Free;
   end;
+end;
+
+procedure EnsureActivityDb;
+var
+  DbPath: string;
+begin
+  if ActivityDbReady then
+    Exit;
+  DbPath := DataPath(ACTIVITY_DB_FILE);
+  ExecSqlOnDb(DbPath,
+    'CREATE TABLE IF NOT EXISTS activity (' +
+    'id INTEGER PRIMARY KEY AUTOINCREMENT,' +
+    'event_time INTEGER NOT NULL,' +
+    'username TEXT,' +
+    'session_id TEXT,' +
+    'ip TEXT,' +
+    'user_agent TEXT,' +
+    'action_name TEXT,' +
+    'status_text TEXT,' +
+    'detail_text TEXT,' +
+    'click_counter INTEGER' +
+    ');');
+  ActivityDbReady := True;
+end;
+
+procedure InvalidateSessionsForUserAndPassword(const Username, PasswordRef: string);
+var
+  I: Integer;
+  SessionId, MetaUsername, MetaPassword, MetaIp, MetaUa: string;
+  LoginAt, LastActivityAt, ClickCounter: Int64;
+begin
+  for I := 0 to SessionMeta.Count - 1 do
+  begin
+    SessionId := SessionMeta.Names[I];
+    if SessionId = '' then
+      Continue;
+    if LoadSessionMeta(SessionId, MetaUsername, MetaPassword, MetaIp, MetaUa, LoginAt, LastActivityAt, ClickCounter) then
+    begin
+      if SameText(MetaUsername, Username) and (MetaPassword = PasswordRef) then
+      begin
+        Sessions.Values[SessionId] := '';
+        SessionMeta.Values[SessionId] := '';
+      end;
+    end;
+  end;
+end;
+
+function GetLogoutIdleSeconds: Int64;
+var
+  SettingsMap: TStringList;
+  IdleHours: Int64;
+begin
+  Result := SESSION_TIMEOUT;
+  SettingsMap := LoadSettingsMap;
+  try
+    IdleHours := StrToInt64Def(Trim(SettingsMap.Values['LOGOUT_ON_HOURS']), 0);
+    if IdleHours > 0 then
+      Result := IdleHours * 60 * 60;
+  finally
+    SettingsMap.Free;
+  end;
+end;
+
+procedure LogActivity(const Username, SessionId, ActionName, StatusText, DetailText: string; ARequest: TRequest; ClickCounter: Int64);
+var
+  DbPath: string;
+  Query: string;
+begin
+  EnsureActivityDb;
+  DbPath := DataPath(ACTIVITY_DB_FILE);
+  Query := 'INSERT INTO activity(event_time,username,session_id,ip,user_agent,action_name,status_text,detail_text,click_counter) VALUES(' +
+    IntToStr(DateTimeToUnix(Now)) + ',''' + SqlEscape(Username) + ''',''' + SqlEscape(SessionId) + ''',''' +
+    SqlEscape(GetClientIp(ARequest)) + ''',''' + SqlEscape(GetRequestUserAgent(ARequest)) + ''',''' +
+    SqlEscape(ActionName) + ''',''' + SqlEscape(StatusText) + ''',''' + SqlEscape(DetailText) + ''',' +
+    IntToStr(ClickCounter) + ');';
+  ExecSqlOnDb(DbPath, Query);
 end;
 
 function GetLatestCommitId(const DbPath: string): Int64;
@@ -1306,9 +1772,9 @@ begin
 
     if ARequest.Method = 'POST' then
     begin
-      Username := Trim(ARequest.ContentFields.Values['username']);
-      Password := ARequest.ContentFields.Values['password'];
-      OtpCode := Trim(ARequest.ContentFields.Values['otp']);
+      Username := Trim(GetFormFieldValue(ARequest, 'username'));
+      Password := GetFormFieldValue(ARequest, 'password');
+      OtpCode := Trim(GetFormFieldValue(ARequest, 'otp'));
 
       if IsUserLocked(Username) then
         ErrorMsg := T('account-locked', Translations)
@@ -1327,10 +1793,10 @@ begin
           end
           else
           begin
-            SessionId := CreateSession(Username);
-            AResponse.SetCustomHeader('Set-Cookie', 'sessionId=' + SessionId + '; Path=/; HttpOnly');
+            SessionId := CreateSession(ARequest, Username, StoredPassword);
+            LogActivity(Username, SessionId, 'login', 'ok', 'login success', ARequest, 0);
             AResponse.Code := 302;
-            AResponse.Location := '/';
+            AResponse.Location := '/?sessionId=' + HtmlEncode(SessionId);
             AResponse.Content := '';
             Exit;
           end;
@@ -1345,7 +1811,7 @@ begin
     else
       UsernameValue := '';
     if ShowOtp then
-      OtpInput := '<tr><td>' + T('otp', Translations) + ':</td><td><input type="text" name="otp" size="10" maxlength="6" required pattern="[0-9]{6}" placeholder="6-digit code"></td></tr>'
+      OtpInput := '<tr><td>' + T('otp', Translations) + ':</td><td><input type="text" name="otp" size="10" maxlength="6" required pattern="[0-9]{6}" placeholder="' + T('otp', Translations) + '"></td></tr>'
     else
       OtpInput := '';
     if ErrorMsg <> '' then
@@ -1359,7 +1825,7 @@ begin
       '<body bgcolor="#f0f0f0">' +
       '<h1>Omi Server - ' + T('login', Translations) + '</h1>' +
       '<table border="0" cellpadding="5">' +
-      '<tr><td colspan="2"><a href="/">[' + T('home', Translations) + ']</a></td></tr>' +
+      '<tr><td colspan="2"><a href="/">' + T('home', Translations) + '</a></td></tr>' +
       '</table>' +
       ErrorHtml +
       '<form method="POST">' +
@@ -1422,8 +1888,17 @@ var
   StoredPassword, StoredOtp, StoredLanguage: string;
   FormatParam: string;
   SuccessColor: string;
+  HeaderRight: string;
+  MainNav: string;
+  CreateRepoAuth: string;
+  UploadRepoAuth: string;
+  PostedAuthAction: string;
+  SessionId: string;
+  NavTarget: string;
+  RepoRootPath: string;
 begin
   Username := GetUsernameFromRequest(ARequest);
+  SessionId := GetSessionIdFromRequest(ARequest);
   UserLang := '';
   UsersMap := LoadUsersMap;
   try
@@ -1463,7 +1938,7 @@ begin
       begin
         AResponse.Code := 404;
         AResponse.ContentType := 'text/plain; charset=UTF-8';
-        AResponse.Content := 'Repository not found';
+        AResponse.Content := T('error', Translations);
         Exit;
       end;
       DownloadData := ReadFileToString(RepoPath);
@@ -1500,9 +1975,9 @@ begin
             '<body bgcolor="#f0f0f0">' +
             '<table width="100%" border="0" cellpadding="5">' +
             '<tr><td><h1>' + HtmlEncode(ImageRepo) + '</h1></td><td align="right"><small>' +
-            ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> | <a href="/language">[' + T('language', Translations) + ']</a> | <a href="/logout">[' + T('logout', Translations) + ']</a>', '<a href="/sign-in">[' + T('login', Translations) + ']</a>') +
+            ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') +
             '</small></td></tr></table>' +
-            '<p><a href="/">[' + T('home', Translations) + ']</a> | <a href="/settings">[' + T('settings', Translations) + ']</a> | <a href="/people">[' + T('people', Translations) + ']</a></p>' +
+            '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' + BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' + BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' + BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + '</p>' +
             '<h2>' + T('image', Translations) + ': ' + HtmlEncode(ImagePath) + '</h2><hr>' +
             '<div style="text-align:center"><img src="data:' + GetMimeType(ImagePath) + ';base64,' + Base64Encode(FileContent) + '" alt="' + HtmlEncode(ExtractFileName(ImagePath)) + '"></div>' +
             '<hr><p><small>Omi Server</small></p></body></html>';
@@ -1511,7 +1986,7 @@ begin
       end;
       AResponse.Code := 404;
       AResponse.ContentType := 'text/plain; charset=UTF-8';
-      AResponse.Content := 'Image not found';
+      AResponse.Content := T('error', Translations);
       Exit;
     end;
 
@@ -1536,9 +2011,9 @@ begin
         '<body bgcolor="#f0f0f0" dir="' + DirAttr + '">' +
         '<table width="100%" border="0" cellpadding="5">' +
         '<tr><td><h1>' + T('commit-history', Translations) + ' - ' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small>' +
-        ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> | <a href="/language">[' + T('language', Translations) + ']</a> | <a href="/logout">[' + T('logout', Translations) + ']</a>', '<a href="/sign-in">[' + T('login', Translations) + ']</a>') +
+        ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') +
         '</small></td></tr></table>' +
-        '<p><a href="/">[' + T('home', Translations) + ']</a> | <a href="/settings">[' + T('settings', Translations) + ']</a> | <a href="/people">[' + T('people', Translations) + ']</a> | <a href="/' + HtmlEncode(StringReplace(RepoName, '.omi', '', [])) + '">[' + T('repository-root', Translations) + ']</a></p>' +
+        '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' + BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' + BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' + BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + ' ' + BuildNavTargetButton(ARequest, '/', '/' + HtmlEncode(StringReplace(RepoName, '.omi', '', [])), 'home-log-repo-root', T('repository-root', Translations)) + '</p>' +
         '<hr>' +
         '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
         '<tr bgcolor="#333333"><th><font color="white">' + T('commit-id', Translations) + '</font></th><th><font color="white">' + T('message', Translations) + '</font></th><th><font color="white">' + T('author', Translations) + '</font></th><th><font color="white">' + T('date', Translations) + '</font></th><th><font color="white">' + T('files', Translations) + '</font></th></tr>' +
@@ -1571,6 +2046,27 @@ begin
     RepoError := False;
     if (ARequest.Method = 'POST') then
     begin
+      if Username <> '' then
+      begin
+        PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
+        if (PostedAuthAction = '') or not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
+        begin
+          AResponse.Code := 403;
+          AResponse.ContentType := 'text/plain; charset=UTF-8';
+          AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
+          LogActivity(Username, SessionId, 'home-post', 'forbidden', 'invalid or missing token', ARequest, -1);
+          Exit;
+        end;
+        NavTarget := GetFormFieldValue(ARequest, 'nav_target');
+        if NavTarget <> '' then
+        begin
+          AResponse.Code := 302;
+          AResponse.Location := NavTarget;
+          AResponse.Content := '';
+          Exit;
+        end;
+      end;
+
       Action := ARequest.ContentFields.Values['action'];
       if Action = 'create_repo' then
       begin
@@ -1593,7 +2089,7 @@ begin
           end;
         end;
       end
-      else if Action = T('upload', Translations) then
+      else if (Action = T('upload', Translations)) or (Action = 'Lähetä') or (Action = 'LÃ¤hetÃ¤') then
       begin
         if ARequest.Files.Count > 0 then
         begin
@@ -1635,13 +2131,34 @@ begin
     end;
 
     Repos := GetReposList;
+    if Username <> '' then
+    begin
+      HeaderRight := '<strong>' + HtmlEncode(Username) + '</strong> ' +
+        BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' +
+        BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations));
+      MainNav := BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' +
+        BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' +
+        BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' +
+        BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations));
+      CreateRepoAuth := BuildAuthHiddenFields(ARequest, 'home-create-repo');
+      UploadRepoAuth := BuildAuthHiddenFields(ARequest, 'home-upload-repo');
+    end
+    else
+    begin
+      HeaderRight := '<a href="/sign-in">' + T('login', Translations) + '</a>';
+      MainNav := '<a href="/">' + T('home', Translations) + '</a>';
+      CreateRepoAuth := '';
+      UploadRepoAuth := '';
+    end;
+
     Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
       '<html dir="' + DirAttr + '"><head><meta charset="UTF-8"><title>Omi Server - ' + T('repositories', Translations) + '</title></head>' +
       '<body bgcolor="#f0f0f0" dir="' + DirAttr + '">' +
       '<table width="100%" border="0" cellpadding="5">' +
       '<tr><td><h1>Omi Server - ' + T('repositories', Translations) + '</h1></td><td align="right"><small>' +
-      ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> | <a href="/language">[' + T('language', Translations) + ']</a> | <a href="/logout">[' + T('logout', Translations) + ']</a>', '<a href="/sign-in">[' + T('login', Translations) + ']</a>') +
+      HeaderRight +
       '</small></td></tr></table>' +
+      '<p>' + MainNav + '</p>' +
       '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
       '<tr bgcolor="#e8f4f8"><td colspan="4"><strong>' + T('server', Translations) + ':</strong> localhost<br>' +
       '<strong>' + T('protocol', Translations) + ':</strong> HTTP<br>' +
@@ -1658,10 +2175,12 @@ begin
       for I := 0 to High(Repos) do
       begin
         SizeText := IntToStr(Repos[I].Size);
-        Html := Html + '<tr><td><a href="/' + HtmlEncode(StringReplace(Repos[I].Name, '.omi', '', [])) + '">' + HtmlEncode(Repos[I].Name) + '</a></td>' +
+        RepoRootPath := '/' + HtmlEncode(StringReplace(Repos[I].Name, '.omi', '', []));
+        Html := Html + '<tr><td>' + BuildNavTargetButton(ARequest, '/', RepoRootPath, 'home-open-repo-' + IntToStr(I), Repos[I].Name) + '</td>' +
           '<td>' + HtmlEncode(SizeText) + '</td>' +
           '<td>' + HtmlEncode(FormatDateTime('yyyy-mm-dd hh:nn:ss', FileDateToDateTime(Repos[I].Modified))) + '</td>' +
-          '<td><a href="?download=' + HtmlEncode(Repos[I].Name) + '">' + T('download', Translations) + '</a> | <a href="?log=' + HtmlEncode(Repos[I].Name) + '">[' + T('log', Translations) + ']</a></td></tr>';
+          '<td>' + BuildNavTargetButton(ARequest, '/', '/?download=' + HtmlEncode(Repos[I].Name), 'home-download-repo-' + IntToStr(I), T('download', Translations)) +
+          ' ' + BuildNavTargetButton(ARequest, '/', '/?log=' + HtmlEncode(Repos[I].Name), 'home-log-repo-' + IntToStr(I), T('log', Translations)) + '</td></tr>';
       end;
     end;
 
@@ -1671,19 +2190,21 @@ begin
     begin
       Html := Html + '<h2>' + T('create-repository', Translations) + '</h2>' +
         '<form method="POST"><table border="0" cellpadding="5">' +
+        CreateRepoAuth +
         '<tr><td>' + T('repository-name', Translations) + ':</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>' +
         '<tr><td colspan="2"><input type="hidden" name="action" value="create_repo"><input type="submit" value="' + T('create-repository', Translations) + '"></td></tr>' +
         '</table></form>' +
         '<h2>' + T('upload-repository', Translations) + '</h2>' +
         '<form method="POST" enctype="multipart/form-data">' +
         '<table border="0" cellpadding="5">' +
+        UploadRepoAuth +
         '<tr><td>' + T('repository-name', Translations) + ':</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>' +
         '<tr><td>' + T('file', Translations) + ':</td><td><input type="file" name="repo_file"></td></tr>' +
         '<tr><td colspan="2"><input type="submit" name="action" value="' + T('upload', Translations) + '"></td></tr>' +
         '</table></form>';
     end
     else
-      Html := Html + '<p><a href="/sign-in">[' + T('sign-in-to-upload', Translations) + ']</a></p>';
+      Html := Html + '<p><a href="/sign-in">' + T('sign-in-to-upload', Translations) + '</a></p>';
 
     Html := Html + '<h2>' + T('api-endpoints', Translations) + '</h2>' +
       '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
@@ -1705,11 +2226,34 @@ end;
 procedure LogoutEndpoint(ARequest: TRequest; AResponse: TResponse);
 var
   SessionId: string;
+  Username: string;
+  PostedAuthAction: string;
 begin
-  SessionId := GetCookieValue(ARequest, 'sessionId');
+  SessionId := GetSessionIdFromRequest(ARequest);
+  Username := '';
   if SessionId <> '' then
+    Username := Sessions.Values[SessionId];
+
+  if (ARequest.Method = 'POST') and (Username <> '') then
+  begin
+    PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
+    if (PostedAuthAction = '') or not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
+    begin
+      AResponse.Code := 403;
+      AResponse.ContentType := 'text/plain; charset=UTF-8';
+      AResponse.Content := T('error', FallbackTranslations) + ': ' + T('invalid-logout-token', FallbackTranslations);
+      LogActivity(Username, SessionId, 'logout', 'forbidden', 'invalid token', ARequest, -1);
+      Exit;
+    end;
+  end;
+
+  if SessionId <> '' then
+  begin
     Sessions.Values[SessionId] := '';
-  AResponse.SetCustomHeader('Set-Cookie', 'sessionId=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly');
+    SessionMeta.Values[SessionId] := '';
+    if Username <> '' then
+      LogActivity(Username, SessionId, 'logout', 'ok', 'logout success', ARequest, -1);
+  end;
   AResponse.Code := 302;
   AResponse.Location := '/';
   AResponse.Content := '';
@@ -1782,7 +2326,7 @@ begin
       '<body bgcolor="#f0f0f0">' +
       '<h1>Omi Server - ' + T('create-account', Translations) + '</h1>' +
       '<table border="0" cellpadding="5">' +
-      '<tr><td colspan="2"><a href="/">[' + T('home', Translations) + ']</a></td></tr>' +
+      '<tr><td colspan="2"><a href="/">' + T('home', Translations) + '</a></td></tr>' +
       '</table>' +
       (ifthen(ErrorMsg <> '', '<p><font color="red"><strong>' + T('error', Translations) + ': ' + HtmlEncode(ErrorMsg) + '</strong></font></p>', '')) +
       (ifthen(SuccessMsg <> '', '<p><font color="green"><strong>' + HtmlEncode(SuccessMsg) + '</strong></font></p><p><a href="/sign-in">' + T('login', Translations) + '</a></p>', '')) +
@@ -1819,11 +2363,23 @@ var
   Translations: TJSONObject;
   Html: string;
   Username: string;
+  Password: string;
+  Otp: string;
+  CurrentLanguage: string;
   SettingsMap: TStringList;
-  SuccessMsg: string;
   ErrorMsg: string;
+  SessionId: string;
+  PostedAuthAction: string;
+  HeaderRight: string;
+  MainNav: string;
+  UserPassword: string;
+  UserOtp: string;
+  UserLang: string;
+  SaveAuth: string;
+  UsersMap: TStringList;
 begin
   Username := GetUsernameFromRequest(ARequest);
+  SessionId := GetSessionIdFromRequest(ARequest);
   if Username = '' then
   begin
     AResponse.Code := 302;
@@ -1832,14 +2388,35 @@ begin
     Exit;
   end;
 
-  Translations := LoadTranslations('en');
+  CurrentLanguage := '';
+  UsersMap := LoadUsersMap;
+  try
+    if not GetUserData(UsersMap, Username, Password, Otp, CurrentLanguage) then
+      CurrentLanguage := '';
+  finally
+    UsersMap.Free;
+  end;
+
+  if CurrentLanguage = '' then
+    CurrentLanguage := GetBrowserLanguage(ARequest);
+  if CurrentLanguage = '' then
+    CurrentLanguage := 'en';
+
+  Translations := LoadTranslations(CurrentLanguage);
   try
     SettingsMap := LoadSettingsMap;
     try
-      SuccessMsg := '';
       ErrorMsg := '';
       if ARequest.Method = 'POST' then
       begin
+        PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
+        if (PostedAuthAction <> '') and not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
+        begin
+          AResponse.Code := 403;
+          AResponse.ContentType := 'text/plain; charset=UTF-8';
+          AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
+          Exit;
+        end;
         if ARequest.ContentFields.Values['SQLITE'] <> '' then
           SettingsMap.Values['SQLITE'] := ARequest.ContentFields.Values['SQLITE'];
         if ARequest.ContentFields.Values['USERNAME'] <> '' then
@@ -1851,9 +2428,7 @@ begin
         if ARequest.ContentFields.Values['CURL'] <> '' then
           SettingsMap.Values['CURL'] := ARequest.ContentFields.Values['CURL'];
 
-        if SaveSettingsMap(SettingsMap) then
-          SuccessMsg := T('settings-updated', Translations)
-        else
+        if not SaveSettingsMap(SettingsMap) then
           ErrorMsg := T('settings-update-failed', Translations);
       end;
 
@@ -1862,18 +2437,27 @@ begin
       if SettingsMap.Values['CURL'] = '' then
         SettingsMap.Values['CURL'] := 'curl';
 
+      HeaderRight := '<strong>' + HtmlEncode(Username) + '</strong> ' +
+        BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' +
+        BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations));
+      MainNav := BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' +
+        BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' +
+        BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' +
+        BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations));
+      SaveAuth := BuildAuthHiddenFields(ARequest, 'settings-save');
+
       Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
         '<html><head><meta charset="UTF-8"><title>' + T('settings', Translations) + ' - Omi Server</title></head>' +
         '<body bgcolor="#f0f0f0">' +
         '<table width="100%" border="0" cellpadding="5">' +
         '<tr><td><h1>' + T('settings', Translations) + '</h1></td>' +
-        '<td align="right"><small><strong>' + HtmlEncode(Username) + '</strong> | <a href="/language">[' + T('language', Translations) + ']</a> | <a href="/logout">[' + T('logout', Translations) + ']</a></small></td></tr>' +
+        '<td align="right"><small>' + HeaderRight + '</small></td></tr>' +
         '</table>' +
-        '<p><a href="/">[' + T('home', Translations) + ']</a> | <a href="/settings">[' + T('settings', Translations) + ']</a> | <a href="/people">[' + T('people', Translations) + ']</a></p>' +
+        '<p>' + MainNav + '</p>' +
         '<hr>' +
-        (ifthen(SuccessMsg <> '', '<p><font color="green"><strong>' + HtmlEncode(SuccessMsg) + '</strong></font></p>', '')) +
         (ifthen(ErrorMsg <> '', '<p><font color="red"><strong>' + HtmlEncode(ErrorMsg) + '</strong></font></p>', '')) +
         '<form method="POST">' +
+        SaveAuth +
         '<table border="1" cellpadding="5">' +
         '<tr><td>SQLITE executable:</td><td><input type="text" name="SQLITE" size="50" value="' + HtmlEncode(SettingsMap.Values['SQLITE']) + '"></td></tr>' +
         '<tr><td>USERNAME:</td><td><input type="text" name="USERNAME" size="50" value="' + HtmlEncode(SettingsMap.Values['USERNAME']) + '"></td></tr>' +
@@ -1909,12 +2493,15 @@ var
   LangCode, LangName: string;
   LangInfo: TJSONObject;
   IsRtl: Boolean;
-  SuccessMsg: string;
   UpdatedLanguage: Boolean;
-  NewLanguage: string;
   FormHtml: string;
+  SessionId: string;
+  PostedAuthAction: string;
+  HeaderRight: string;
+  MainNav: string;
 begin
   Username := GetUsernameFromRequest(ARequest);
+  SessionId := GetSessionIdFromRequest(ARequest);
   if Username = '' then
   begin
     AResponse.Code := 302;
@@ -1924,19 +2511,24 @@ begin
   end;
 
   UsersMap := LoadUsersMap;
-  SuccessMsg := '';
   UpdatedLanguage := False;
-  NewLanguage := '';
   try
     if not GetUserData(UsersMap, Username, Password, Otp, CurrentLanguage) then
       CurrentLanguage := 'en';
 
     if ARequest.Method = 'POST' then
     begin
+      PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
+      if (PostedAuthAction <> '') and not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
+      begin
+        AResponse.Code := 403;
+        AResponse.ContentType := 'text/plain; charset=UTF-8';
+        AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
+        Exit;
+      end;
       if ARequest.ContentFields.Values['language'] <> '' then
       begin
-        NewLanguage := ARequest.ContentFields.Values['language'];
-        CurrentLanguage := NewLanguage;
+        CurrentLanguage := ARequest.ContentFields.Values['language'];
         UsersMap.Values[Username] := Password + USER_VALUE_SEP + Otp + USER_VALUE_SEP + CurrentLanguage;
         SaveUsersMap(UsersMap);
         UpdatedLanguage := True;
@@ -1948,13 +2540,18 @@ begin
 
   Translations := LoadTranslations(CurrentLanguage);
   try
-    if UpdatedLanguage then
-      SuccessMsg := T('language-updated', Translations);
-
     LangData := LoadLanguagesData;
     try
-      FormHtml := '<form method="POST"><table border="1" cellpadding="5">' +
-        '<tr bgcolor="#333333"><th><font color="white">Language</font></th></tr>';
+      HeaderRight := '<strong>' + HtmlEncode(Username) + '</strong> | ' +
+        BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' +
+        BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations));
+      MainNav := BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' +
+        BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' +
+        BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' +
+        BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations));
+
+      FormHtml := '<form method="POST">' + BuildAuthHiddenFields(ARequest, 'language-save') + '<table border="1" cellpadding="5">' +
+        '<tr bgcolor="#333333"><th><font color="white">' + T('language', Translations) + '</font></th></tr>';
 
       for I := 0 to LangData.Count - 1 do
       begin
@@ -1968,20 +2565,19 @@ begin
       end;
 
       FormHtml := FormHtml + '</table><br>' +
-        '<input type="submit" value="' + T('save-language', Translations) + '">' +
+        '<input type="submit" value="' + T('save', Translations) + '">' +
         '</form>';
 
       Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
         '<html>' +
-        '<head><meta charset="UTF-8"><title>' + T('language-selection', Translations) + ' - Omi Server</title></head>' +
+        '<head><meta charset="UTF-8"><title>' + T('language', Translations) + ' - Omi Server</title></head>' +
         '<body bgcolor="#f0f0f0">' +
         '<table width="100%" border="0" cellpadding="5">' +
-        '<tr><td><h1>Omi Server</h1></td><td align="right"><small><strong>' + HtmlEncode(Username) + '</strong> | <a href="/language">[' + T('language', Translations) + ']</a> | <a href="/logout">[' + T('logout', Translations) + ']</a></small></td></tr>' +
+        '<tr><td><h1>Omi Server</h1></td><td align="right"><small>' + HeaderRight + '</small></td></tr>' +
         '</table>' +
-        '<p><a href="/">[' + T('home', Translations) + ']</a> | <a href="/people">[' + T('people', Translations) + ']</a> | <a href="/settings">[' + T('settings', Translations) + ']</a></p>' +
+        '<p>' + MainNav + '</p>' +
         '<hr>' +
-        '<h2>' + T('select-language', Translations) + '</h2>' +
-        (ifthen(SuccessMsg <> '', '<p><font color="green"><strong>' + HtmlEncode(SuccessMsg) + '</strong></font></p>', '')) +
+        '<h2>' + T('language', Translations) + '</h2>' +
         FormHtml +
         '<hr>' +
         '<p><small>Omi Server</small></p>' +
@@ -1991,6 +2587,97 @@ begin
     end;
     AResponse.Content := Html;
     AResponse.ContentType := 'text/html; charset=UTF-8';
+  finally
+    if Assigned(Translations) then
+      Translations.Free;
+  end;
+end;
+
+procedure ActivityEndpoint(ARequest: TRequest; AResponse: TResponse);
+var
+  Username: string;
+  SessionId: string;
+  UsersMap: TStringList;
+  UserPassword: string;
+  UserOtp: string;
+  UserLang: string;
+  Translations: TJSONObject;
+  PostedAuthAction: string;
+  Output: string;
+  Lines: TStringArray;
+  Parts: TStringArray;
+  I: Integer;
+  Rows: string;
+  Html: string;
+begin
+  Username := GetUsernameFromRequest(ARequest);
+  SessionId := GetSessionIdFromRequest(ARequest);
+  if Username = '' then
+  begin
+    AResponse.Code := 302;
+    AResponse.Location := '/sign-in';
+    AResponse.Content := '';
+    Exit;
+  end;
+
+  UsersMap := LoadUsersMap;
+  try
+    UserLang := 'en';
+    if GetUserData(UsersMap, Username, UserPassword, UserOtp, UserLang) then
+      UserLang := Trim(UserLang);
+  finally
+    UsersMap.Free;
+  end;
+  if UserLang = '' then
+    UserLang := 'en';
+  Translations := LoadTranslations(UserLang);
+  try
+
+  if ARequest.Method = 'POST' then
+  begin
+    PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
+    if (PostedAuthAction <> '') and not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
+    begin
+      AResponse.Code := 403;
+      AResponse.ContentType := 'text/plain; charset=UTF-8';
+      AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
+      Exit;
+    end;
+  end;
+
+  EnsureActivityDb;
+  Output := ExecSqlOnDb(DataPath(ACTIVITY_DB_FILE),
+    'SELECT ip, user_agent, COUNT(*), datetime(MIN(event_time), ''unixepoch''), datetime(MAX(event_time), ''unixepoch''), GROUP_CONCAT(DISTINCT username) ' +
+    'FROM activity GROUP BY ip, user_agent ORDER BY MAX(event_time) DESC;');
+
+  Rows := '';
+  Lines := Output.Split([#10]);
+  for I := 0 to High(Lines) do
+  begin
+    if Trim(Lines[I]) = '' then
+      Continue;
+    Parts := Lines[I].Split(['|']);
+    if Length(Parts) >= 6 then
+      Rows := Rows + '<tr><td>' + HtmlEncode(Parts[0]) + '</td><td>' + HtmlEncode(Parts[1]) + '</td><td>' + HtmlEncode(Parts[5]) + '</td><td>' + HtmlEncode(Parts[2]) + '</td><td>' + HtmlEncode(Parts[3]) + '</td><td>' + HtmlEncode(Parts[4]) + '</td></tr>';
+  end;
+  if Rows = '' then
+    Rows := '<tr><td colspan="6">' + TE('no-activity-yet', Translations) + '</td></tr>';
+
+  Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
+    '<html><head><meta charset="UTF-8"><title>' + TE('activity', Translations) + ' - Omi Server</title></head><body bgcolor="#f0f0f0">' +
+    '<table width="100%" border="0" cellpadding="5"><tr><td><h1>' + TE('activity', Translations) + '</h1></td><td align="right"><small><strong>' + HtmlEncode(Username) + '</strong> | ' +
+    BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' +
+    BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)) + '</small></td></tr></table>' +
+    '<p>' + BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' +
+    BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' +
+    BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' +
+    BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations)) + '</p>' +
+    '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
+    '<tr bgcolor="#333333"><th><font color="white">' + TE('ip-address', Translations) + '</font></th><th><font color="white">' + TE('user-agent', Translations) + '</font></th><th><font color="white">' + TE('users', Translations) + '</font></th><th><font color="white">' + TE('events', Translations) + '</font></th><th><font color="white">' + TE('first-unix', Translations) + '</font></th><th><font color="white">' + TE('last-unix', Translations) + '</font></th></tr>' +
+    Rows + '</table><hr><p><small>Omi Server</small></p></body></html>';
+
+  AResponse.ContentType := 'text/html; charset=UTF-8';
+  AResponse.Content := Html;
   finally
     if Assigned(Translations) then
       Translations.Free;
@@ -2020,6 +2707,15 @@ var
   EditSections: string;
   OtpSections: string;
   SelfUser: string;
+  SessionId: string;
+  PostedAuthAction: string;
+  HeaderRight: string;
+  MainNav: string;
+  UserPassword: string;
+  UserOtp: string;
+  UserLang: string;
+  OpenEditUser: string;
+  OpenOtpUser: string;
 
   function GenerateSecret(LengthValue: Integer): string;
   const
@@ -2035,6 +2731,7 @@ var
 
 begin
   Username := GetUsernameFromRequest(ARequest);
+  SessionId := GetSessionIdFromRequest(ARequest);
   if Username = '' then
   begin
     AResponse.Code := 302;
@@ -2043,15 +2740,31 @@ begin
     Exit;
   end;
 
-  Translations := LoadTranslations('en');
   UsersMap := LoadUsersMap;
+  UserLang := 'en';
+  if GetUserData(UsersMap, Username, UserPassword, UserOtp, UserLang) then
+    UserLang := Trim(UserLang);
+  if UserLang = '' then
+    UserLang := 'en';
+  Translations := LoadTranslations(UserLang);
   try
     SuccessMsg := '';
     ErrorMsg := '';
+    OpenEditUser := '';
+    OpenOtpUser := '';
     Action := ARequest.ContentFields.Values['action'];
 
     if (ARequest.Method = 'POST') and (Action <> '') then
     begin
+      PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
+      if (PostedAuthAction = '') or not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
+      begin
+        AResponse.Code := 403;
+        AResponse.ContentType := 'text/plain; charset=UTF-8';
+        AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
+        Exit;
+      end;
+
       if Action = 'add' then
       begin
         NewUser := Trim(ARequest.ContentFields.Values['newuser']);
@@ -2062,13 +2775,29 @@ begin
           begin
             UsersMap.Values[NewUser] := NewPass + USER_VALUE_SEP + '' + USER_VALUE_SEP + 'en';
             SaveUsersMap(UsersMap);
-            SuccessMsg := 'User added successfully';
+            SuccessMsg := T('save', Translations);
           end
           else
-            ErrorMsg := 'User already exists';
+            ErrorMsg := T('error', Translations);
         end
         else
-          ErrorMsg := 'Username and password are required';
+          ErrorMsg := T('error', Translations);
+      end
+      else if Action = 'open_edit' then
+      begin
+        OpenEditUser := ARequest.ContentFields.Values['edituser'];
+      end
+      else if Action = 'open_otp' then
+      begin
+        OpenOtpUser := ARequest.ContentFields.Values['otpuser'];
+      end
+      else if Action = 'close_edit' then
+      begin
+        OpenEditUser := '';
+      end
+      else if Action = 'close_otp' then
+      begin
+        OpenOtpUser := '';
       end
       else if Action = 'delete' then
       begin
@@ -2077,10 +2806,10 @@ begin
         begin
           UsersMap.Values[DelUser] := '';
           SaveUsersMap(UsersMap);
-          SuccessMsg := 'User deleted successfully';
+          SuccessMsg := T('save', Translations);
         end
         else
-          ErrorMsg := 'User not found';
+          ErrorMsg := T('error', Translations);
       end
       else if Action = 'update' then
       begin
@@ -2090,10 +2819,10 @@ begin
         begin
           UsersMap.Values[UpUser] := UpPass + USER_VALUE_SEP + Otp + USER_VALUE_SEP + Language;
           SaveUsersMap(UsersMap);
-          SuccessMsg := 'User updated successfully';
+          SuccessMsg := T('save', Translations);
         end
         else
-          ErrorMsg := 'Failed to update user';
+          ErrorMsg := T('error', Translations);
       end
       else if Action = 'enable_otp' then
       begin
@@ -2107,10 +2836,10 @@ begin
           OtpUrl := 'otpauth://totp/Omi (' + EmailValue + '):' + EmailValue + '?secret=' + Secret + '&issuer=omi&digits=6&period=30';
           UsersMap.Values[OtpUser] := Password + USER_VALUE_SEP + OtpUrl + USER_VALUE_SEP + Language;
           SaveUsersMap(UsersMap);
-          SuccessMsg := 'OTP enabled successfully';
+          SuccessMsg := T('save', Translations);
         end
         else
-          ErrorMsg := 'Failed to enable OTP';
+          ErrorMsg := T('error', Translations);
       end
       else if Action = 'disable_otp' then
       begin
@@ -2119,10 +2848,10 @@ begin
         begin
           UsersMap.Values[OtpUser] := Password + USER_VALUE_SEP + '' + USER_VALUE_SEP + Language;
           SaveUsersMap(UsersMap);
-          SuccessMsg := 'OTP disabled successfully';
+          SuccessMsg := T('save', Translations);
         end
         else
-          ErrorMsg := 'Failed to disable OTP';
+          ErrorMsg := T('error', Translations);
       end;
     end;
 
@@ -2141,55 +2870,77 @@ begin
       UsersTable := UsersTable + '<tr><td>' + HtmlEncode(UserKey) + '</td>' +
         '<td>' + ifthen(Otp <> '', '<font color="green">✓ ' + T('enabled', Translations) + '</font>', '<font color="gray">' + T('disabled', Translations) + '</font>') + '</td>' +
         '<td><form method="POST" style="display:inline">' +
+        BuildAuthHiddenFields(ARequest, 'people-delete-' + UserKey) +
         '<input type="hidden" name="action" value="delete">' +
         '<input type="hidden" name="deluser" value="' + HtmlEncode(UserKey) + '">' +
-        '<input type="submit" value="' + T('delete', Translations) + '" onclick="return confirm(''Delete user ' + HtmlEncode(UserKey) + ' ?'')"></form> | ' +
-        '<a href="#" onclick="document.getElementById(''edit_' + HtmlEncode(UserKey) + ''').style.display=''block''; return false;">[' + T('edit', Translations) + ']</a>' +
-        (ifthen(UserKey = Username, ' | <a href="#" onclick="document.getElementById(''otp_' + HtmlEncode(UserKey) + ''').style.display=''block''; return false;">[' + T('otp', Translations) + ']</a>', '')) +
+        '<input type="submit" value="' + T('delete', Translations) + '"></form> | ' +
+        '<form method="POST" style="display:inline">' +
+        BuildAuthHiddenFields(ARequest, 'people-open-edit-' + UserKey) +
+        '<input type="hidden" name="action" value="open_edit">' +
+        '<input type="hidden" name="edituser" value="' + HtmlEncode(UserKey) + '">' +
+        '<input type="submit" value="' + T('edit', Translations) + '"></form>' +
+        (ifthen(UserKey = Username,
+          ' | <form method="POST" style="display:inline">' +
+          BuildAuthHiddenFields(ARequest, 'people-open-otp-' + UserKey) +
+          '<input type="hidden" name="action" value="open_otp">' +
+          '<input type="hidden" name="otpuser" value="' + HtmlEncode(UserKey) + '">' +
+          '<input type="submit" value="' + T('otp', Translations) + '"></form>',
+          '')) +
         '</td></tr>';
 
-      EditSections := EditSections + '<div id="edit_' + HtmlEncode(UserKey) + '" style="display:none;border:1px solid #ccc;padding:10px;margin:10px 0">' +
+      if (OpenEditUser <> '') and SameText(OpenEditUser, UserKey) then
+        EditSections := EditSections + '<div style="border:1px solid #ccc;padding:10px;margin:10px 0">' +
         '<form method="POST"><table border="0" cellpadding="5">' +
+        BuildAuthHiddenFields(ARequest, 'people-update-' + UserKey) +
         '<tr><td>' + T('username', Translations) + ':</td><td><strong>' + HtmlEncode(UserKey) + '</strong></td></tr>' +
         '<tr><td>' + T('new-password', Translations) + ':</td><td><input type="password" name="uppass" size="30" required></td></tr>' +
         '<tr><td colspan="2"><input type="hidden" name="action" value="update">' +
         '<input type="hidden" name="upuser" value="' + HtmlEncode(UserKey) + '">' +
-        '<input type="submit" value="' + T('update', Translations) + '"> | ' +
-        '<a href="#" onclick="document.getElementById(''edit_' + HtmlEncode(UserKey) + ''').style.display=''none''; return false;">[' + T('cancel', Translations) + ']</a></td></tr>' +
-        '</table></form></div>';
+        '<input type="submit" value="' + T('update', Translations) + '"></td></tr>' +
+        '</table></form><p>' + BuildActionButton(ARequest, '/people', 'people-close-edit-' + UserKey, T('cancel', Translations)) + '</p></div>';
 
-      if UserKey = Username then
+      if (UserKey = Username) and (OpenOtpUser <> '') and SameText(OpenOtpUser, UserKey) then
       begin
         if Otp = '' then
-          OtpSections := OtpSections + '<div id="otp_' + HtmlEncode(UserKey) + '" style="display:none;border:1px solid #ccc;padding:10px;margin:10px 0">' +
+          OtpSections := OtpSections + '<div style="border:1px solid #ccc;padding:10px;margin:10px 0">' +
             '<h3>' + T('otp-for-user', Translations) + ': ' + HtmlEncode(UserKey) + '</h3>' +
             '<form method="POST"><table border="0" cellpadding="5">' +
+            BuildAuthHiddenFields(ARequest, 'people-enable-otp-' + UserKey) +
             '<tr><td>' + T('email-optional', Translations) + ':</td><td><input type="text" name="email" size="30" value="' + HtmlEncode(UserKey) + '"></td></tr>' +
             '<tr><td colspan="2"><small>' + T('otp-email-help', Translations) + '</small></td></tr>' +
             '<tr><td colspan="2"><input type="hidden" name="action" value="enable_otp">' +
             '<input type="hidden" name="otpuser" value="' + HtmlEncode(UserKey) + '">' +
             '<input type="submit" value="' + T('enable-otp', Translations) + '"></td></tr>' +
-            '</table></form><p><a href="#" onclick="document.getElementById(''otp_' + HtmlEncode(UserKey) + ''').style.display=''none''; return false;">[' + T('close', Translations) + ']</a></p></div>'
+            '</table></form><p>' + BuildActionButton(ARequest, '/people', 'people-close-otp-' + UserKey, T('close', Translations)) + '</p></div>'
         else
-          OtpSections := OtpSections + '<div id="otp_' + HtmlEncode(UserKey) + '" style="display:none;border:1px solid #ccc;padding:10px;margin:10px 0">' +
+          OtpSections := OtpSections + '<div style="border:1px solid #ccc;padding:10px;margin:10px 0">' +
             '<h3>' + T('otp-for-user', Translations) + ': ' + HtmlEncode(UserKey) + '</h3>' +
             '<p><font color="green">✓ ' + T('otp-enabled', Translations) + '</font></p>' +
             '<p><small>' + T('otp-url-stored', Translations) + '</small></p>' +
             '<form method="POST" style="display:inline">' +
+            BuildAuthHiddenFields(ARequest, 'people-disable-otp-' + UserKey) +
             '<input type="hidden" name="action" value="disable_otp">' +
             '<input type="hidden" name="otpuser" value="' + HtmlEncode(UserKey) + '">' +
             '<input type="submit" value="' + T('disable-otp', Translations) + '"></form>' +
-            '<p><a href="#" onclick="document.getElementById(''otp_' + HtmlEncode(UserKey) + ''').style.display=''none''; return false;">[' + T('close', Translations) + ']</a></p></div>';
+            '<p>' + BuildActionButton(ARequest, '/people', 'people-close-otp-' + UserKey, T('close', Translations)) + '</p></div>';
       end;
     end;
+
+    HeaderRight := '<strong>' + HtmlEncode(Username) + '</strong> | ' +
+      BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' +
+      BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations));
+    MainNav := BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)) + ' ' +
+      BuildActionButton(ARequest, '/settings', 'nav-settings', T('settings', Translations)) + ' ' +
+      BuildActionButton(ARequest, '/people', 'nav-people', T('people', Translations)) + ' ' +
+      BuildActionButton(ARequest, '/activity', 'nav-activity', T('activity', Translations));
 
     Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
       '<html><head><meta charset="UTF-8"><title>' + T('people', Translations) + ' - Omi Server</title></head>' +
       '<body bgcolor="#f0f0f0">' +
       '<table width="100%" border="0" cellpadding="5">' +
-      '<tr><td><h1>' + T('user-management', Translations) + '</h1></td><td align="right"><small><strong>' + HtmlEncode(Username) + '</strong> | <a href="/language">[' + T('language', Translations) + ']</a> | <a href="/logout">[' + T('logout', Translations) + ']</a></small></td></tr>' +
+      '<tr><td><h1>' + T('user-management', Translations) + '</h1></td><td align="right"><small>' + HeaderRight + '</small></td></tr>' +
       '</table>' +
-      '<p><a href="/">[' + T('home', Translations) + ']</a> | <a href="/settings">[' + T('settings', Translations) + ']</a> | <a href="/people">[' + T('people', Translations) + ']</a></p>' +
+      '<p>' + MainNav + '</p>' +
       '<hr>' +
       ifthen(SuccessMsg <> '', '<p><font color="green"><strong>' + HtmlEncode(SuccessMsg) + '</strong></font></p>', '') +
       ifthen(ErrorMsg <> '', '<p><font color="red"><strong>' + HtmlEncode(ErrorMsg) + '</strong></font></p>', '') +
@@ -2200,14 +2951,13 @@ begin
       '</table>' +
       '<h2>' + T('add-new-user', Translations) + '</h2>' +
       '<form method="POST"><table border="0" cellpadding="5">' +
+      BuildAuthHiddenFields(ARequest, 'people-add-user') +
       '<tr><td>' + T('username', Translations) + ':</td><td><input type="text" name="newuser" size="30" required></td></tr>' +
       '<tr><td>' + T('password', Translations) + ':</td><td><input type="password" name="newpass" size="30" required></td></tr>' +
-      '<tr><td colspan="2"><input type="hidden" name="action" value="add"><input type="submit" value="' + T('add-user', Translations) + '"></td></tr>' +
+      '<tr><td colspan="2"><input type="hidden" name="action" value="add"><input type="submit" value="' + T('save', Translations) + '"></td></tr>' +
       '</table></form>' +
-      '<h2>' + T('edit-user-password', Translations) + '</h2>' +
-      EditSections +
-      '<h2>' + T('manage-otp', Translations) + '</h2>' +
-      OtpSections +
+      ifthen(EditSections <> '', '<h2>' + T('edit-user-password', Translations) + '</h2>' + EditSections, '') +
+      ifthen(OtpSections <> '', '<h2>' + T('manage-otp', Translations) + '</h2>' + OtpSections, '') +
       '<hr><p><small>Omi Server</small></p>' +
       '</body></html>';
 
@@ -2287,6 +3037,12 @@ var
   Query: string;
   Output: string;
   FileDir: string;
+  SessionId: string;
+  PostedAuthAction: string;
+  NavTarget: string;
+  HeaderRight: string;
+  MainNav: string;
+  CurrentPath: string;
 
   function RepoToRoot(const Name: string): string;
   begin
@@ -2310,7 +3066,7 @@ begin
   if RepoName = '' then
   begin
     AResponse.Code := 404;
-    AResponse.Content := 'Repository not found';
+    AResponse.Content := T('error', FallbackTranslations);
     Exit;
   end;
 
@@ -2332,11 +3088,13 @@ begin
   if not FileExists(DbPath) then
   begin
     AResponse.Code := 404;
-    AResponse.Content := 'Repository not found';
+    AResponse.Content := T('error', FallbackTranslations);
     Exit;
   end;
 
   Username := GetUsernameFromRequest(ARequest);
+  SessionId := GetSessionIdFromRequest(ARequest);
+  CurrentPath := PathInfo;
   Translations := LoadTranslations('en');
   try
     DownloadFlag := ARequest.QueryFields.Values['download'];
@@ -2362,6 +3120,26 @@ begin
     ErrorMsg := '';
     UploadMsg := '';
     UploadError := '';
+
+    if (ARequest.Method = 'POST') and (Username <> '') then
+    begin
+      PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
+      if (PostedAuthAction <> '') and not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
+      begin
+        AResponse.Code := 403;
+        AResponse.ContentType := 'text/plain; charset=UTF-8';
+        AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
+        Exit;
+      end;
+      NavTarget := GetFormFieldValue(ARequest, 'nav_target');
+      if NavTarget <> '' then
+      begin
+        AResponse.Code := 302;
+        AResponse.Location := NavTarget;
+        AResponse.Content := '';
+        Exit;
+      end;
+    end;
 
     if IsFile then
     begin
@@ -2410,9 +3188,9 @@ begin
         '<body bgcolor="#f0f0f0">' +
         '<table width="100%" border="0" cellpadding="5">' +
         '<tr><td><h1>' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small>' +
-        ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> | <a href="/language">[' + T('language', Translations) + ']</a> | <a href="/logout">[' + T('logout', Translations) + ']</a>', '<a href="/sign-in">[' + T('login', Translations) + ']</a>') +
+        ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') +
         '</small></td></tr></table>' +
-        '<p><a href="/">[' + T('home', Translations) + ']</a> | <a href="?log=' + HtmlEncode(RepoName) + '">[' + T('log', Translations) + ']</a> | <a href="' + RepoToRoot(RepoName) + '">[' + T('repository-root', Translations) + ']</a></p>' +
+        '<p>' + BuildNavTargetButton(ARequest, CurrentPath, '/', 'repo-nav-home', T('home', Translations)) + ' ' + BuildNavTargetButton(ARequest, CurrentPath, '/?log=' + HtmlEncode(RepoName), 'repo-nav-log', T('log', Translations)) + ' ' + BuildNavTargetButton(ARequest, CurrentPath, RepoToRoot(RepoName), 'repo-nav-root', T('repository-root', Translations)) + '</p>' +
         '<h2>' + T('file', Translations) + ': ' + HtmlEncode(RepoPath) + '</h2>';
 
       if ShowDeleteConfirm then
@@ -2421,8 +3199,8 @@ begin
           '<p><font color="red"><strong>⚠️ ' + T('confirm-delete', Translations) + '</strong></font></p>' +
           '<p>' + T('delete-file-question', Translations) + ' <strong>' + HtmlEncode(RepoPath) + '</strong>?</p>' +
           '<p>' + T('delete-file-warning', Translations) + '</p>' +
-          '<form method="POST"><input type="hidden" name="delete_confirm" value="1">' +
-          '<input type="submit" value="' + T('confirm-delete', Translations) + '"> | <a href="?">[' + T('cancel', Translations) + ']</a></form>' +
+          '<form method="POST">' + BuildAuthHiddenFields(ARequest, 'repo-file-confirm-delete') + '<input type="hidden" name="delete_confirm" value="1">' +
+          '<input type="submit" value="' + T('confirm-delete', Translations) + '"> | <button type="submit" name="nav_target" value="' + HtmlEncode(CurrentPath) + '">' + T('cancel', Translations) + '</button></form>' +
           '</div><hr>';
       end
       else
@@ -2430,9 +3208,9 @@ begin
         if Username <> '' then
         begin
           Html := Html + '<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">' +
-            '<div><form method="GET" style="display:inline"><input type="submit" formaction="?download=1" value="' + T('download', Translations) + '"></form>' +
-            ifthen(IsText, '<form method="GET" style="display:inline"><input type="hidden" name="edit" value="1"><input type="submit" value="' + T('edit', Translations) + '"></form>', '') +
-            '</div><div><form method="GET" style="display:inline"><input type="hidden" name="delete" value="1"><input type="submit" value="' + T('delete', Translations) + '"></form></div></div>';
+            '<div>' + BuildNavTargetButton(ARequest, CurrentPath, CurrentPath + '?download=1', 'repo-file-download', T('download', Translations)) +
+            ifthen(IsText, BuildNavTargetButton(ARequest, CurrentPath, CurrentPath + '?edit=1', 'repo-file-edit', T('edit', Translations)), '') +
+            '</div><div>' + BuildNavTargetButton(ARequest, CurrentPath, CurrentPath + '?delete=1', 'repo-file-delete-prompt', T('delete', Translations)) + '</div></div>';
         end;
       end;
 
@@ -2446,9 +3224,10 @@ begin
       if InEdit then
       begin
         Html := Html + '<form method="POST">' +
+          BuildAuthHiddenFields(ARequest, 'repo-file-save') +
           '<textarea name="file_content" rows="20" cols="80" style="width:100%; max-width:800px; font-family:monospace; box-sizing:border-box;">' + HtmlEncode(FileContent) + '</textarea><br><br>' +
           '<input type="submit" name="save_file" value="Save"> ' +
-          '<input type="submit" formaction="?" formmethod="GET" value="Cancel">' +
+          '<button type="submit" name="nav_target" value="' + HtmlEncode(CurrentPath) + '">Cancel</button>' +
           '</form>';
       end
       else if IsText then
@@ -2538,7 +3317,7 @@ begin
             '</div>';
         end
         else
-          Html := Html + '<p><strong>Binary file (' + IntToStr(Length(FileContent)) + ' bytes)</strong></p>';
+          Html := Html + '<p><strong>' + T('file', Translations) + ' (' + IntToStr(Length(FileContent)) + ' bytes)</strong></p>';
       end;
 
       Html := Html + '<hr><p><small>Omi Server</small></p></body></html>';
@@ -2582,7 +3361,7 @@ begin
           else
             EntryPath := Target;
           if DeleteFileFromRepo(DbPath, EntryPath, Username) then
-            UploadMsg := 'File deleted'
+            UploadMsg := T('delete', Translations)
           else
             UploadError := T('file-delete-failed', Translations);
         end
@@ -2600,12 +3379,12 @@ begin
             if RepoPath <> '' then
               NewName := RepoPath + '/' + NewName;
             if RenameFileInRepo(DbPath, EntryPath, NewName, Username) then
-              UploadMsg := 'File renamed'
+              UploadMsg := T('save', Translations)
             else
-              UploadError := 'Failed to rename file';
+              UploadError := T('error', Translations);
           end
           else
-            UploadError := 'File name and new name are required';
+            UploadError := T('error', Translations);
         end
         else if Action = 'create_dir' then
         begin
@@ -2618,12 +3397,12 @@ begin
             else
               EntryPath := DirName + '/.omidir';
             if CommitFile(DbPath, EntryPath, '', Username, 'Create directory') then
-              UploadMsg := 'Directory created'
+              UploadMsg := T('create', Translations)
             else
-              UploadError := 'Failed to create directory';
+              UploadError := T('error', Translations);
           end
           else
-            UploadError := 'Directory name is required';
+            UploadError := T('error', Translations);
         end
         else if Action = 'create_file' then
         begin
@@ -2637,12 +3416,12 @@ begin
             else
               EntryPath := FileName;
             if CommitFile(DbPath, EntryPath, FileData, Username, 'Create file') then
-              UploadMsg := 'File created'
+              UploadMsg := T('create', Translations)
             else
-              UploadError := 'Failed to create file';
+              UploadError := T('error', Translations);
           end
           else
-            UploadError := 'File name is required';
+            UploadError := T('error', Translations);
         end
         else if (ARequest.Files.Count > 0) then
         begin
@@ -2657,12 +3436,12 @@ begin
               EntryPath := FileName;
             FileData := ReadFileToString(UploadFile.LocalFileName);
             if CommitFile(DbPath, EntryPath, FileData, Username, 'Upload file') then
-              UploadMsg := 'File uploaded successfully'
+              UploadMsg := T('upload', Translations)
             else
-              UploadError := 'Failed to upload file';
+              UploadError := T('error', Translations);
           end
           else
-            UploadError := 'Invalid filename';
+            UploadError := T('error', Translations);
         end;
 
         Files := GetLatestFiles(DbPath, RepoPath);
@@ -2678,7 +3457,7 @@ begin
         RepoRootLink := RepoToRoot(RepoName);
         if ParentPath <> '' then
           RepoRootLink := RepoRootLink + '/' + ParentPath;
-        TableRows := TableRows + '<tr><td><a href="' + RepoRootLink + '">' + T('directory', Translations) + ' ..</a></td><td>-</td><td>-</td><td>-</td></tr>';
+        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, RepoRootLink, 'repo-dir-parent', T('directory', Translations) + ' ..') + '</td><td>-</td><td>-</td><td>-</td></tr>';
       end;
 
       for I := 0 to DirList.Count - 1 do
@@ -2688,7 +3467,7 @@ begin
         if RepoPath <> '' then
           EntryPath := EntryPath + '/' + RepoPath;
         EntryPath := EntryPath + '/' + DisplayName;
-        TableRows := TableRows + '<tr><td><a href="' + EntryPath + '">' + T('directory', Translations) + ' ' + HtmlEncode(DisplayName) + '/</a></td><td>-</td><td>-</td><td>-</td></tr>';
+        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, EntryPath, 'repo-dir-open-' + IntToStr(I), T('directory', Translations) + ' ' + DisplayName + '/') + '</td><td>-</td><td>-</td><td>-</td></tr>';
       end;
 
       for I := 0 to FileList.Count - 1 do
@@ -2716,14 +3495,13 @@ begin
         EditButton := '';
         if IsTextFile then
         begin
-          EditButton := '<form method="GET" action="' + EntryPath + '" style="display:inline">' +
-            '<input type="hidden" name="edit" value="1">' +
-            '<input type="submit" value="' + T('edit', Translations) + '"></form>';
+          EditButton := BuildNavTargetButton(ARequest, CurrentPath, EntryPath + '?edit=1', 'repo-file-open-edit-' + IntToStr(I), T('edit', Translations));
         end;
         RowActions := '<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">' +
             '<div>' +
             EditButton +
             '<form method="POST" style="display:inline">' +
+            BuildAuthHiddenFields(ARequest, 'repo-rename-' + DisplayName) +
             '<input type="hidden" name="action" value="rename_file">' +
             '<input type="hidden" name="target" value="' + HtmlEncode(DisplayName) + '">' +
             '<input type="text" name="new_name" size="12" placeholder="' + T('new-name', Translations) + '">' +
@@ -2731,13 +3509,14 @@ begin
             '</div>' +
             '<div>' +
             '<form method="POST" style="display:inline">' +
+            BuildAuthHiddenFields(ARequest, 'repo-delete-' + DisplayName) +
             '<input type="hidden" name="action" value="delete_file">' +
             '<input type="hidden" name="target" value="' + HtmlEncode(DisplayName) + '">' +
             '<input type="submit" value="' + T('delete', Translations) + '"></form>' +
             '</div>' +
             '</div>';
         end;
-        TableRows := TableRows + '<tr><td><a href="' + EntryPath + '">[' + HtmlEncode(GetFileTypeLabel(DisplayName)) + '] ' + HtmlEncode(DisplayName) + '</a></td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
+        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, EntryPath, 'repo-file-open-' + IntToStr(I), '[' + GetFileTypeLabel(DisplayName) + '] ' + DisplayName) + '</td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
       end;
 
       if TableRows = '' then
@@ -2759,7 +3538,7 @@ begin
           ParentUrl := RepoToRoot(RepoName);
           if ParentPath <> '' then
             ParentUrl := ParentUrl + '/' + ParentPath;
-          ParentDirRow := '<tr><td><a href="' + ParentUrl + '">' + T('directory', Translations) + ' ..</a></td><td>-</td><td>-</td><td>-</td></tr>';
+          ParentDirRow := '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, ParentUrl, 'repo-parent-row', T('directory', Translations) + ' ..') + '</td><td>-</td><td>-</td><td>-</td></tr>';
         end;
       end;
 
@@ -2768,9 +3547,9 @@ begin
         '<body bgcolor="#f0f0f0">' +
         '<table width="100%" border="0" cellpadding="5">' +
         '<tr><td><h1>' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small>' +
-        ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> | <a href="/language">[' + T('language', Translations) + ']</a> | <a href="/logout">[' + T('logout', Translations) + ']</a>', '<a href="/sign-in">[' + T('login', Translations) + ']</a>') +
+        ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong> ' + BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)) + ' ' + BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), '<a href="/sign-in">' + T('login', Translations) + '</a>') +
         '</small></td></tr></table>' +
-        '<p><a href="/">[' + T('home', Translations) + ']</a> | <a href="?log=' + HtmlEncode(RepoName) + '">[' + T('log', Translations) + ']</a></p>' +
+        '<p>' + BuildNavTargetButton(ARequest, CurrentPath, '/', 'repo-nav-home-list', T('home', Translations)) + ' ' + BuildNavTargetButton(ARequest, CurrentPath, '/?log=' + HtmlEncode(RepoName), 'repo-nav-log-list', T('log', Translations)) + '</p>' +
         '<h2>' + T('directory', Translations) + ': /' + HtmlEncode(RepoPath) + '</h2>' +
         '<hr>' +
         '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
@@ -2783,19 +3562,19 @@ begin
         ifthen(UploadError <> '', '<p><font color="red"><strong>' + HtmlEncode(UploadError) + '</strong></font></p>', '') +
         ifthen(Username <> '',
           '<p><b>' + T('create-directory', Translations) + '</b></p>' +
-          '<form method="POST"><input type="text" name="dir_name" size="30" placeholder="new-folder">' +
+          '<form method="POST">' + BuildAuthHiddenFields(ARequest, 'repo-create-dir') + '<input type="text" name="dir_name" size="30" placeholder="new-folder">' +
           '<input type="hidden" name="action" value="create_dir">' +
           '<input type="submit" value="' + T('create-directory', Translations) + '"></form>' +
           '<p><b>' + T('create-text-file', Translations) + '</b></p>' +
-          '<form method="POST"><input type="text" name="file_name" size="30" placeholder="notes.txt"><br>' +
+          '<form method="POST">' + BuildAuthHiddenFields(ARequest, 'repo-create-file') + '<input type="text" name="file_name" size="30" placeholder="notes.txt"><br>' +
           '<textarea name="file_content" rows="6" cols="60" placeholder="' + T('write-file-contents', Translations) + '"></textarea><br>' +
           '<input type="hidden" name="action" value="create_file">' +
           '<input type="submit" value="' + T('create-file', Translations) + '"></form>' +
           '<p><b>' + T('upload-file-directory', Translations) + '</b></p>' +
-          '<form method="POST" enctype="multipart/form-data">' +
+          '<form method="POST" enctype="multipart/form-data">' + BuildAuthHiddenFields(ARequest, 'repo-upload-file') +
           '<input type="file" name="upload_file" required>' +
           '<input type="submit" value="' + T('upload', Translations) + '"></form>',
-          '<p><small><a href="/sign-in">[' + T('login', Translations) + ']</a> ' + T('login-to-upload-files', Translations) + '</small></p>') +
+          '<p><small><a href="/sign-in">' + T('login', Translations) + '</a> ' + T('login-to-upload-files', Translations) + '</small></p>') +
         '<hr><p><small>Omi Server</small></p>' +
         '</body></html>';
 
@@ -2812,10 +3591,15 @@ begin
 end;
 
 begin
+  DefaultSystemCodePage := CP_UTF8;
+  FallbackTranslations := LoadTranslations('en');
   Settings := LoadSettings;
   Users := TStringList.Create;
   Sessions := TStringList.Create;
+  SessionMeta := TStringList.Create;
+  SessionMeta.NameValueSeparator := '=';
   Sessions.NameValueSeparator := '=';
+  ActivityDbReady := False;
 
   WriteLn('Omi Server v', VERSION);
   WriteLn('Port: ', Settings.Port);
@@ -2841,6 +3625,8 @@ begin
   HTTPRouter.RegisterRoute('/settings', rmPost, @SettingsEndpoint);
   HTTPRouter.RegisterRoute('/language', rmGet, @LanguageEndpoint);
   HTTPRouter.RegisterRoute('/language', rmPost, @LanguageEndpoint);
+  HTTPRouter.RegisterRoute('/activity', rmGet, @ActivityEndpoint);
+  HTTPRouter.RegisterRoute('/activity', rmPost, @ActivityEndpoint);
   HTTPRouter.RegisterRoute('/people', rmGet, @PeopleEndpoint);
   HTTPRouter.RegisterRoute('/people', rmPost, @PeopleEndpoint);
   HTTPRouter.RegisterRoute('/*', rmGet, @RepoEndpoint);
@@ -2851,4 +3637,7 @@ begin
 
   Users.Free;
   Sessions.Free;
+  SessionMeta.Free;
+  if Assigned(FallbackTranslations) then
+    FallbackTranslations.Free;
 end.

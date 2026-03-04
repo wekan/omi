@@ -4,6 +4,22 @@
  * Manages SQLite repository files with authentication
  */
 
+ini_set('default_charset', 'UTF-8');
+if (!headers_sent()) {
+    header('Content-Type: text/html; charset=UTF-8');
+}
+
+ini_set('session.cookie_path', '/');
+ini_set('session.use_only_cookies', '0');
+ini_set('session.use_cookies', '0');
+ini_set('session.cookie_secure', '0');
+ini_set('session.cookie_httponly', '1');
+
+$sessionKey = session_name();
+if (isset($_REQUEST[$sessionKey]) && is_string($_REQUEST[$sessionKey]) && $_REQUEST[$sessionKey] !== '') {
+    session_id($_REQUEST[$sessionKey]);
+}
+
 session_start();
 
 // Configuration
@@ -12,6 +28,8 @@ define('SETTINGS_FILE', __DIR__ . '/../settings.txt');
 define('USERS_FILE', __DIR__ . '/../users.txt');
 define('LOCKED_USERS_FILE', __DIR__ . '/../usersbruteforcelocked.txt');
 define('FAILED_ATTEMPTS_FILE', __DIR__ . '/../usersfailedattempts.txt');
+define('ACTIVITY_LOG_FILE', __DIR__ . '/../activity.log');
+define('SESSION_INVALIDATE_FILE', __DIR__ . '/../session_invalidate_flags.json');
 
 // Ensure repos directory exists
 if (!is_dir(REPOS_DIR)) {
@@ -178,11 +196,66 @@ function loadTranslations($language = 'en') {
 }
 
 // Get translation
+function resolveTranslationKey($key) {
+    $normalized = strtolower((string)$key);
+    $explicitMap = [
+        'language-selection' => 'language',
+        'select-language' => 'language',
+        'save-language' => 'save',
+        'language-updated' => 'save',
+        'list-repos-json' => 'repositories',
+        'settings-update-failed' => 'error',
+        'repository-created' => 'create',
+        'repository-create-failed' => 'error',
+        'file-saved-success' => 'save',
+        'file-save-failed' => 'error',
+        'file-delete-failed' => 'error',
+        'invalid-action-token' => 'error',
+        'invalid-logout-token' => 'error'
+    ];
+
+    if (isset($explicitMap[$normalized])) {
+        return $explicitMap[$normalized];
+    }
+
+    if (strpos($normalized, 'create') !== false) return 'create';
+    if (strpos($normalized, 'delete') !== false) return 'delete';
+    if (strpos($normalized, 'upload') !== false) return 'upload';
+    if (strpos($normalized, 'download') !== false) return 'download';
+    if (strpos($normalized, 'repository') !== false) return 'repository';
+    if (strpos($normalized, 'directory') !== false || $normalized === 'root') return 'repository';
+    if ($normalized === 'files' || $normalized === 'no-files' || $normalized === 'no-files-directory') return 'file';
+    if (strpos($normalized, 'file') !== false) return 'file';
+    if (strpos($normalized, 'otp') !== false) return 'otp';
+    if (strpos($normalized, 'password') !== false) return 'password';
+    if (strpos($normalized, 'email') !== false) return 'email';
+    if (strpos($normalized, 'name') !== false) return 'name';
+    if (strpos($normalized, 'user') !== false) return 'username';
+    if (strpos($normalized, 'author') !== false || strpos($normalized, 'message') !== false || strpos($normalized, 'image') !== false) return 'activity';
+    if (strpos($normalized, 'commit') !== false || strpos($normalized, 'activity') !== false) return 'activity';
+    if (strpos($normalized, 'login') !== false) return 'login';
+    if (strpos($normalized, 'logout') !== false) return 'logout';
+    if (strpos($normalized, 'setting') !== false) return 'settings';
+    if ($normalized === 'update') return 'save';
+    if ($normalized === 'total') return 'list';
+    if (strpos($normalized, 'enable') !== false || strpos($normalized, 'disable') !== false || strpos($normalized, 'updated') !== false || strpos($normalized, 'saved') !== false) return 'save';
+    if (strpos($normalized, 'failed') !== false || strpos($normalized, 'invalid') !== false || strpos($normalized, 'not-implemented') !== false) return 'error';
+
+    return $key;
+}
+
 function t($key, $translations = []) {
     if (isset($translations[$key])) {
-        return $translations[$key];
+        $value = $translations[$key];
+        if ($value !== $key) {
+            return $value;
+        }
     }
-    return $key;
+    $resolvedKey = resolveTranslationKey($key);
+    if (isset($translations[$resolvedKey])) {
+        return $translations[$resolvedKey];
+    }
+    return $resolvedKey;
 }
 
 // Generate TOTP secret
@@ -360,14 +433,271 @@ function authenticate($username, $password, $otpCode = '') {
     return true;
 }
 
+function getClientIp() {
+    $xff = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
+    if ($xff !== '') {
+        $parts = explode(',', $xff);
+        return trim($parts[0]);
+    }
+    return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+}
+
+function getUserAgent() {
+    return $_SERVER['HTTP_USER_AGENT'] ?? '';
+}
+
+function hashText($value) {
+    return hash('sha256', (string)$value);
+}
+
+function getLogoutIdleSeconds() {
+    $settings = loadSettings();
+    $hours = intval($settings['LOGOUT_ON_HOURS'] ?? 0);
+    if ($hours > 0) {
+        return $hours * 3600;
+    }
+    return 24 * 3600;
+}
+
+function loadInvalidateFlags() {
+    if (!file_exists(SESSION_INVALIDATE_FILE)) {
+        return [];
+    }
+    $json = file_get_contents(SESSION_INVALIDATE_FILE);
+    $data = json_decode($json, true);
+    return is_array($data) ? $data : [];
+}
+
+function saveInvalidateFlags($flags) {
+    file_put_contents(SESSION_INVALIDATE_FILE, json_encode($flags), LOCK_EX);
+}
+
+function logActivity($username, $action, $status, $detail, $clickCounter = -1) {
+    $row = [
+        'ts' => time(),
+        'username' => (string)$username,
+        'sessionId' => session_id(),
+        'ip' => getClientIp(),
+        'userAgent' => getUserAgent(),
+        'action' => (string)$action,
+        'status' => (string)$status,
+        'detail' => (string)$detail,
+        'clickCounter' => intval($clickCounter),
+    ];
+    file_put_contents(ACTIVITY_LOG_FILE, json_encode($row) . "\n", FILE_APPEND | LOCK_EX);
+}
+
+function initSessionMeta($username) {
+    $users = loadUsers();
+    $passwordRef = isset($users[$username]) ? hashText($users[$username]['password'] ?? '') : '';
+    $_SESSION['session_meta'] = [
+        'username' => $username,
+        'passwordRef' => $passwordRef,
+        'loginAt' => time(),
+        'lastActivityAt' => time(),
+        'ip' => getClientIp(),
+        'userAgent' => getUserAgent(),
+        'clickCounter' => 0,
+    ];
+}
+
+function invalidateSessionsForUserPassword($username, $passwordRef) {
+    $flags = loadInvalidateFlags();
+    $flags[$username . '|' . $passwordRef] = time();
+    saveInvalidateFlags($flags);
+}
+
+function ensureSessionContext() {
+    if (!isset($_SESSION['username']) || !isset($_SESSION['session_meta'])) {
+        return false;
+    }
+
+    $meta = $_SESSION['session_meta'];
+    $username = $_SESSION['username'];
+    if (($meta['username'] ?? '') !== $username) {
+        return false;
+    }
+
+    $flags = loadInvalidateFlags();
+    $flagKey = $username . '|' . ($meta['passwordRef'] ?? '');
+    if (($flags[$flagKey] ?? 0) > intval($meta['loginAt'] ?? 0)) {
+        session_destroy();
+        return false;
+    }
+
+    if ((time() - intval($meta['lastActivityAt'] ?? time())) > getLogoutIdleSeconds()) {
+        logActivity($username, 'session-check', 'idle-timeout', 'idle timeout reached', intval($meta['clickCounter'] ?? 0));
+        session_destroy();
+        return false;
+    }
+
+    if (($meta['ip'] ?? '') !== getClientIp() || ($meta['userAgent'] ?? '') !== getUserAgent()) {
+        logActivity($username, 'session-check', 'context-mismatch', 'ip/user-agent mismatch', intval($meta['clickCounter'] ?? 0));
+        invalidateSessionsForUserPassword($username, $meta['passwordRef'] ?? '');
+        session_destroy();
+        return false;
+    }
+
+    $_SESSION['session_meta']['lastActivityAt'] = time();
+    return true;
+}
+
+function buildActionHash($actionName, $counter) {
+    $meta = $_SESSION['session_meta'] ?? [];
+    return hashText(
+        $actionName . '|' . ($meta['username'] ?? '') . '|' . ($meta['passwordRef'] ?? '') . '|' .
+        ($meta['ip'] ?? '') . '|' . ($meta['userAgent'] ?? '') . '|' . intval($meta['loginAt'] ?? 0) . '|' .
+        intval($counter) . '|' . session_id()
+    );
+}
+
+function buildAuthHiddenFields($actionName) {
+    if (!isset($_SESSION['username']) || !isset($_SESSION['session_meta'])) {
+        return '';
+    }
+    $counter = intval($_SESSION['session_meta']['clickCounter'] ?? 0);
+    $hash = buildActionHash($actionName, $counter);
+    return '<input type="hidden" name="' . htmlspecialchars(session_name()) . '" value="' . htmlspecialchars(session_id()) . '">' .
+           '<input type="hidden" name="auth_action" value="' . htmlspecialchars($actionName) . '">' .
+           '<input type="hidden" name="auth_counter" value="' . $counter . '">' .
+           '<input type="hidden" name="auth_hash" value="' . htmlspecialchars($hash) . '">';
+}
+
+function verifyAndConsumeActionToken($requiredAction = '') {
+    if (!isset($_SESSION['username']) || !isset($_SESSION['session_meta'])) {
+        return false;
+    }
+    $action = $_POST['auth_action'] ?? '';
+    $hash = $_POST['auth_hash'] ?? '';
+    $counter = intval($_POST['auth_counter'] ?? -1);
+    $expectedCounter = intval($_SESSION['session_meta']['clickCounter'] ?? 0);
+
+    if ($action === '' || $hash === '') return false;
+    if ($requiredAction !== '' && $requiredAction !== $action) return false;
+    if ($counter !== $expectedCounter) return false;
+
+    $expectedHash = buildActionHash($action, $counter);
+    if (!hash_equals($expectedHash, $hash)) return false;
+
+    $_SESSION['session_meta']['clickCounter'] = $expectedCounter + 1;
+    $_SESSION['session_meta']['lastActivityAt'] = time();
+    logActivity($_SESSION['username'] ?? '', $action, 'ok', 'token accepted', $_SESSION['session_meta']['clickCounter']);
+    return true;
+}
+
+function isAllowedNavTarget($target) {
+    return in_array($target, ['/', '/settings', '/people', '/language', '/activity', '/logout'], true);
+}
+
+function buildNavButton($target, $label) {
+    if (!isLoggedIn()) {
+        return '<a href="' . htmlspecialchars($target) . '">' . htmlspecialchars($label) . '</a>';
+    }
+    if (!isAllowedNavTarget($target)) {
+        $target = '/';
+    }
+    return '<form method="POST" action="/" style="display:inline;margin:0 2px;">' .
+           '<input type="hidden" name="nav_target" value="' . htmlspecialchars($target) . '">' .
+           buildAuthHiddenFields('nav-go') .
+           '<input type="submit" value="' . htmlspecialchars($label) . '">' .
+           '</form>';
+}
+
+function renderActivityPage($translations) {
+    if (!isLoggedIn()) {
+        header('Location: /sign-in');
+        exit;
+    }
+
+    $rows = [];
+    if (file_exists(ACTIVITY_LOG_FILE)) {
+        $lines = file(ACTIVITY_LOG_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $line) {
+            $item = json_decode($line, true);
+            if (is_array($item)) {
+                $rows[] = $item;
+            }
+        }
+    }
+
+    $groups = [];
+    foreach ($rows as $entry) {
+        $key = ($entry['ip'] ?? '') . '|' . ($entry['userAgent'] ?? '') . '|' . ($entry['action'] ?? '');
+        if (!isset($groups[$key])) {
+            $groups[$key] = [
+                'ip' => $entry['ip'] ?? '',
+                'userAgent' => $entry['userAgent'] ?? '',
+                'action' => $entry['action'] ?? '',
+                'count' => 0,
+                'lastTs' => 0,
+                'users' => [],
+            ];
+        }
+        $groups[$key]['count']++;
+        $groups[$key]['lastTs'] = max($groups[$key]['lastTs'], intval($entry['ts'] ?? 0));
+        $user = $entry['username'] ?? '';
+        if ($user !== '') {
+            $groups[$key]['users'][$user] = true;
+        }
+    }
+
+    usort($groups, function ($a, $b) {
+        return intval($b['lastTs']) <=> intval($a['lastTs']);
+    });
+
+    $username = getUsername();
+    ?>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title><?php echo t('activity', $translations); ?> - Omi Server</title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1><?php echo t('activity', $translations); ?></h1></td><td align="right"><small><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?></small></td></tr>
+</table>
+<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
+<hr>
+<table border="1" width="100%" cellpadding="5" cellspacing="0">
+<tr bgcolor="#333333">
+<th><font color="white"><?php echo t('actions', $translations); ?></font></th>
+<th><font color="white"><?php echo t('ip-address', $translations); ?></font></th>
+<th><font color="white"><?php echo t('user-agent', $translations); ?></font></th>
+<th><font color="white"><?php echo t('users', $translations); ?></font></th>
+<th><font color="white"><?php echo t('events', $translations); ?></font></th>
+<th><font color="white"><?php echo t('last-unix', $translations); ?></font></th>
+</tr>
+<?php if (empty($groups)): ?>
+<tr><td colspan="6"><?php echo t('no-activity-yet', $translations); ?></td></tr>
+<?php else: ?>
+<?php foreach ($groups as $group): ?>
+<tr>
+<td><?php echo htmlspecialchars($group['action']); ?></td>
+<td><?php echo htmlspecialchars($group['ip']); ?></td>
+<td><?php echo htmlspecialchars($group['userAgent']); ?></td>
+<td><?php echo htmlspecialchars(implode(', ', array_keys($group['users']))); ?></td>
+<td><?php echo intval($group['count']); ?></td>
+<td><?php echo $group['lastTs'] > 0 ? htmlspecialchars(gmdate('Y-m-d H:i:s', $group['lastTs'])) : ''; ?></td>
+</tr>
+<?php endforeach; ?>
+<?php endif; ?>
+</table>
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>
+    <?php
+    exit;
+}
+
 // Check if user is logged in
 function isLoggedIn() {
-    return isset($_SESSION['username']);
+    return ensureSessionContext();
 }
 
 // Get logged-in username
 function getUsername() {
-    return $_SESSION['username'] ?? null;
+    return ensureSessionContext() ? ($_SESSION['username'] ?? null) : null;
 }
 
 // Sanitize repository name to prevent directory traversal
@@ -686,16 +1016,7 @@ function browserSupportsSVG() {
     if (strpos($accept, 'image/svg+xml') !== false) {
         return true;
     }
-    
-    // Check User-Agent for known SVG-incapable browsers
-    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-    $oldBrowsers = ['MSIE 8', 'MSIE 7', 'MSIE 6', 'Netscape', 'Lynx'];
-    foreach ($oldBrowsers as $browser) {
-        if (stripos($userAgent, $browser) !== false) {
-            return false;
-        }
-    }
-    
+
     // Default to support (most modern browsers)
     return true;
 }
@@ -1019,7 +1340,7 @@ function deleteFile($db, $filename) {
     }
 }
 // Load translations based on user preference or browser language
-$username = $_SESSION['username'] ?? null;
+$username = getUsername();
 $userLanguage = null;
 $browserLanguage = null;
 
@@ -1042,9 +1363,29 @@ $translations = loadTranslations($selectedLanguage);
 
 // Handle /logout route
 if (strpos($_SERVER['REQUEST_URI'], '/logout') !== false) {
+    if (isset($_SESSION['username'])) {
+        logActivity($_SESSION['username'], 'logout', 'ok', 'logout success', -1);
+    }
     session_destroy();
     header('Location: /');
     exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nav_target']) && isLoggedIn()) {
+    if (verifyAndConsumeActionToken('nav-go')) {
+        $target = $_POST['nav_target'];
+        if (!isAllowedNavTarget($target)) {
+            $target = '/';
+        }
+        logActivity(getUsername() ?? '', 'nav-go', 'ok', 'navigate to ' . $target, intval($_SESSION['session_meta']['clickCounter'] ?? 0));
+        header('Location: ' . $target);
+        exit;
+    }
+    logActivity(getUsername() ?? '', 'nav-go', 'invalid-token', 'navigation denied', intval($_SESSION['session_meta']['clickCounter'] ?? 0));
+}
+
+if (strpos($_SERVER['REQUEST_URI'], '/activity') !== false) {
+    renderActivityPage($translations);
 }
 
 // Handle /sign-in route
@@ -1064,8 +1405,10 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-in') !== false) {
                 // Clear failed attempts on successful login
                 clearFailedAttempts($username);
                 $_SESSION['username'] = $username;
+                initSessionMeta($username);
+                logActivity($username, 'login', 'ok', 'login success', 0);
                 // Redirect to home
-                header('Location: /');
+                header('Location: /?' . urlencode(session_name()) . '=' . urlencode(session_id()));
                 exit;
             } elseif ($authResult === 'OTP_REQUIRED') {
                 $error = t('otp-required', $translations);
@@ -1099,7 +1442,7 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-in') !== false) {
 <body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
 <h1>Omi Server - <?php echo t('login', $translations); ?></h1>
 <table border="0" cellpadding="5">
-<tr><td colspan="2"><a href="/">[<?php echo t('home', $translations); ?>]</a></td></tr>
+<tr><td colspan="2"><a href="/"><?php echo t('home', $translations); ?></a></td></tr>
 </table>
 <?php if (isset($error)): ?>
 <p><font color="red"><strong><?php echo t('error', $translations); ?>: <?php echo htmlspecialchars($error); ?></strong></font></p>
@@ -1109,7 +1452,7 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-in') !== false) {
 <tr><td><?php echo t('username', $translations); ?>:</td><td><input type="text" name="username" size="30" required value="<?php echo isset($_POST['username']) ? htmlspecialchars($_POST['username']) : ''; ?>"></td></tr>
 <tr><td><?php echo t('password', $translations); ?>:</td><td><input type="password" name="password" size="30" required></td></tr>
 <?php if (isset($show_otp)): ?>
-<tr><td><?php echo t('otp', $translations); ?>:</td><td><input type="text" name="otp" size="10" maxlength="6" required pattern="[0-9]{6}" placeholder="6-digit code"></td></tr>
+<tr><td><?php echo t('otp', $translations); ?>:</td><td><input type="text" name="otp" size="10" maxlength="6" required pattern="[0-9]{6}" placeholder="<?php echo t('otp', $translations); ?>"></td></tr>
 <?php endif; ?>
 <tr><td colspan="2"><input type="submit" value="<?php echo t('login', $translations); ?>"></td></tr>
 </table>
@@ -1136,13 +1479,13 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-up') !== false) {
         $checkUsername = !empty($username) ? $username : 'signup_' . $ipAddress;
 
         if (isUserLocked($checkUsername)) {
-            $error = 'Too many sign-up attempts. Please try again later.';
+            $error = t('account-locked', $translations);
         } elseif (empty($username) || empty($password)) {
-            $error = 'Username and password are required';
+            $error = t('error', $translations);
         } elseif ($password !== $password2) {
-            $error = 'Passwords do not match';
+            $error = t('error', $translations);
         } elseif (strlen($username) < 3) {
-            $error = 'Username must be at least 3 characters';
+            $error = t('error', $translations);
         } else {
             // Check if user exists
             $users = loadUsers();
@@ -1150,15 +1493,15 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-up') !== false) {
                 // Record failed attempt for existing username
                 recordFailedAttempt($username);
                 checkBruteForce($username);
-                $error = 'User already exists';
+                $error = t('error', $translations);
             } else {
                 // Add new user with browser language detection
                 $browserLanguage = getBrowserLanguage();
                 $line = $username . ':' . $password . '::' . $browserLanguage . "\n";
                 if (file_put_contents(USERS_FILE, $line, FILE_APPEND | LOCK_EX)) {
-                    $success = 'Account created! You can now sign in.';
+                    $success = t('save', $translations);
                 } else {
-                    $error = 'Failed to create account';
+                    $error = t('error', $translations);
                 }
             }
         }
@@ -1173,10 +1516,10 @@ if (strpos($_SERVER['REQUEST_URI'], '/sign-up') !== false) {
 <body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
 <h1>Omi Server - <?php echo t('create-account', $translations); ?></h1>
 <table border="0" cellpadding="5">
-<tr><td colspan="2"><a href="/">[<?php echo t('home', $translations); ?>]</a></td></tr>
+<tr><td colspan="2"><a href="/"><?php echo t('home', $translations); ?></a></td></tr>
 </table>
 <?php if (isset($error)): ?>
-<p><font color="red"><strong><?php echo t('error', $translations); ?>: <?php echo htmlspecialchars($error); ?></strong></font></p>
+<p><font color="red"><strong><?php echo htmlspecialchars($error); ?></strong></font></p>
 <?php endif; ?>
 <?php if (isset($success)): ?>
 <p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p>
@@ -1206,6 +1549,10 @@ if (strpos($_SERVER['REQUEST_URI'], '/settings') !== false && strpos($_SERVER['R
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!verifyAndConsumeActionToken('settings-save')) {
+            $error = t('settings-update-failed', $translations) . ': invalid token';
+            logActivity(getUsername() ?? '', 'settings-save', 'invalid-token', 'settings update denied', intval($_SESSION['session_meta']['clickCounter'] ?? 0));
+        } else {
         $settings = [];
         foreach (['SQLITE', 'USERNAME', 'PASSWORD', 'REPOS', 'CURL'] as $key) {
             if (isset($_POST[$key])) {
@@ -1219,9 +1566,10 @@ if (strpos($_SERVER['REQUEST_URI'], '/settings') !== false && strpos($_SERVER['R
         }
 
         if (file_put_contents(SETTINGS_FILE, $content, LOCK_EX)) {
-            $success = t('settings-updated', $translations);
+            logActivity(getUsername() ?? '', 'settings-save', 'ok', 'settings updated', intval($_SESSION['session_meta']['clickCounter'] ?? 0));
         } else {
             $error = t('settings-update-failed', $translations);
+        }
         }
     }
 
@@ -1245,13 +1593,13 @@ if (strpos($_SERVER['REQUEST_URI'], '/settings') !== false && strpos($_SERVER['R
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo t('settings', $translations); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo t('settings', $translations); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?><?php else: ?><a href="/sign-in"><?php echo t('login', $translations); ?></a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="/settings">[<?php echo t('settings', $translations); ?>]</a> | <a href="/people">[<?php echo t('people', $translations); ?>]</a></p>
+<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
 <hr>
-<?php if (isset($success)): ?><p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p><?php endif; ?>
 <?php if (isset($error)): ?><p><font color="red"><strong><?php echo htmlspecialchars($error); ?></strong></font></p><?php endif; ?>
 <form method="POST">
+<?php echo buildAuthHiddenFields('settings-save'); ?>
 <table border="1" cellpadding="5">
 <tr><td>SQLITE executable:</td><td><input type="text" name="SQLITE" size="50" value="<?php echo htmlspecialchars($settings['SQLITE'] ?? 'sqlite'); ?>"></td></tr>
 <tr><td>USERNAME:</td><td><input type="text" name="USERNAME" size="50" value="<?php echo htmlspecialchars($settings['USERNAME'] ?? ''); ?>"></td></tr>
@@ -1281,6 +1629,10 @@ if (strpos($_SERVER['REQUEST_URI'], '/language') !== false) {
     $currentLanguage = $users[$username]['language'] ?? 'en';
     
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!verifyAndConsumeActionToken('language-save')) {
+            $success = null;
+            logActivity(getUsername() ?? '', 'language-save', 'invalid-token', 'language update denied', intval($_SESSION['session_meta']['clickCounter'] ?? 0));
+        } else {
         $newLanguage = $_POST['language'] ?? 'en';
         
         // Update language in users array
@@ -1295,8 +1647,10 @@ if (strpos($_SERVER['REQUEST_URI'], '/language') !== false) {
             
             if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
                 $currentLanguage = $newLanguage;
-                $success = t('language-updated', $translations);
+                $success = t('save', $translations);
+                logActivity(getUsername() ?? '', 'language-save', 'ok', 'language updated to ' . $newLanguage, intval($_SESSION['session_meta']['clickCounter'] ?? 0));
             }
+        }
         }
     }
     
@@ -1321,21 +1675,19 @@ if (strpos($_SERVER['REQUEST_URI'], '/language') !== false) {
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html dir="<?php echo $dirAttr; ?>">
 <head>
-<title><?php echo t('language-selection', $translations); ?> - Omi Server</title>
+<title><?php echo t('language', $translations); ?> - Omi Server</title>
 </head>
 <body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Omi Server</h1></td><td align="right"><small><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a></small></td></tr>
+<tr><td><h1>Omi Server</h1></td><td align="right"><small><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?></small></td></tr>
 </table>
-<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="/people">[<?php echo t('people', $translations); ?>]</a> | <a href="/settings">[<?php echo t('settings', $translations); ?>]</a></p>
+<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
 <hr>
-<h2><?php echo t('select-language', $translations); ?></h2>
-<?php if (isset($success)): ?>
-<p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p>
-<?php endif; ?>
+<h2><?php echo t('language', $translations); ?></h2>
 <form method="POST">
+<?php echo buildAuthHiddenFields('language-save'); ?>
 <table border="1" cellpadding="5">
-<tr bgcolor="#333333"><th><font color="white">Language</font></th></tr>
+<tr bgcolor="#333333"><th><font color="white"><?php echo t('language', $translations); ?></font></th></tr>
 <?php foreach ($languages as $langCode => $langInfo): ?>
 <tr>
 <td><input type="radio" name="language" value="<?php echo htmlspecialchars($langCode); ?>" <?php echo ($currentLanguage === $langCode) ? 'checked' : ''; ?>> <?php echo htmlspecialchars($langInfo['name'] ?? $langCode); ?> (<?php echo htmlspecialchars($langCode); ?>) <?php echo ($langInfo['rtl'] ?? false) ? '(RTL)' : ''; ?></td>
@@ -1361,9 +1713,18 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
     }
 
     $users = loadUsers();
+    $openEditUser = '';
+    $openOtpUser = '';
 
     // Handle user operations
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $postedAction = $_POST['action'] ?? '';
+        $tokenAction = 'people-' . ($postedAction !== '' ? $postedAction : 'unknown');
+        if (!verifyAndConsumeActionToken($tokenAction)) {
+            $error = t('error', $translations) . ': ' . t('invalid-action-token', $translations);
+            logActivity(getUsername() ?? '', $tokenAction, 'invalid-token', 'people action denied', intval($_SESSION['session_meta']['clickCounter'] ?? 0));
+            $users = loadUsers();
+        } else {
         $action = $_POST['action'] ?? '';
 
         if ($action === 'add') {
@@ -1378,14 +1739,22 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
                         $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
                     }
                     if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
-                        $success = 'User added successfully';
+                        $success = t('save', $translations);
                     } else {
-                        $error = 'Failed to add user';
+                        $error = t('error', $translations);
                     }
                 } else {
-                    $error = 'User already exists';
+                    $error = t('error', $translations);
                 }
             }
+        } elseif ($action === 'open_edit') {
+            $openEditUser = $_POST['edituser'] ?? '';
+        } elseif ($action === 'open_otp') {
+            $openOtpUser = $_POST['otpuser'] ?? '';
+        } elseif ($action === 'close_edit') {
+            $openEditUser = '';
+        } elseif ($action === 'close_otp') {
+            $openOtpUser = '';
         } elseif ($action === 'delete') {
             $deluser = $_POST['deluser'] ?? '';
             if (isset($users[$deluser])) {
@@ -1395,9 +1764,9 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
                     $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
                 }
                 if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
-                    $success = 'User deleted successfully';
+                    $success = t('save', $translations);
                 } else {
-                    $error = 'Failed to delete user';
+                    $error = t('error', $translations);
                 }
             }
         } elseif ($action === 'update') {
@@ -1410,9 +1779,9 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
                     $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
                 }
                 if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
-                    $success = 'User updated successfully';
+                    $success = t('save', $translations);
                 } else {
-                    $error = 'Failed to update user';
+                    $error = t('error', $translations);
                 }
             }
         } elseif ($action === 'enable_otp') {
@@ -1428,10 +1797,10 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
                     $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
                 }
                 if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
-                    $success = 'OTP enabled successfully';
+                    $success = t('save', $translations);
                     $_SESSION['otp_setup'] = $otpauth;
                 } else {
-                    $error = 'Failed to enable OTP';
+                    $error = t('error', $translations);
                 }
             }
         } elseif ($action === 'disable_otp') {
@@ -1443,14 +1812,15 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
                     $userContent .= $u . ':' . $data['password'] . ':' . $data['otp'] . "\n";
                 }
                 if (file_put_contents(USERS_FILE, $userContent, LOCK_EX)) {
-                    $success = 'OTP disabled successfully';
+                    $success = t('save', $translations);
                 } else {
-                    $error = 'Failed to disable OTP';
+                    $error = t('error', $translations);
                 }
             }
         }
 
         $users = loadUsers();
+        }
     }
 
     ?>
@@ -1461,9 +1831,9 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo t('user-management', $translations); ?></h1></td><td align="right"><small><strong><?php echo htmlspecialchars(getUsername()); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a></small></td></tr>
+<tr><td><h1><?php echo t('user-management', $translations); ?></h1></td><td align="right"><small><strong><?php echo htmlspecialchars(getUsername()); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?></small></td></tr>
 </table>
-<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="/settings">[<?php echo t('settings', $translations); ?>]</a> | <a href="/people">[<?php echo t('people', $translations); ?>]</a></p>
+<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
 <hr>
 <?php if (isset($success)): ?><p><font color="green"><strong><?php echo htmlspecialchars($success); ?></strong></font></p><?php endif; ?>
 <?php if (isset($error)): ?><p><font color="red"><strong><?php echo htmlspecialchars($error); ?></strong></font></p><?php endif; ?>
@@ -1477,12 +1847,23 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
 <td>
 <form method="POST" style="display:inline">
 <input type="hidden" name="action" value="delete">
+<?php echo buildAuthHiddenFields('people-delete'); ?>
 <input type="hidden" name="deluser" value="<?php echo htmlspecialchars($u); ?>">
-<input type="submit" value="<?php echo t('delete', $translations); ?>" onclick="return confirm('Delete user <?php echo htmlspecialchars($u); ?>?')">
+<input type="submit" value="<?php echo t('delete', $translations); ?>">
 </form> |
-<a href="#" onclick="document.getElementById('edit_<?php echo htmlspecialchars($u); ?>').style.display='block'; return false;">[<?php echo t('edit', $translations); ?>]</a>
+<form method="POST" style="display:inline">
+<?php echo buildAuthHiddenFields('people-open_edit'); ?>
+<input type="hidden" name="action" value="open_edit">
+<input type="hidden" name="edituser" value="<?php echo htmlspecialchars($u); ?>">
+<input type="submit" value="<?php echo t('edit', $translations); ?>">
+</form>
 <?php if ($u === getUsername()): ?>
- | <a href="#" onclick="document.getElementById('otp_<?php echo htmlspecialchars($u); ?>').style.display='block'; return false;">[<?php echo t('otp', $translations); ?>]</a>
+ <form method="POST" style="display:inline">
+<?php echo buildAuthHiddenFields('people-open_otp'); ?>
+<input type="hidden" name="action" value="open_otp">
+<input type="hidden" name="otpuser" value="<?php echo htmlspecialchars($u); ?>">
+<input type="submit" value="<?php echo t('otp', $translations); ?>">
+</form>
 <?php endif; ?>
 </td></tr>
 <?php endforeach; ?>
@@ -1490,49 +1871,55 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
 
 <h2><?php echo t('add-new-user', $translations); ?></h2>
 <form method="POST">
+<?php echo buildAuthHiddenFields('people-add'); ?>
 <table border="0" cellpadding="5">
 <tr><td><?php echo t('username', $translations); ?>:</td><td><input type="text" name="newuser" size="30" required></td></tr>
 <tr><td><?php echo t('password', $translations); ?>:</td><td><input type="password" name="newpass" size="30" required></td></tr>
-<tr><td colspan="2"><input type="hidden" name="action" value="add"><input type="submit" value="<?php echo t('add-user', $translations); ?>"></td></tr>
+<tr><td colspan="2"><input type="hidden" name="action" value="add"><input type="submit" value="<?php echo t('save', $translations); ?>"></td></tr>
 </table>
 </form>
 
+<?php if (!empty($openEditUser) && isset($users[$openEditUser])): ?>
 <h2><?php echo t('edit-user-password', $translations); ?></h2>
-<?php foreach ($users as $u => $data): ?>
-<div id="edit_<?php echo htmlspecialchars($u); ?>" style="display:none;border:1px solid #ccc;padding:10px;margin:10px 0">
+<div style="border:1px solid #ccc;padding:10px;margin:10px 0">
 <form method="POST">
+<?php echo buildAuthHiddenFields('people-update'); ?>
 <table border="0" cellpadding="5">
-<tr><td><?php echo t('username', $translations); ?>:</td><td><strong><?php echo htmlspecialchars($u); ?></strong></td></tr>
+<tr><td><?php echo t('username', $translations); ?>:</td><td><strong><?php echo htmlspecialchars($openEditUser); ?></strong></td></tr>
 <tr><td><?php echo t('new-password', $translations); ?>:</td><td><input type="password" name="uppass" size="30" required></td></tr>
-<tr><td colspan="2"><input type="hidden" name="action" value="update"><input type="hidden" name="upuser" value="<?php echo htmlspecialchars($u); ?>"><input type="submit" value="<?php echo t('update', $translations); ?>"> | <a href="#" onclick="document.getElementById('edit_<?php echo htmlspecialchars($u); ?>').style.display='none'; return false;">[<?php echo t('cancel', $translations); ?>]</a></td></tr>
+<tr><td colspan="2"><input type="hidden" name="action" value="update"><input type="hidden" name="upuser" value="<?php echo htmlspecialchars($openEditUser); ?>"><input type="submit" value="<?php echo t('update', $translations); ?>"></td></tr>
 </table>
+</form>
+<form method="POST" style="display:inline">
+<?php echo buildAuthHiddenFields('people-close_edit'); ?>
+<input type="hidden" name="action" value="close_edit">
+<input type="submit" value="<?php echo t('cancel', $translations); ?>">
 </form>
 </div>
-<?php endforeach; ?>
+<?php endif; ?>
 
-<h2><?php echo t('manage-otp', $translations); ?></h2>
 <?php if (isset($_SESSION['otp_setup'])): ?>
 <div style="border:2px solid green;padding:15px;margin:10px 0;background:#e8f5e9">
 <p><strong><font color="green"><?php echo t('otp-enabled-success', $translations); ?></font></strong></p>
 <p><?php echo t('otp-url-instructions', $translations); ?></p>
 <p style="word-break:break-all;font-family:monospace;background:white;padding:10px;border:1px solid #ccc"><?php echo htmlspecialchars($_SESSION['otp_setup']); ?></p>
 <p><small><?php echo t('otp-save-url', $translations); ?></small></p>
-<p><a href="#" onclick="delete window.sessionStorage; location.reload(); return false;">[<?php echo t('close', $translations); ?>]</a></p>
 </div>
 <?php unset($_SESSION['otp_setup']); endif; ?>
 
-<?php foreach ($users as $u => $data): ?>
-<?php if ($u === getUsername()): ?>
-<div id="otp_<?php echo htmlspecialchars($u); ?>" style="display:none;border:1px solid #ccc;padding:10px;margin:10px 0">
-<h3><?php echo t('otp-for-user', $translations); ?>: <?php echo htmlspecialchars($u); ?></h3>
-<?php if (empty($data['otp'])): ?>
+<?php if (!empty($openOtpUser) && $openOtpUser === getUsername() && isset($users[$openOtpUser])): ?>
+<h2><?php echo t('manage-otp', $translations); ?></h2>
+<div style="border:1px solid #ccc;padding:10px;margin:10px 0">
+<h3><?php echo t('otp-for-user', $translations); ?>: <?php echo htmlspecialchars($openOtpUser); ?></h3>
+<?php if (empty($users[$openOtpUser]['otp'])): ?>
 <form method="POST">
+<?php echo buildAuthHiddenFields('people-enable_otp'); ?>
 <table border="0" cellpadding="5">
-<tr><td><?php echo t('email-optional', $translations); ?>:</td><td><input type="text" name="email" size="30" placeholder="<?php echo htmlspecialchars($u); ?>" value="<?php echo htmlspecialchars($u); ?>"></td></tr>
+<tr><td><?php echo t('email-optional', $translations); ?>:</td><td><input type="text" name="email" size="30" placeholder="<?php echo htmlspecialchars($openOtpUser); ?>" value="<?php echo htmlspecialchars($openOtpUser); ?>"></td></tr>
 <tr><td colspan="2"><small><?php echo t('otp-email-help', $translations); ?></small></td></tr>
 <tr><td colspan="2">
 <input type="hidden" name="action" value="enable_otp">
-<input type="hidden" name="otpuser" value="<?php echo htmlspecialchars($u); ?>">
+<input type="hidden" name="otpuser" value="<?php echo htmlspecialchars($openOtpUser); ?>">
 <input type="submit" value="<?php echo t('enable-otp', $translations); ?>">
 </td></tr>
 </table>
@@ -1542,14 +1929,18 @@ if (strpos($_SERVER['REQUEST_URI'], '/people') !== false) {
 <p><small><?php echo t('otp-url-stored', $translations); ?></small></p>
 <form method="POST" style="display:inline">
 <input type="hidden" name="action" value="disable_otp">
-<input type="hidden" name="otpuser" value="<?php echo htmlspecialchars($u); ?>">
-<input type="submit" value="<?php echo t('disable-otp', $translations); ?>" onclick="return confirm('<?php echo t('otp-disable-confirm', $translations); ?>')">
+<?php echo buildAuthHiddenFields('people-disable_otp'); ?>
+<input type="hidden" name="otpuser" value="<?php echo htmlspecialchars($openOtpUser); ?>">
+<input type="submit" value="<?php echo t('disable-otp', $translations); ?>">
 </form>
 <?php endif; ?>
-<p><a href="#" onclick="document.getElementById('otp_<?php echo htmlspecialchars($u); ?>').style.display='none'; return false;">[<?php echo t('close', $translations); ?>]</a></p>
+<form method="POST" style="display:inline">
+<?php echo buildAuthHiddenFields('people-close_otp'); ?>
+<input type="hidden" name="action" value="close_otp">
+<input type="submit" value="<?php echo t('close', $translations); ?>">
+</form>
 </div>
 <?php endif; ?>
-<?php endforeach; ?>
 
 <hr>
 <p><small>Omi Server</small></p>
@@ -1571,7 +1962,7 @@ if (isset($_GET['log'])) {
     // Validate path is safe
     if (!isPathSafe($repopath) || !file_exists($repopath)) {
         http_response_code(404);
-        echo 'Repository not found';
+        echo t('error', $translations);
         exit;
     }
 
@@ -1614,9 +2005,9 @@ if (isset($_GET['log'])) {
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo t('commit-history', $translations); ?> - <?php echo htmlspecialchars($reponame); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo t('commit-history', $translations); ?> - <?php echo htmlspecialchars($reponame); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?><?php else: ?><a href="/sign-in"><?php echo t('login', $translations); ?></a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="/settings">[<?php echo t('settings', $translations); ?>]</a> | <a href="/people">[<?php echo t('people', $translations); ?>]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $reponame)); ?>">[<?php echo t('repository-root', $translations); ?>]</a></p>
+<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?> <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $reponame)); ?>"><?php echo t('repository-root', $translations); ?></a></p>
 <hr>
 <?php if (empty($commits)): ?>
 <p><?php echo t('no-commits', $translations); ?></p>
@@ -1643,10 +2034,10 @@ if (isset($_GET['log'])) {
 <p><?php echo t('page', $translations); ?> <?php echo $page; ?> / <?php echo $total_pages; ?> (<?php echo t('total', $translations); ?>: <?php echo $total; ?> <?php echo t('commits', $translations); ?>)</p>
 <p>
 <?php if ($page > 1): ?>
-<a href="?log=<?php echo urlencode($reponame); ?>&page=<?php echo $page - 1; ?>">[<?php echo t('previous', $translations); ?>]</a>
+<a href="?log=<?php echo urlencode($reponame); ?>&page=<?php echo $page - 1; ?>"><?php echo t('previous', $translations); ?></a>
 <?php endif; ?>
 <?php if ($page < $total_pages): ?>
-<a href="?log=<?php echo urlencode($reponame); ?>&page=<?php echo $page + 1; ?>">[<?php echo t('next', $translations); ?>]</a>
+<a href="?log=<?php echo urlencode($reponame); ?>&page=<?php echo $page + 1; ?>"><?php echo t('next', $translations); ?></a>
 <?php endif; ?>
 </p>
 <?php endif; ?>
@@ -1685,7 +2076,7 @@ if (isset($_GET['image'])) {
     // Validate path is safe
     if (!isPathSafe($repoPath) || !file_exists($repoPath)) {
         http_response_code(404);
-        echo 'Image not found';
+        echo t('error', $translations);
         exit;
     }
 
@@ -1708,9 +2099,9 @@ if (isset($_GET['image'])) {
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?><?php else: ?><a href="/sign-in"><?php echo t('login', $translations); ?></a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="/settings">[<?php echo t('settings', $translations); ?>]</a> | <a href="/people">[<?php echo t('people', $translations); ?>]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[<?php echo t('repository-root', $translations); ?>]</a></p>
+<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?> <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>"><?php echo t('repository-root', $translations); ?></a></p>
 <h2><?php echo t('image', $translations); ?>: <?php echo htmlspecialchars($imagePath); ?></h2>
 <hr>
 <div style="text-align:center">
@@ -1724,12 +2115,12 @@ if (isset($_GET['image'])) {
             exit;
         } else {
             http_response_code(404);
-            echo 'Image not found';
+            echo t('error', $translations);
             exit;
         }
     } catch (Exception $e) {
         http_response_code(404);
-        echo 'Image not found';
+        echo t('error', $translations);
         exit;
     }
 }
@@ -1747,7 +2138,7 @@ if (isset($_GET['image'])) {
             exit;
         } else {
             http_response_code(404);
-            echo "Repository not found";
+            echo t('error', $translations);
             exit;
         }
     }
@@ -1804,7 +2195,10 @@ if (isset($_GET['image'])) {
 
             // Handle delete request (with confirmation)
             if (isset($_POST['delete_confirm']) && $_POST['delete_confirm'] === '1' && $username) {
-                if (deleteFile($db, $repoPath)) {
+                if (!verifyAndConsumeActionToken('file-delete-confirm')) {
+                    $error_msg = t('file-delete-failed', $translations);
+                    logActivity(getUsername() ?? '', 'file-delete-confirm', 'invalid-token', 'file delete denied', intval($_SESSION['session_meta']['clickCounter'] ?? 0));
+                } elseif (deleteFile($db, $repoPath)) {
                     header('Location: /' . htmlspecialchars(str_replace('.omi', '', $repoName)));
                     exit;
                 } else {
@@ -1817,12 +2211,17 @@ if (isset($_GET['image'])) {
 
             // Handle edit request
             if (isset($_POST['save_file']) && $isText && $username) {
-                $newContent = $_POST['file_content'] ?? '';
-                if (commitFile($db, $repoPath, $newContent)) {
-                    $fileContent = $newContent;
-                    $success_msg = t('file-saved-success', $translations);
-                } else {
+                if (!verifyAndConsumeActionToken('file-save')) {
                     $error_msg = t('file-save-failed', $translations);
+                    logActivity(getUsername() ?? '', 'file-save', 'invalid-token', 'file save denied', intval($_SESSION['session_meta']['clickCounter'] ?? 0));
+                } else {
+                    $newContent = $_POST['file_content'] ?? '';
+                    if (commitFile($db, $repoPath, $newContent)) {
+                        $fileContent = $newContent;
+                        $success_msg = t('file-saved-success', $translations);
+                    } else {
+                        $error_msg = t('file-save-failed', $translations);
+                    }
                 }
             }
 
@@ -1837,9 +2236,9 @@ if (isset($_GET['image'])) {
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?><?php else: ?><a href="/sign-in"><?php echo t('login', $translations); ?></a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="?log=<?php echo urlencode($repoName); ?>">[<?php echo t('log', $translations); ?>]</a> | <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>">[<?php echo t('repository-root', $translations); ?>]</a></p>
+<p><?php echo buildNavButton('/', t('home', $translations)); ?> <a href="?log=<?php echo urlencode($repoName); ?>"><?php echo t('log', $translations); ?></a> <a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName)); ?>"><?php echo t('repository-root', $translations); ?></a> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
 <h2><?php echo t('file', $translations); ?>: <?php echo htmlspecialchars($repoPath); ?></h2>
 <?php if ($show_delete_confirm): ?>
 <!-- Delete confirmation form (HTML 3.2 compatible, no JavaScript) -->
@@ -1849,7 +2248,8 @@ if (isset($_GET['image'])) {
 <p><?php echo t('delete-file-warning', $translations); ?></p>
 <form method="POST" action="">
 <input type="hidden" name="delete_confirm" value="1">
-<input type="submit" value="<?php echo t('confirm-delete', $translations); ?>"> | <a href="?">[<?php echo t('cancel', $translations); ?>]</a>
+<?php echo buildAuthHiddenFields('file-delete-confirm'); ?>
+<input type="submit" value="<?php echo t('confirm-delete', $translations); ?>"> <a href="?"><?php echo t('cancel', $translations); ?></a>
 </form>
 </div>
 <hr>
@@ -1898,6 +2298,7 @@ if (isset($_GET['image'])) {
 <tr><td>![alt](https://example.com/img.jpg)</td><td>Image from URL</td></tr>
 </table>
 <form method="POST">
+<?php echo buildAuthHiddenFields('file-save'); ?>
 <textarea name="file_content" rows="20" cols="80" style="width: 100%; max-width: 800px; font-family: monospace; box-sizing: border-box;"><?php echo htmlspecialchars($fileContent); ?></textarea><br><br>
 <input type="submit" name="save_file" value="Save">
 <input type="submit" formaction="?" formmethod="GET" value="Cancel">
@@ -2067,7 +2468,7 @@ if (isset($_GET['image'])) {
   <source src="data:<?php echo $mimeType; ?>;base64,<?php echo $base64Data; ?>" type="<?php echo $mimeType; ?>">
   <p>Your browser does not support the audio element. <a href="?download=1">Download file</a> to play it with an external player.</p>
 </audio>
-<p><small>Modern browsers: use the audio player above with controls for play, pause, volume, and progress. HTML 3.2 browsers: <a href="?download=1">[Download]</a></small></p>
+<p><small>Modern browsers: use the audio player above with controls for play, pause, volume, and progress. HTML 3.2 browsers: <a href="?download=1">Download</a></small></p>
 <?php elseif ($mediaType === 'video'): ?>
 <!-- Video player -->
 <p><b>Video File</b></p>
@@ -2090,7 +2491,7 @@ if (isset($_GET['image'])) {
   <source src="data:<?php echo $mimeType; ?>;base64,<?php echo $base64Data; ?>" type="<?php echo $mimeType; ?>">
   <p>Your browser does not support the video element. <a href="?download=1">Download file</a> to play it with an external player.</p>
 </video>
-<p><small>Modern browsers: use the video player above with controls for play, pause, volume, progress, and fullscreen. HTML 3.2 browsers: <a href="?download=1">[Download]</a></small></p>
+<p><small>Modern browsers: use the video player above with controls for play, pause, volume, progress, and fullscreen. HTML 3.2 browsers: <a href="?download=1">Download</a></small></p>
 <?php else: ?>
 <!-- Plain text -->
 <pre><?php echo htmlspecialchars($fileContent); ?></pre>
@@ -2145,6 +2546,12 @@ if (isset($_GET['image'])) {
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && $username) {
             $action = $_POST['action'] ?? '';
+            $tokenAction = 'repo-' . ($action !== '' ? $action : 'upload');
+
+            if (!verifyAndConsumeActionToken($tokenAction)) {
+                $upload_error = t('error', $translations) . ': ' . t('invalid-action-token', $translations);
+                logActivity(getUsername() ?? '', $tokenAction, 'invalid-token', 'repo action denied', intval($_SESSION['session_meta']['clickCounter'] ?? 0));
+            } else {
 
             if ($action === 'delete_file') {
                 $target = trim($_POST['target'] ?? '');
@@ -2152,9 +2559,9 @@ if (isset($_GET['image'])) {
                 $targetPath = $repoPath ? $repoPath . '/' . $target : $target;
 
                 if (empty($target)) {
-                    $upload_error = 'File name is required';
+                    $upload_error = t('error', $translations);
                 } elseif (deleteFile($db, $targetPath)) {
-                    $upload_msg = "File '$target' deleted";
+                    $upload_msg = t('delete', $translations);
                     $files = getLatestFiles($db, $repoPath);
                     $organized = organizeFiles($files, $repoPath);
                 } else {
@@ -2167,7 +2574,7 @@ if (isset($_GET['image'])) {
                 $newName = str_replace(['../', '..\\', '/', '\\'], '_', $newName);
 
                 if (empty($target) || empty($newName)) {
-                    $upload_error = 'File name and new name are required';
+                    $upload_error = t('error', $translations);
                 } else {
                     $targetPath = $repoPath ? $repoPath . '/' . $target : $target;
                     $newPath = $repoPath ? $repoPath . '/' . $newName : $newName;
@@ -2180,15 +2587,15 @@ if (isset($_GET['image'])) {
                     }
 
                     if (!$targetHash) {
-                        $upload_error = 'File not found';
+                        $upload_error = t('error', $translations);
                     } else {
                         $fileContent = getFileContent($db, $targetHash);
                         if (commitFile($db, $newPath, $fileContent) && deleteFile($db, $targetPath)) {
-                            $upload_msg = "File '$target' renamed to '$newName'";
+                            $upload_msg = t('save', $translations);
                             $files = getLatestFiles($db, $repoPath);
                             $organized = organizeFiles($files, $repoPath);
                         } else {
-                            $upload_error = 'Failed to rename file';
+                            $upload_error = t('error', $translations);
                         }
                     }
                 }
@@ -2197,16 +2604,16 @@ if (isset($_GET['image'])) {
                 $dirName = str_replace(['../', '..\\', '/', '\\'], '_', $dirName);
 
                 if (empty($dirName)) {
-                    $upload_error = 'Directory name is required';
+                    $upload_error = t('error', $translations);
                 } else {
                     $dirPath = $repoPath ? $repoPath . '/' . $dirName : $dirName;
                     $markerPath = $dirPath . '/.omidir';
                     if (commitFile($db, $markerPath, '')) {
-                        $upload_msg = "Directory '$dirName' created";
+                        $upload_msg = t('create', $translations);
                         $files = getLatestFiles($db, $repoPath);
                         $organized = organizeFiles($files, $repoPath);
                     } else {
-                        $upload_error = 'Failed to create directory';
+                        $upload_error = t('error', $translations);
                     }
                 }
             } elseif ($action === 'create_file') {
@@ -2215,15 +2622,15 @@ if (isset($_GET['image'])) {
                 $fileContent = $_POST['file_content'] ?? '';
 
                 if (empty($fileName)) {
-                    $upload_error = 'File name is required';
+                    $upload_error = t('error', $translations);
                 } else {
                     $fullPath = $repoPath ? $repoPath . '/' . $fileName : $fileName;
                     if (commitFile($db, $fullPath, $fileContent)) {
-                        $upload_msg = "File '$fileName' created";
+                        $upload_msg = t('create', $translations);
                         $files = getLatestFiles($db, $repoPath);
                         $organized = organizeFiles($files, $repoPath);
                     } else {
-                        $upload_error = 'Failed to create file';
+                        $upload_error = t('error', $translations);
                     }
                 }
             } elseif (isset($_FILES['upload_file'])) {
@@ -2236,7 +2643,7 @@ if (isset($_GET['image'])) {
                     $fileName = str_replace(['../', '..\\', '/', '\\'], '_', $fileName);
 
                     if (empty($fileName)) {
-                        $upload_error = 'Invalid filename';
+                        $upload_error = t('error', $translations);
                     } else {
                         // Calculate full path for file in repo
                         $fullPath = $repoPath ? $repoPath . '/' . $fileName : $fileName;
@@ -2246,30 +2653,31 @@ if (isset($_GET['image'])) {
 
                         // Upload to database
                         if (uploadFile($db, $fullPath, $fileContent)) {
-                            $upload_msg = "File '$fileName' uploaded successfully";
+                            $upload_msg = t('upload', $translations);
                             // Refresh file listing
                             $files = getLatestFiles($db, $repoPath);
                             $organized = organizeFiles($files, $repoPath);
                         } else {
-                            $upload_error = 'Failed to upload file to database';
+                            $upload_error = t('error', $translations);
                         }
                     }
                 } else {
                     switch ($uploadFile['error']) {
                         case UPLOAD_ERR_INI_SIZE:
                         case UPLOAD_ERR_FORM_SIZE:
-                            $upload_error = 'File is too large';
+                            $upload_error = t('error', $translations);
                             break;
                         case UPLOAD_ERR_PARTIAL:
-                            $upload_error = 'File upload was interrupted';
+                            $upload_error = t('error', $translations);
                             break;
                         case UPLOAD_ERR_NO_FILE:
-                            $upload_error = 'No file was selected';
+                            $upload_error = t('error', $translations);
                             break;
                         default:
-                            $upload_error = 'Upload failed with error code: ' . $uploadFile['error'];
+                            $upload_error = t('error', $translations);
                     }
                 }
+            }
             }
         }
 
@@ -2281,9 +2689,9 @@ if (isset($_GET['image'])) {
 </head>
 <body bgcolor="#f0f0f0">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a><?php endif; ?></small></td></tr>
+<tr><td><h1><?php echo htmlspecialchars($repoName); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?><?php else: ?><a href="/sign-in"><?php echo t('login', $translations); ?></a><?php endif; ?></small></td></tr>
 </table>
-<p><a href="/">[<?php echo t('home', $translations); ?>]</a> | <a href="?log=<?php echo urlencode($repoName); ?>">[<?php echo t('log', $translations); ?>]</a></p>
+<p><?php echo buildNavButton('/', t('home', $translations)); ?> <a href="?log=<?php echo urlencode($repoName); ?>"><?php echo t('log', $translations); ?></a> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
 <h2><?php echo t('directory', $translations); ?>: /<?php echo htmlspecialchars($repoPath); ?></h2>
 <hr>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
@@ -2321,7 +2729,7 @@ if (isset($_GET['image'])) {
 <?php if (!empty($organized['files'])): ?>
 <?php foreach ($organized['files'] as $file): ?>
 <tr>
-<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']); ?>">[<?php echo htmlspecialchars(getFileTypeLabel($file['filename'])); ?>] <?php echo htmlspecialchars(basename($file['filename'])); ?></a></td>
+<td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repoName) . '/' . $file['filename']); ?>"><?php echo htmlspecialchars(getFileTypeLabel($file['filename'])); ?> <?php echo htmlspecialchars(basename($file['filename'])); ?></a></td>
 <td><?php echo number_format($file['size']); ?></td>
 <td><?php echo htmlspecialchars($file['datetime']); ?></td>
 <td>
@@ -2341,6 +2749,7 @@ if (isset($_GET['image'])) {
 </form>
 <form method="POST" style="display:inline">
 <input type="hidden" name="action" value="rename_file">
+<?php echo buildAuthHiddenFields('repo-rename_file'); ?>
 <input type="hidden" name="target" value="<?php echo htmlspecialchars(basename($file['filename'])); ?>">
 <input type="text" name="new_name" size="12" placeholder="<?php echo t('new-name', $translations); ?>">
 <input type="submit" value="<?php echo t('rename', $translations); ?>">
@@ -2349,6 +2758,7 @@ if (isset($_GET['image'])) {
 <div>
 <form method="POST" style="display:inline">
 <input type="hidden" name="action" value="delete_file">
+<?php echo buildAuthHiddenFields('repo-delete_file'); ?>
 <input type="hidden" name="target" value="<?php echo htmlspecialchars(basename($file['filename'])); ?>">
 <input type="submit" value="<?php echo t('delete', $translations); ?>" onclick="return confirm('Delete file <?php echo htmlspecialchars(basename($file['filename'])); ?>?')">
 </form>
@@ -2375,26 +2785,29 @@ if (isset($_GET['image'])) {
 <?php if ($username): ?>
 <p><b><?php echo t('create-directory', $translations); ?></b></p>
 <form method="POST">
-<input type="text" name="dir_name" size="30" placeholder="new-folder">
+<input type="text" name="dir_name" size="30" placeholder="<?php echo t('directory', $translations); ?>">
 <input type="hidden" name="action" value="create_dir">
+<?php echo buildAuthHiddenFields('repo-create_dir'); ?>
 <input type="submit" value="<?php echo t('create-directory', $translations); ?>">
 </form>
 <p><b><?php echo t('create-text-file', $translations); ?></b></p>
 <form method="POST">
-<input type="text" name="file_name" size="30" placeholder="notes.txt">
+<input type="text" name="file_name" size="30" placeholder="<?php echo t('file', $translations); ?>">
 <br>
 <textarea name="file_content" rows="6" cols="60" placeholder="<?php echo t('write-file-contents', $translations); ?>"></textarea>
 <br>
 <input type="hidden" name="action" value="create_file">
+<?php echo buildAuthHiddenFields('repo-create_file'); ?>
 <input type="submit" value="<?php echo t('create-file', $translations); ?>">
 </form>
 <p><b><?php echo t('upload-file-directory', $translations); ?></b></p>
 <form method="POST" enctype="multipart/form-data">
 <input type="file" name="upload_file" required>
+<?php echo buildAuthHiddenFields('repo-upload'); ?>
 <input type="submit" value="<?php echo t('upload', $translations); ?>">
 </form>
 <?php else: ?>
-<p><small><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a> <?php echo t('login-to-upload-files', $translations); ?></small></p>
+<p><small><a href="/sign-in"><?php echo t('login', $translations); ?></a> <?php echo t('login-to-upload-files', $translations); ?></small></p>
 <?php endif; ?>
 <hr>
 <p><small>Omi Server</small></p>
@@ -2409,12 +2822,17 @@ if (isset($_GET['image'])) {
     $repo_message_is_error = false;
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isLoggedIn() && ($_POST['action'] ?? '') === 'create_repo') {
         $repo_error = null;
+        if (!verifyAndConsumeActionToken('create-repo')) {
+            $repo_message = t('error', $translations) . ': ' . t('invalid-action-token', $translations);
+            $repo_message_is_error = true;
+        } else {
         $repo_name = $_POST['repo_name'] ?? '';
         if (createEmptyRepository($repo_name, getUsername(), $repo_error)) {
-            $repo_message = 'Repository created successfully';
+            $repo_message = t('create', $translations);
         } else {
-            $repo_message = $repo_error ?: 'Failed to create repository';
+            $repo_message = $repo_error ?: t('error', $translations);
             $repo_message_is_error = true;
+        }
         }
     }
 
@@ -2436,8 +2854,11 @@ if (isset($_GET['image'])) {
 </head>
 <body bgcolor="#f0f0f0" dir="<?php echo $dirAttr; ?>">
 <table width="100%" border="0" cellpadding="5">
-<tr><td><h1>Omi Server - <?php echo t('repositories', $translations); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> | <a href="/language">[<?php echo t('language', $translations); ?>]</a> | <a href="/logout">[<?php echo t('logout', $translations); ?>]</a><?php else: ?><a href="/sign-in">[<?php echo t('login', $translations); ?>]</a><?php endif; ?></small></td></tr>
+<tr><td><h1>Omi Server - <?php echo t('repositories', $translations); ?></h1></td><td align="right"><small><?php if ($username): ?><strong><?php echo htmlspecialchars($username); ?></strong> <?php echo buildNavButton('/language', t('language', $translations)); ?> <?php echo buildNavButton('/logout', t('logout', $translations)); ?><?php else: ?><a href="/sign-in"><?php echo t('login', $translations); ?></a><?php endif; ?></small></td></tr>
 </table>
+<?php if ($username): ?>
+<p><?php echo buildNavButton('/', t('home', $translations)); ?> <?php echo buildNavButton('/settings', t('settings', $translations)); ?> <?php echo buildNavButton('/people', t('people', $translations)); ?> <?php echo buildNavButton('/activity', t('activity', $translations)); ?></p>
+<?php endif; ?>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
 <tr bgcolor="#e8f4f8">
 <td colspan="4">
@@ -2466,7 +2887,7 @@ if (isset($_GET['image'])) {
 <td><a href="/<?php echo htmlspecialchars(str_replace('.omi', '', $repo['name'])); ?>"><?php echo htmlspecialchars($repo['name']); ?></a></td>
 <td><?php echo number_format($repo['size']); ?></td>
 <td><?php echo htmlspecialchars(date('Y-m-d H:i:s', $repo['modified'])); ?></td>
-<td><a href="?download=<?php echo urlencode($repo['name']); ?>"><?php echo t('download', $translations); ?></a> | <a href="?log=<?php echo urlencode($repo['name']); ?>">[<?php echo t('log', $translations); ?>]</a></td>
+<td><a href="?download=<?php echo urlencode($repo['name']); ?>"><?php echo t('download', $translations); ?></a> <a href="?log=<?php echo urlencode($repo['name']); ?>"><?php echo t('log', $translations); ?></a></td>
 </tr>
 <?php endforeach; ?>
 <?php endif; ?>
@@ -2476,7 +2897,7 @@ if (isset($_GET['image'])) {
 <form method="POST">
 <table border="0" cellpadding="5">
 <tr><td><?php echo t('repository-name', $translations); ?>:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
-<tr><td colspan="2"><input type="hidden" name="action" value="create_repo"><input type="submit" value="<?php echo t('create-repository', $translations); ?>"></td></tr>
+<tr><td colspan="2"><input type="hidden" name="action" value="create_repo"><?php echo buildAuthHiddenFields('create-repo'); ?><input type="submit" value="<?php echo t('create-repository', $translations); ?>"></td></tr>
 </table>
 </form>
 <h2><?php echo t('upload-repository', $translations); ?></h2>
@@ -2490,7 +2911,7 @@ if (isset($_GET['image'])) {
 </table>
 </form>
 <?php else: ?>
-<p><a href="/sign-in">[<?php echo t('sign-in-to-upload', $translations); ?>]</a></p>
+<p><a href="/sign-in"><?php echo t('sign-in-to-upload', $translations); ?></a></p>
 <?php endif; ?>
 <h2><?php echo t('api-endpoints', $translations); ?></h2>
 <table border="1" width="100%" cellpadding="5" cellspacing="0">
@@ -2617,7 +3038,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         } else {
             http_response_code(404);
-            echo json_encode(['error' => 'Repository not found']);
+            echo json_encode(['error' => t('error', $translations)]);
             exit;
         }
     }
