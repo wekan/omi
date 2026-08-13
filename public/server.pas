@@ -33,6 +33,9 @@ uses
   {$ENDIF}
   SysUtils, fphttpapp, HTTPDefs, httproute, Classes,
   StrUtils, Math, fpjson, jsonparser,
+  // ssockets: for ESocketError, so "that port is already in use" can be caught
+  // and reported instead of ending the program with a core dump.
+  ssockets,
   Process, inifiles, DateUtils;
 
 const
@@ -79,6 +82,8 @@ var
   SessionMeta: TStringList;
   ActivityDbReady: Boolean;
   FallbackTranslations: TJSONObject;
+  // --port / -p on the command line, read in the main block below.
+  ArgIndex: Integer;
 
 function GetLogoutIdleSeconds: Int64; forward;
 procedure LogActivity(const Username, SessionId, ActionName, StatusText, DetailText: string; ARequest: TRequest; ClickCounter: Int64); forward;
@@ -813,9 +818,13 @@ begin
         EqPos := Pos('=', Line);
         if EqPos > 0 then
         begin
-          Key := Trim(Copy(Line, 1, EqPos - 1));
+          // LOWERCASED, because the settings.txt that ships with Omi writes
+          // its keys in capitals - SQLITE=sqlite3, PORT=3001 - and this
+          // compared them against lowercase literals, so every line in that
+          // file was read and then ignored.
+          Key := LowerCase(Trim(Copy(Line, 1, EqPos - 1)));
           Value := Trim(Copy(Line, EqPos + 1, Length(Line)));
-          
+
           if Key = 'port' then
             Result.Port := StrToIntDef(Value, DEFAULT_PORT)
           else if Key = 'sqlite' then
@@ -2716,7 +2725,19 @@ begin
       begin
         AResponse.Code := 403;
         AResponse.ContentType := 'text/plain; charset=UTF-8';
-        AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
+        // Translations is loaded further down, AFTER this branch, so it was an
+        // uninitialised pointer here and T() dereferenced whatever the stack held.
+        // The compiler says exactly that: server.pas(2719,53) Warning: Local
+        // variable "Translations" does not seem to be initialized. Load it for the
+        // message and free it here, because this branch returns before the block
+        // that owns it.
+        Translations := LoadTranslations(CurrentLanguage);
+        try
+          AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
+        finally
+          if Assigned(Translations) then
+            FreeAndNil(Translations);
+        end;
         Exit;
       end;
       if ARequest.ContentFields.Values['language'] <> '' then
@@ -3758,6 +3779,17 @@ begin
   end;
 end;
 
+// Free what the program allocated, once, and only what was actually created.
+// The error paths and the normal exit both come here, so they cannot disagree
+// about what has already been released.
+procedure CleanupGlobals;
+begin
+  if Assigned(Users) then FreeAndNil(Users);
+  if Assigned(Sessions) then FreeAndNil(Sessions);
+  if Assigned(SessionMeta) then FreeAndNil(SessionMeta);
+  if Assigned(FallbackTranslations) then FreeAndNil(FallbackTranslations);
+end;
+
 begin
   DefaultSystemCodePage := CP_UTF8;
   FallbackTranslations := LoadTranslations('en');
@@ -3768,6 +3800,12 @@ begin
   SessionMeta.NameValueSeparator := '=';
   Sessions.NameValueSeparator := '=';
   ActivityDbReady := False;
+
+  // --port N (or -p N) beats settings.txt: when the port is busy, changing it
+  // should not need a file edited first.
+  for ArgIndex := 1 to ParamCount - 1 do
+    if (ParamStr(ArgIndex) = '--port') or (ParamStr(ArgIndex) = '-p') then
+      Settings.Port := StrToIntDef(ParamStr(ArgIndex + 1), Settings.Port);
 
   WriteLn('Omi Server v', VERSION);
   WriteLn('Port: ', Settings.Port);
@@ -3800,12 +3838,44 @@ begin
   HTTPRouter.RegisterRoute('/*', rmGet, @RepoEndpoint);
   HTTPRouter.RegisterRoute('/*', rmPost, @RepoEndpoint);
 
-  Application.Initialize;
-  Application.Run;
+  // A PORT THAT IS ALREADY IN USE IS AN ORDINARY THING, not a crash. Without
+  // this, the ESocketError from the bind escaped the program, and what an admin
+  // saw was:
+  //
+  //   Exception at 00000000004F2348: ESocketError:
+  //   Binding of socket failed: 3001.
+  //   free(): invalid pointer
+  //   Aborted (core dumped)
+  //
+  // - the exception unwound past the objects above, the half-started server was
+  // torn down twice, and the shell reported a core dump for "something else is
+  // using that port". Say which port, say what to do about it, and exit 1.
+  try
+    Application.Initialize;
+    Application.Run;
+  except
+    on E: ESocketError do
+    begin
+      WriteLn(StdErr, '');
+      WriteLn(StdErr, 'Omi: cannot listen on port ', Settings.Port, '.');
+      WriteLn(StdErr, E.Message);
+      WriteLn(StdErr, '');
+      WriteLn(StdErr, 'Something else is already using it. To see what:');
+      WriteLn(StdErr, '  ss -ltnp | grep :', Settings.Port, '     (or: lsof -i :', Settings.Port, ')');
+      WriteLn(StdErr, 'To use another port, put this in settings.txt beside this server:');
+      WriteLn(StdErr, '  port=', Settings.Port + 1);
+      WriteLn(StdErr, 'or start it with:  ./public/server --port ', Settings.Port + 1);
+      CleanupGlobals;
+      Halt(1);
+    end;
+    on E: Exception do
+    begin
+      WriteLn(StdErr, '');
+      WriteLn(StdErr, 'Omi: ', E.ClassName, ': ', E.Message);
+      CleanupGlobals;
+      Halt(1);
+    end;
+  end;
 
-  Users.Free;
-  Sessions.Free;
-  SessionMeta.Free;
-  if Assigned(FallbackTranslations) then
-    FallbackTranslations.Free;
+  CleanupGlobals;
 end.
