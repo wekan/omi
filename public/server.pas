@@ -1270,6 +1270,28 @@ begin
     Result := DirectoryName + '/' + EntryName;
 end;
 
+function FormatByteSize(const ByteCount: Int64): string;
+const
+  UnitNames: array[0..4] of string = ('B', 'KB', 'MB', 'GB', 'TB');
+var
+  UnitIndex: Integer;
+  DisplayValue: Double;
+begin
+  if ByteCount < 0 then
+    Exit('-');
+  DisplayValue := ByteCount;
+  UnitIndex := 0;
+  while (DisplayValue >= 1024) and (UnitIndex < High(UnitNames)) do
+  begin
+    DisplayValue := DisplayValue / 1024;
+    Inc(UnitIndex);
+  end;
+  if UnitIndex = 0 then
+    Result := IntToStr(ByteCount) + ' ' + UnitNames[UnitIndex]
+  else
+    Result := FormatFloat('0.##', DisplayValue) + ' ' + UnitNames[UnitIndex];
+end;
+
 function NormalizeRepoName(const Value: string): string;
 var
   Name: string;
@@ -3406,6 +3428,7 @@ var
   DbPath: string;
   Files: TFileEntryArray;
   I: Integer;
+  J: Integer;
   FileEntry: TFileEntry;
   IsFile: Boolean;
   FileContent: string;
@@ -3438,6 +3461,7 @@ var
   EntryPath: string;
   DisplayName: string;
   RowActions: string;
+  FileSizeText: string;
   NewContent: string;
   MarkdownHtml: string;
   Base64Data: string;
@@ -3930,8 +3954,16 @@ begin
       for I := 0 to FileList.Count - 1 do
       begin
         DisplayName := FileList[I];
+        FileSizeText := '-';
+        EntryPath := JoinRepoPath(RepoPath, DisplayName);
+        for J := 0 to High(Files) do
+          if Files[J].Filename = EntryPath then
+          begin
+            FileSizeText := FormatByteSize(Files[J].Size);
+            Break;
+          end;
         EntryPath := RepoToRoot(RepoName) + '/' +
-          JoinRepoPath(RepoPath, DisplayName);
+          EntryPath;
         RowActions := '-';
         if (Username <> '') and not IsHistoricView then
         begin
@@ -3955,7 +3987,7 @@ begin
         RowActions := BuildRepositoryEntryActions(ARequest, DisplayName,
           'file', EditButton, Translations);
         end;
-        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-file-open-' + IntToStr(I), '[' + GetFileTypeLabel(DisplayName) + '] ' + DisplayName) + '</td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
+        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-file-open-' + IntToStr(I), '[' + GetFileTypeLabel(DisplayName) + '] ' + DisplayName) + '</td><td>' + HtmlEncode(FileSizeText) + '</td><td>-</td><td>' + RowActions + '</td></tr>';
       end;
 
       if TableRows = '' then
