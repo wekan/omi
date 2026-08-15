@@ -2270,7 +2270,17 @@ begin
     PendingDeleteRepo := '';
     if (ARequest.Method = 'POST') then
     begin
-      if Username <> '' then
+      // Every POST handled here mutates state or carries authenticated
+      // navigation state. Never fall through to repository actions when a
+      // missing, expired, or restarted-server session resolves to no user.
+      if Username = '' then
+      begin
+        AResponse.Code := 401;
+        AResponse.ContentType := 'text/plain; charset=UTF-8';
+        AResponse.Content := T('error', Translations) + ': ' + T('login', Translations);
+        Exit;
+      end
+      else
       begin
         PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
         if (PostedAuthAction = '') or not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
