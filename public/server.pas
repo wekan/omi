@@ -1230,6 +1230,28 @@ begin
   Result := StringReplace(Result, '"', '&quot;', [rfReplaceAll]);
 end;
 
+function ResolveExecutablePath(const CommandName: string): string;
+var
+  PathDirs: TStringArray;
+  PathDir: string;
+  Candidate: string;
+begin
+  Result := CommandName;
+  if ExtractFilePath(CommandName) <> '' then
+    Exit;
+
+  PathDirs := GetEnvironmentVariable('PATH').Split([PathSeparator]);
+  for PathDir in PathDirs do
+  begin
+    if PathDir = '' then
+      Candidate := ExpandFileName(CommandName)
+    else
+      Candidate := IncludeTrailingPathDelimiter(PathDir) + CommandName;
+    if FileExists(Candidate) then
+      Exit(Candidate);
+  end;
+end;
+
 function HexToString(const HexValue: string): string;
 var
   I: Integer;
@@ -1273,14 +1295,14 @@ begin
   Proc := TProcess.Create(nil);
   OutputStream := TStringStream.Create('');
   try
-    Proc.Executable := Settings.SqliteCmd;
+    Proc.Executable := ResolveExecutablePath(Settings.SqliteCmd);
     Proc.Parameters.Add(DbAbs);
     Proc.Parameters.Add('-separator');
     Proc.Parameters.Add('|');
     Proc.Parameters.Add('-batch');
     Proc.Parameters.Add('-noheader');
     Proc.Parameters.Add(Query);
-    Proc.Options := [poWaitOnExit, poUsePipes];
+    Proc.Options := [poWaitOnExit, poUsePipes, poStderrToOutPut];
 
     try
       Proc.Execute;
@@ -1288,7 +1310,10 @@ begin
       begin
         OutputStream.CopyFrom(Proc.Output, 0);
         OutputText := OutputStream.DataString;
-        Result := OutputText;
+        if Proc.ExitStatus = 0 then
+          Result := OutputText
+        else
+          Result := '';
       end;
     except
       Result := '';
@@ -1513,9 +1538,9 @@ begin
     Proc := TProcess.Create(nil);
     OutputStream := TStringStream.Create('');
     try
-      Proc.Executable := 'sha256sum';
+      Proc.Executable := ResolveExecutablePath('sha256sum');
       Proc.Parameters.Add(TempFile);
-      Proc.Options := [poWaitOnExit, poUsePipes];
+      Proc.Options := [poWaitOnExit, poUsePipes, poStderrToOutPut];
       Proc.Execute;
       OutputStream.CopyFrom(Proc.Output, 0);
       Output := Trim(OutputStream.DataString);
@@ -1555,11 +1580,12 @@ function CreateEmptyRepository(const RepoFilePath, Username: string): Boolean;
 var
   Query: string;
   RepoDir: string;
+  InitialCommitId: Int64;
 begin
   Result := False;
   RepoDir := ExtractFileDir(RepoFilePath);
-  if not DirectoryExists(RepoDir) then
-    ForceDirectories(RepoDir);
+  if not DirectoryExists(RepoDir) and not ForceDirectories(RepoDir) then
+    Exit;
   if FileExists(RepoFilePath) then
     Exit;
   ExecSqlOnDb(RepoFilePath, 'PRAGMA foreign_keys=ON;');
@@ -1568,8 +1594,10 @@ begin
     'CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, hash TEXT, datetime TEXT, commit_id INTEGER);' +
     'CREATE TABLE IF NOT EXISTS staging (filename TEXT PRIMARY KEY, hash TEXT, datetime TEXT);';
   ExecSqlOnDb(RepoFilePath, Query);
-  CreateCommit(RepoFilePath, 'Initial commit', Username);
-  Result := True;
+  InitialCommitId := CreateCommit(RepoFilePath, 'Initial commit', Username);
+  Result := FileExists(RepoFilePath) and (InitialCommitId > 0);
+  if not Result and FileExists(RepoFilePath) then
+    DeleteFile(RepoFilePath);
 end;
 
 function GetRepoPath(const RepoName: string): string;
@@ -2239,7 +2267,8 @@ begin
         begin
           RepoPath := GetRepoPath(RepoName);
           if CreateEmptyRepository(RepoPath, Username) then
-            RepoMessage := T('repository-created', Translations)
+            RepoMessage := T('repository', Translations) + ' ' + RepoName + ': ' +
+              T('create', Translations) + ' OK (repos/' + RepoName + ')'
           else
           begin
             RepoMessage := T('repository-create-failed', Translations);
