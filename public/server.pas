@@ -29,7 +29,7 @@ program OmiServer;
 
 uses
   {$IFDEF UNIX}
-  cthreads, cmem,
+  cthreads,
   {$ENDIF}
   SysUtils, fphttpapp, HTTPDefs, httproute, Classes,
   StrUtils, Math, fpjson, jsonparser,
@@ -3816,6 +3816,11 @@ begin
 
   Application.Port := Settings.Port;
   Application.Threaded := True;
+  // fphttpapp handles server exceptions inside Application.Run, before the
+  // outer try/except below can see them. Make such a startup failure terminate
+  // the run loop and return failure instead of printing an error and exiting 0.
+  Application.StopOnException := True;
+  Application.ExceptionExitCode := 1;
 
   HTTPRouter.RegisterRoute('/', rmGet, @HomeEndpoint);
   HTTPRouter.RegisterRoute('/', rmPost, @HomeEndpoint);
@@ -3865,15 +3870,16 @@ begin
       WriteLn(StdErr, 'To use another port, put this in settings.txt beside this server:');
       WriteLn(StdErr, '  port=', Settings.Port + 1);
       WriteLn(StdErr, 'or start it with:  ./public/server --port ', Settings.Port + 1);
-      CleanupGlobals;
-      Halt(1);
+      // Do not Halt while Pascal is still handling E: that skips the normal
+      // exception-frame unwinding and can itself end in free(): invalid pointer.
+      // Set the status and fall through to the one cleanup path below instead.
+      ExitCode := 1;
     end;
     on E: Exception do
     begin
       WriteLn(StdErr, '');
       WriteLn(StdErr, 'Omi: ', E.ClassName, ': ', E.Message);
-      CleanupGlobals;
-      Halt(1);
+      ExitCode := 1;
     end;
   end;
 
