@@ -172,6 +172,7 @@ Key guides:
   - **[CLI_PYTHON3.md](docs/CLI_PYTHON3.md)** - CLI for Python 3 (recommended)
   - **[CLI_TCL.md](docs/CLI_TCL.md)** - CLI for Tcl (tclsh)
 - **[WEB.md](docs/WEB.md)** - Web interface guide
+- **[WEB_DESIGN.md](docs/WEB_DESIGN.md)** - Shared UI and implementation patterns
 - SERVER:
   - **[SERVER_FREEPASCAL.md](docs/SERVER_FREEPASCAL.md)** - FreePascal server (compiled binary)
   - **[SERVER_JS.md](docs/SERVER_JS.md)** - JavaScript server (Node.js, Bun, Deno)

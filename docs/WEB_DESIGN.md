@@ -1,0 +1,144 @@
+# Omi Web UI Design
+
+This document defines the interface and implementation patterns shared by Omi's
+FreePascal, JavaScript, and PHP web servers. New pages and controls should follow
+these patterns so the three implementations remain familiar and interoperable.
+
+## Design goals
+
+- Work without JavaScript, cookies, or client-side storage.
+- Keep the generated interface usable in simple and retro browsers.
+- Render the same navigation, terminology, and repository operations in every
+  server implementation.
+- Escape all dynamic HTML and translate all user-visible labels.
+- Put repeated markup and path rules in language-local helper functions.
+
+The servers are intentionally independent implementations. They cannot share a
+runtime template, but each server should implement the same patterns once and
+reuse its local helpers everywhere.
+
+## Page structure
+
+Pages use server-rendered HTML and a consistent order:
+
+1. Omi title and logo.
+2. Primary navigation as a compact row of controls.
+3. Page heading and status or error message.
+4. Main content, normally a simple table or form.
+5. Context-specific create or upload forms after the listing.
+
+Tables use descriptive column headings and `-` for a value or action that is not
+available. Repository listings put the entry button in the first column and the
+entry's operations in the Actions column.
+
+## Buttons, links, and forms
+
+Navigation and actions are buttons when a logged-in session must travel with the
+request. This is part of the interface contract, not only visual styling.
+
+- Public destinations may use ordinary links.
+- Authenticated navigation uses a POST form with a `nav_target` field and signed
+  one-time authentication fields.
+- Mutations always use POST and signed one-time authentication fields.
+- Every independent action has its own form and token action name.
+- Related actions are grouped on one row. Destructive actions are placed at the
+  right side where the browser supports the layout.
+- A destructive operation that removes a whole repository or a viewed file uses
+  a confirmation step. Row operations may remain immediate when that is the
+  established interface behavior.
+
+Do not hand-build authentication fields at each call site. Use the server's
+authentication-field helper and its navigation or signed-form helper.
+
+## Repository entries
+
+Files and directories use the same row design:
+
+- The name opens the entry through an authenticated navigation button.
+- Rename is an inline text field and button.
+- Delete is a separate button on the destructive side of the Actions column.
+- Text files also have Edit before Rename.
+- Mutation controls are shown only to logged-in users on the newest commit.
+- Historical commit views are read-only.
+
+Directory rename and delete apply to the marker and every descendant. File and
+directory operations share rendering helpers, but keep separate storage helpers
+because their commit semantics differ.
+
+Every successful content change creates a commit. Rename creates a new snapshot
+with rewritten paths. Delete creates a new snapshot without the selected entry;
+earlier commits and their blobs remain available.
+
+## Status, errors, and confirmation
+
+- Success and error text appears near the operation that produced it.
+- Errors should include the useful underlying cause when it is safe to display.
+- Do not reduce an available diagnostic to only `Error`.
+- Confirmation boxes identify the exact destructive target and contain Confirm
+  and Cancel controls.
+- Invalid, expired, or consumed one-time tokens tell the user to reload or log in
+  again, as appropriate.
+
+## Internationalization and escaping
+
+- Retrieve labels through the translation helper instead of embedding English.
+- HTML-escape translated values and all repository, file, directory, and user
+  data when inserting them into markup.
+- Use a hidden-input helper for hidden names and values so both are escaped in
+  one place.
+- Keep action identifiers stable and language-neutral; translate only labels.
+
+## Shared helper responsibilities
+
+Each server implementation should have one local helper for each repeated rule:
+
+- HTML escaping.
+- Translation lookup and escaped translation output.
+- Hidden input rendering.
+- Signed authentication fields.
+- Signed inline POST forms.
+- Authenticated navigation buttons.
+- Navigation-row layout.
+- Repository file/directory action layout.
+- Joining normalized repository path segments.
+- Full page shell and status/error rendering.
+
+Before adding markup inline, check whether one of these helpers already owns the
+pattern. Extend that helper when all its callers need the change. Add a specialized
+helper when a repeated component has a stable contract. Do not combine operations
+merely because their markup resembles each other when their validation or database
+behavior differs.
+
+## FreePascal helper map
+
+The FreePascal server currently uses these common functions:
+
+| Responsibility | Helper |
+| --- | --- |
+| Escape dynamic HTML | `HtmlEncode` |
+| Translate labels | `T` and `TE` |
+| Render hidden values | `BuildHiddenInput` |
+| Add one-time authentication | `BuildAuthHiddenFields` |
+| Render signed inline mutations | `BuildSignedInlineForm` |
+| Render authenticated navigation | `BuildNavTargetButton` |
+| Render compact navigation | `BuildNavRow` |
+| Render file/directory actions | `BuildRepositoryEntryActions` |
+| Join repository path segments | `JoinRepoPath` |
+
+Use these functions instead of repeating their HTML or slash-handling rules in an
+endpoint. Equivalent helpers should be maintained in the JavaScript and PHP
+servers as their interfaces converge.
+
+## Review checklist
+
+When adding or changing a web feature, verify that:
+
+- it works without JavaScript and cookies;
+- authenticated buttons contain a distinct signed action token;
+- mutations use POST and cannot appear in historical views;
+- dynamic values and translated labels are escaped;
+- the same component is not independently assembled in multiple call sites;
+- repository changes create a commit and preserve older commits;
+- errors explain the actionable cause;
+- the FreePascal, JavaScript, and PHP interfaces use the same terminology and
+  overall interaction pattern where the feature exists.

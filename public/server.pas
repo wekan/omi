@@ -1052,6 +1052,45 @@ begin
     Result := ResolvedKey;
 end;
 
+function BuildHiddenInput(const Name, Value: string): string;
+begin
+  Result := '<input type="hidden" name="' + HtmlEncode(Name) +
+    '" value="' + HtmlEncode(Value) + '">';
+end;
+
+function BuildSignedInlineForm(ARequest: TRequest; const TokenAction,
+  FieldsHtml, ControlsHtml: string): string;
+begin
+  Result := '<form method="POST" style="display:inline; margin:0; padding:0;">' +
+    BuildAuthHiddenFields(ARequest, TokenAction) + FieldsHtml + ControlsHtml +
+    '</form>';
+end;
+
+function BuildRepositoryEntryActions(ARequest: TRequest; const Target,
+  EntryKind, EditButton: string; Translations: TJSONObject): string;
+var
+  RenameAction, DeleteAction: string;
+  RenameForm, DeleteForm: string;
+begin
+  RenameAction := 'rename_' + EntryKind;
+  DeleteAction := 'delete_' + EntryKind;
+  RenameForm := BuildSignedInlineForm(ARequest,
+    'repo-' + EntryKind + '-rename-' + Target,
+    BuildHiddenInput('action', RenameAction) +
+    BuildHiddenInput('target', Target),
+    '<input type="text" name="new_name" size="12" placeholder="' +
+    HtmlEncode(T('new-name', Translations)) + '">' +
+    '<input type="submit" value="' + HtmlEncode(T('rename', Translations)) + '">');
+  DeleteForm := BuildSignedInlineForm(ARequest,
+    'repo-' + EntryKind + '-delete-' + Target,
+    BuildHiddenInput('action', DeleteAction) +
+    BuildHiddenInput('target', Target),
+    '<input type="submit" value="' + HtmlEncode(T('delete', Translations)) + '">');
+  Result := '<div style="display:flex; align-items:center; ' +
+    'justify-content:space-between; gap:12px;"><div>' + EditButton +
+    RenameForm + '</div><div>' + DeleteForm + '</div></div>';
+end;
+
 function TE(const Key: string; Translations: TJSONObject): string;
 begin
   Result := HtmlEncode(T(Key, Translations));
@@ -1219,6 +1258,16 @@ begin
   Result := StringReplace(Result, '..\', '', [rfReplaceAll]);
   Result := StringReplace(Result, '..', '', [rfReplaceAll]);
   Result := StringReplace(Result, #0, '', [rfReplaceAll]);
+end;
+
+function JoinRepoPath(const DirectoryName, EntryName: string): string;
+begin
+  if DirectoryName = '' then
+    Result := EntryName
+  else if EntryName = '' then
+    Result := DirectoryName
+  else
+    Result := DirectoryName + '/' + EntryName;
 end;
 
 function NormalizeRepoName(const Value: string): string;
@@ -3772,11 +3821,7 @@ begin
         if Action = 'delete_dir' then
         begin
           Target := SanitizePathSegment(ARequest.ContentFields.Values['target']);
-          EntryPath := RepoPath;
-          if EntryPath <> '' then
-            EntryPath := EntryPath + '/' + Target
-          else
-            EntryPath := Target;
+          EntryPath := JoinRepoPath(RepoPath, Target);
           if DeleteDirectoryFromRepo(DbPath, EntryPath, Username) then
             UploadMsg := T('delete', Translations)
           else
@@ -3788,13 +3833,8 @@ begin
           NewName := SanitizePathSegment(ARequest.ContentFields.Values['new_name']);
           if (Target <> '') and (NewName <> '') then
           begin
-            EntryPath := RepoPath;
-            if EntryPath <> '' then
-              EntryPath := EntryPath + '/' + Target
-            else
-              EntryPath := Target;
-            if RepoPath <> '' then
-              NewName := RepoPath + '/' + NewName;
+            EntryPath := JoinRepoPath(RepoPath, Target);
+            NewName := JoinRepoPath(RepoPath, NewName);
             if RenameDirectoryInRepo(DbPath, EntryPath, NewName, Username) then
               UploadMsg := T('save', Translations)
             else
@@ -3806,11 +3846,7 @@ begin
         else if Action = 'delete_file' then
         begin
           Target := SanitizePathSegment(ARequest.ContentFields.Values['target']);
-          EntryPath := RepoPath;
-          if EntryPath <> '' then
-            EntryPath := EntryPath + '/' + Target
-          else
-            EntryPath := Target;
+          EntryPath := JoinRepoPath(RepoPath, Target);
           if DeleteFileFromRepo(DbPath, EntryPath, Username) then
             UploadMsg := T('delete', Translations)
           else
@@ -3822,13 +3858,8 @@ begin
           NewName := SanitizePathSegment(ARequest.ContentFields.Values['new_name']);
           if (Target <> '') and (NewName <> '') then
           begin
-            EntryPath := RepoPath;
-            if EntryPath <> '' then
-              EntryPath := EntryPath + '/' + Target
-            else
-              EntryPath := Target;
-            if RepoPath <> '' then
-              NewName := RepoPath + '/' + NewName;
+            EntryPath := JoinRepoPath(RepoPath, Target);
+            NewName := JoinRepoPath(RepoPath, NewName);
             if RenameFileInRepo(DbPath, EntryPath, NewName, Username) then
               UploadMsg := T('save', Translations)
             else
@@ -3842,11 +3873,7 @@ begin
           DirName := SanitizePathSegment(ARequest.ContentFields.Values['dir_name']);
           if DirName <> '' then
           begin
-            EntryPath := RepoPath;
-            if EntryPath <> '' then
-              EntryPath := EntryPath + '/' + DirName + '/.omidir'
-            else
-              EntryPath := DirName + '/.omidir';
+            EntryPath := JoinRepoPath(RepoPath, DirName + '/.omidir');
             if CommitFile(DbPath, EntryPath, '', Username, 'Create directory') then
               UploadMsg := T('create', Translations)
             else
@@ -3861,11 +3888,7 @@ begin
           FileData := ARequest.ContentFields.Values['file_content'];
           if FileName <> '' then
           begin
-            EntryPath := RepoPath;
-            if EntryPath <> '' then
-              EntryPath := EntryPath + '/' + FileName
-            else
-              EntryPath := FileName;
+            EntryPath := JoinRepoPath(RepoPath, FileName);
             if CommitFile(DbPath, EntryPath, FileData, Username, 'Create file') then
               UploadMsg := T('create', Translations)
             else
@@ -3880,11 +3903,7 @@ begin
           FileName := SanitizePathSegment(UploadFile.FileName);
           if FileName <> '' then
           begin
-            EntryPath := RepoPath;
-            if EntryPath <> '' then
-              EntryPath := EntryPath + '/' + FileName
-            else
-              EntryPath := FileName;
+            EntryPath := JoinRepoPath(RepoPath, FileName);
             FileData := ReadFileToString(UploadFile.LocalFileName);
             if CommitFile(DbPath, EntryPath, FileData, Username, 'Upload file') then
               UploadMsg := T('upload', Translations)
@@ -3925,34 +3944,20 @@ begin
       for I := 0 to DirList.Count - 1 do
       begin
         DisplayName := DirList[I];
-        EntryPath := RepoToRoot(RepoName);
-        if RepoPath <> '' then
-          EntryPath := EntryPath + '/' + RepoPath;
-        EntryPath := EntryPath + '/' + DisplayName;
+        EntryPath := RepoToRoot(RepoName) + '/' +
+          JoinRepoPath(RepoPath, DisplayName);
         RowActions := '-';
         if (Username <> '') and not IsHistoricView then
-          RowActions := '<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">' +
-            '<div><form method="POST" style="display:inline">' +
-            BuildAuthHiddenFields(ARequest, 'repo-dir-rename-' + DisplayName) +
-            '<input type="hidden" name="action" value="rename_dir">' +
-            '<input type="hidden" name="target" value="' + HtmlEncode(DisplayName) + '">' +
-            '<input type="text" name="new_name" size="12" placeholder="' + T('new-name', Translations) + '">' +
-            '<input type="submit" value="' + T('rename', Translations) + '"></form></div>' +
-            '<div><form method="POST" style="display:inline">' +
-            BuildAuthHiddenFields(ARequest, 'repo-dir-delete-' + DisplayName) +
-            '<input type="hidden" name="action" value="delete_dir">' +
-            '<input type="hidden" name="target" value="' + HtmlEncode(DisplayName) + '">' +
-            '<input type="submit" value="' + T('delete', Translations) + '"></form></div></div>';
+          RowActions := BuildRepositoryEntryActions(ARequest, DisplayName,
+            'dir', '', Translations);
         TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-dir-open-' + IntToStr(I), DisplayName + '/') + '</td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
       end;
 
       for I := 0 to FileList.Count - 1 do
       begin
         DisplayName := FileList[I];
-        EntryPath := RepoToRoot(RepoName);
-        if RepoPath <> '' then
-          EntryPath := EntryPath + '/' + RepoPath;
-        EntryPath := EntryPath + '/' + DisplayName;
+        EntryPath := RepoToRoot(RepoName) + '/' +
+          JoinRepoPath(RepoPath, DisplayName);
         RowActions := '-';
         if (Username <> '') and not IsHistoricView then
         begin
@@ -3973,24 +3978,8 @@ begin
         begin
           EditButton := BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath + '?edit=1'), 'repo-file-open-edit-' + IntToStr(I), T('edit', Translations));
         end;
-        RowActions := '<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">' +
-            '<div>' +
-            EditButton +
-            '<form method="POST" style="display:inline">' +
-            BuildAuthHiddenFields(ARequest, 'repo-rename-' + DisplayName) +
-            '<input type="hidden" name="action" value="rename_file">' +
-            '<input type="hidden" name="target" value="' + HtmlEncode(DisplayName) + '">' +
-            '<input type="text" name="new_name" size="12" placeholder="' + T('new-name', Translations) + '">' +
-            '<input type="submit" value="' + T('rename', Translations) + '"></form>' +
-            '</div>' +
-            '<div>' +
-            '<form method="POST" style="display:inline">' +
-            BuildAuthHiddenFields(ARequest, 'repo-delete-' + DisplayName) +
-            '<input type="hidden" name="action" value="delete_file">' +
-            '<input type="hidden" name="target" value="' + HtmlEncode(DisplayName) + '">' +
-            '<input type="submit" value="' + T('delete', Translations) + '"></form>' +
-            '</div>' +
-            '</div>';
+        RowActions := BuildRepositoryEntryActions(ARequest, DisplayName,
+          'file', EditButton, Translations);
         end;
         TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-file-open-' + IntToStr(I), '[' + GetFileTypeLabel(DisplayName) + '] ' + DisplayName) + '</td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
       end;

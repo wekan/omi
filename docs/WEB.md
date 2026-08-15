@@ -5,6 +5,9 @@
 
 ## Overview
 
+For the common interaction, security, markup, and code-reuse conventions used by
+all server implementations, see [WEB_DESIGN.md](WEB_DESIGN.md).
+
 Omi has web server implementations in PHP (traditional) and JavaScript (Node.js, Bun, Deno).
 
 **Choose your server:**

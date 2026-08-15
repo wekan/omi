@@ -1,6 +1,6 @@
 # Omi Documentation
 
-> **Quick Navigation:** [FEATURES.md](FEATURES.md) | [CLI](#cli-documentation) | [WEB.md](WEB.md) | [SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)
+> **Quick Navigation:** [FEATURES.md](FEATURES.md) | [CLI](#cli-documentation) | [WEB.md](WEB.md) | [WEB_DESIGN.md](WEB_DESIGN.md) | [SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)
 
 ## Getting Started
 
@@ -23,6 +23,7 @@ Omi is a lightweight Git-like version control system for retro systems and moder
 | **[CLI_AMIGASHELL.md](CLI_AMIGASHELL.md)** | Command line for Commodore Amiga | Amiga users |
 | **[CLI_LUA.md](CLI_LUA.md)** | Command line for Lua (cross-platform) | Lua developers |
 | **[WEB.md](WEB.md)** | Web interface and browser access | Web users |
+| **[WEB_DESIGN.md](WEB_DESIGN.md)** | Shared web UI and code patterns | Web developers |
 | **[SERVER_JS.md](SERVER_JS.md)** | Web server (JavaScript runtimes) | Node.js/Bun/Deno developers |
 | **[SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md)** | Web server (FreePascal compiled) | System admins |
 | **[SERVER_PHP.md](SERVER_PHP.md)** | Web server (PHP with Apache/Nginx) | PHP/web admins |
