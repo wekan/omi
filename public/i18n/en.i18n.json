@@ -1664,6 +1664,8 @@
   "repository-name": "Repository name",
   "size-bytes": "Size (bytes)",
   "last-modified": "Last Modified",
+  "uploaded": "Uploaded",
+  "uploaded-by": "Uploaded By",
   "no-repositories": "No repositories found",
   "create-repository": "Create Repository",
   "upload-repository": "Upload/Update Repository",

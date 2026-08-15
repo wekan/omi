@@ -68,6 +68,8 @@ type
     Filename: string;
     Hash: string;
     DateTimeStr: string;
+    UploadedAt: string;
+    UploadedBy: string;
     Size: Int64;
     IsDirectory: Boolean;
   end;
@@ -1551,6 +1553,25 @@ begin
     Result := StrToInt64Def(Output, 0);
 end;
 
+procedure EnsureFileOriginMetadata(const DbPath: string);
+var
+  TableInfo: string;
+begin
+  TableInfo := ExecSqlOnDb(DbPath, 'PRAGMA table_info(files);');
+  if Pos('|uploaded_at|', '|' + TableInfo) = 0 then
+    ExecSqlOnDb(DbPath, 'ALTER TABLE files ADD COLUMN uploaded_at TEXT;');
+  if Pos('|uploaded_by|', '|' + TableInfo) = 0 then
+    ExecSqlOnDb(DbPath, 'ALTER TABLE files ADD COLUMN uploaded_by TEXT;');
+  ExecSqlOnDb(DbPath,
+    'UPDATE files SET uploaded_at=COALESCE(NULLIF(uploaded_at,''''),' +
+    '(SELECT c.datetime FROM files origin JOIN commits c ON c.id=origin.commit_id ' +
+    'WHERE origin.filename=files.filename ORDER BY origin.commit_id LIMIT 1),datetime),' +
+    'uploaded_by=COALESCE(NULLIF(uploaded_by,''''),' +
+    '(SELECT c.user FROM files origin JOIN commits c ON c.id=origin.commit_id ' +
+    'WHERE origin.filename=files.filename ORDER BY origin.commit_id LIMIT 1),'''') ' +
+    'WHERE uploaded_at IS NULL OR uploaded_at='''' OR uploaded_by IS NULL OR uploaded_by='''';');
+end;
+
 function GetLatestFiles(const DbPath, RepoPath: string; CommitId: Int64 = 0): TFileEntryArray;
 var
   Output: string;
@@ -1564,6 +1585,7 @@ var
   CleanRepoPath: string;
 begin
   Result := nil;
+  EnsureFileOriginMetadata(DbPath);
   if CommitId > 0 then
     LatestCommit := CommitId
   else
@@ -1579,10 +1601,10 @@ begin
   begin
     // Check if this is a file (exact match) or a directory (prefix match)
     Prefix := CleanRepoPath + '/';
-    Query := 'SELECT f.filename, f.hash, f.datetime, IFNULL(b.size,0) FROM files f LEFT JOIN blobs b ON f.hash=b.hash WHERE f.commit_id=' + IntToStr(LatestCommit) + ' AND (f.filename = ''' + SqlEscape(CleanRepoPath) + ''' OR f.filename LIKE ''' + SqlEscape(Prefix) + '%'') ORDER BY f.filename;';
+    Query := 'SELECT f.filename, f.hash, f.datetime, IFNULL(b.size,0),IFNULL(f.uploaded_at,f.datetime),IFNULL(f.uploaded_by,'''') FROM files f LEFT JOIN blobs b ON f.hash=b.hash WHERE f.commit_id=' + IntToStr(LatestCommit) + ' AND (f.filename = ''' + SqlEscape(CleanRepoPath) + ''' OR f.filename LIKE ''' + SqlEscape(Prefix) + '%'') ORDER BY f.filename;';
   end
   else
-    Query := 'SELECT f.filename, f.hash, f.datetime, IFNULL(b.size,0) FROM files f LEFT JOIN blobs b ON f.hash=b.hash WHERE f.commit_id=' + IntToStr(LatestCommit) + ' ORDER BY f.filename;';
+    Query := 'SELECT f.filename, f.hash, f.datetime, IFNULL(b.size,0),IFNULL(f.uploaded_at,f.datetime),IFNULL(f.uploaded_by,'''') FROM files f LEFT JOIN blobs b ON f.hash=b.hash WHERE f.commit_id=' + IntToStr(LatestCommit) + ' ORDER BY f.filename;';
 
   Output := ExecSqlOnDb(DbPath, Query);
   if Output = '' then
@@ -1593,12 +1615,14 @@ begin
     if Trim(Lines[I]) = '' then
       Continue;
     Parts := Lines[I].Split(['|']);
-    if Length(Parts) >= 4 then
+    if Length(Parts) >= 6 then
     begin
       Entry.Filename := Parts[0];
       Entry.Hash := Parts[1];
       Entry.DateTimeStr := Parts[2];
       Entry.Size := StrToInt64Def(Parts[3], 0);
+      Entry.UploadedAt := Parts[4];
+      Entry.UploadedBy := Parts[5];
       Entry.IsDirectory := False;
       SetLength(Result, Length(Result) + 1);
       Result[High(Result)] := Entry;
@@ -1643,11 +1667,15 @@ begin
   Result := StrToInt64Def(Output, 0);
 end;
 
-function InsertFileRecord(const DbPath, Filename, Hash, DateTimeStr: string; CommitId: Int64): Boolean;
+function InsertFileRecord(const DbPath, Filename, Hash, DateTimeStr,
+  UploadedAt, UploadedBy: string; CommitId: Int64): Boolean;
 var
   Query: string;
 begin
-  Query := 'INSERT INTO files(filename, hash, datetime, commit_id) VALUES(''' + SqlEscape(Filename) + ''', ''' + SqlEscape(Hash) + ''', ''' + SqlEscape(DateTimeStr) + ''', ' + IntToStr(CommitId) + ');';
+  Query := 'INSERT INTO files(filename, hash, datetime, uploaded_at, uploaded_by, commit_id) VALUES(''' +
+    SqlEscape(Filename) + ''', ''' + SqlEscape(Hash) + ''', ''' +
+    SqlEscape(DateTimeStr) + ''', ''' + SqlEscape(UploadedAt) + ''', ''' +
+    SqlEscape(UploadedBy) + ''', ' + IntToStr(CommitId) + ');';
   ExecSqlOnDb(DbPath, Query);
   Result := True;
 end;
@@ -1705,10 +1733,18 @@ begin
     begin
       if Files[I].Filename = Filename then
         Continue;
-      InsertFileRecord(DbPath, Files[I].Filename, Files[I].Hash, Files[I].DateTimeStr, CommitId);
+      InsertFileRecord(DbPath, Files[I].Filename, Files[I].Hash,
+        Files[I].DateTimeStr, Files[I].UploadedAt, Files[I].UploadedBy, CommitId);
     end;
 
-    InsertFileRecord(DbPath, Filename, Hash, NowStr, CommitId);
+    for I := 0 to High(Files) do
+      if Files[I].Filename = Filename then
+      begin
+        InsertFileRecord(DbPath, Filename, Hash, NowStr, Files[I].UploadedAt,
+          Files[I].UploadedBy, CommitId);
+        Exit(True);
+      end;
+    InsertFileRecord(DbPath, Filename, Hash, NowStr, NowStr, Username, CommitId);
     Result := True;
   finally
     if FileExists(TempFile) then
@@ -1740,7 +1776,7 @@ begin
   Query := 'PRAGMA foreign_keys=ON;' +
     'CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, data BLOB, size INTEGER);' +
     'CREATE TABLE IF NOT EXISTS commits (id INTEGER PRIMARY KEY AUTOINCREMENT, message TEXT, datetime TEXT, user TEXT);' +
-    'CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, hash TEXT, datetime TEXT, commit_id INTEGER);' +
+    'CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, hash TEXT, datetime TEXT, uploaded_at TEXT, uploaded_by TEXT, commit_id INTEGER);' +
     'CREATE TABLE IF NOT EXISTS staging (filename TEXT PRIMARY KEY, hash TEXT, datetime TEXT);';
   if not RunSqlOnDb(RepoFilePath, Query, SqlOutput, SqlError) then
     ErrorMessage := 'Could not create SQLite schema: ' + SqlError
@@ -1803,19 +1839,18 @@ var
   Files: TFileEntryArray;
   I: Integer;
   CommitId: Int64;
-  NowStr: string;
 begin
   Result := False;
   Files := GetLatestFiles(DbPath, '');
   CommitId := CreateCommit(DbPath, 'Delete file', Username);
   if CommitId = 0 then
     Exit;
-  NowStr := FormatDateTime('yyyy-mm-dd hh:nn:ss', Now);
   for I := 0 to High(Files) do
   begin
     if Files[I].Filename = TargetFilename then
       Continue;
-    InsertFileRecord(DbPath, Files[I].Filename, Files[I].Hash, NowStr, CommitId);
+    InsertFileRecord(DbPath, Files[I].Filename, Files[I].Hash,
+      Files[I].DateTimeStr, Files[I].UploadedAt, Files[I].UploadedBy, CommitId);
   end;
   Result := True;
 end;
@@ -1825,7 +1860,6 @@ var
   Files: TFileEntryArray;
   I: Integer;
   CommitId: Int64;
-  NowStr: string;
   Filename: string;
 begin
   Result := False;
@@ -1833,13 +1867,13 @@ begin
   CommitId := CreateCommit(DbPath, 'Rename file', Username);
   if CommitId = 0 then
     Exit;
-  NowStr := FormatDateTime('yyyy-mm-dd hh:nn:ss', Now);
   for I := 0 to High(Files) do
   begin
     Filename := Files[I].Filename;
     if Filename = OldName then
       Filename := NewName;
-    InsertFileRecord(DbPath, Filename, Files[I].Hash, NowStr, CommitId);
+    InsertFileRecord(DbPath, Filename, Files[I].Hash, Files[I].DateTimeStr,
+      Files[I].UploadedAt, Files[I].UploadedBy, CommitId);
   end;
   Result := True;
 end;
@@ -1876,7 +1910,7 @@ begin
     if Pos(DirectoryPrefix, Files[I].Filename) = 1 then
       Continue;
     InsertFileRecord(DbPath, Files[I].Filename, Files[I].Hash,
-      Files[I].DateTimeStr, CommitId);
+      Files[I].DateTimeStr, Files[I].UploadedAt, Files[I].UploadedBy, CommitId);
   end;
   Result := True;
 end;
@@ -1923,7 +1957,7 @@ begin
       Filename := NewName + Copy(Filename, Length(OldName) + 1,
         Length(Filename));
     InsertFileRecord(DbPath, Filename, Files[I].Hash,
-      Files[I].DateTimeStr, CommitId);
+      Files[I].DateTimeStr, Files[I].UploadedAt, Files[I].UploadedBy, CommitId);
   end;
   Result := True;
 end;
@@ -3462,6 +3496,9 @@ var
   DisplayName: string;
   RowActions: string;
   FileSizeText: string;
+  FileModifiedText: string;
+  FileUploadedText: string;
+  FileUploaderText: string;
   NewContent: string;
   MarkdownHtml: string;
   Base64Data: string;
@@ -3948,18 +3985,25 @@ begin
         if (Username <> '') and not IsHistoricView then
           RowActions := BuildRepositoryEntryActions(ARequest, DisplayName,
             'dir', '', Translations);
-        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-dir-open-' + IntToStr(I), DisplayName + '/') + '</td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
+        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-dir-open-' + IntToStr(I), DisplayName + '/') + '</td><td>-</td><td>-</td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
       end;
 
       for I := 0 to FileList.Count - 1 do
       begin
         DisplayName := FileList[I];
         FileSizeText := '-';
+        FileModifiedText := '-';
+        FileUploadedText := '-';
+        FileUploaderText := '-';
         EntryPath := JoinRepoPath(RepoPath, DisplayName);
         for J := 0 to High(Files) do
           if Files[J].Filename = EntryPath then
           begin
             FileSizeText := FormatByteSize(Files[J].Size);
+            FileModifiedText := Files[J].DateTimeStr;
+            FileUploadedText := Files[J].UploadedAt;
+            if Files[J].UploadedBy <> '' then
+              FileUploaderText := Files[J].UploadedBy;
             Break;
           end;
         EntryPath := RepoToRoot(RepoName) + '/' +
@@ -3987,11 +4031,11 @@ begin
         RowActions := BuildRepositoryEntryActions(ARequest, DisplayName,
           'file', EditButton, Translations);
         end;
-        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-file-open-' + IntToStr(I), '[' + GetFileTypeLabel(DisplayName) + '] ' + DisplayName) + '</td><td>' + HtmlEncode(FileSizeText) + '</td><td>-</td><td>' + RowActions + '</td></tr>';
+        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-file-open-' + IntToStr(I), '[' + GetFileTypeLabel(DisplayName) + '] ' + DisplayName) + '</td><td>' + HtmlEncode(FileSizeText) + '</td><td>' + HtmlEncode(FileModifiedText) + '</td><td>' + HtmlEncode(FileUploadedText) + '</td><td>' + HtmlEncode(FileUploaderText) + '</td><td>' + RowActions + '</td></tr>';
       end;
 
       if TableRows = '' then
-        TableRows := '<tr><td colspan="4">' + T('no-files-directory', Translations) + '</td></tr>';
+        TableRows := '<tr><td colspan="6">' + T('no-files-directory', Translations) + '</td></tr>';
 
       DirHeader := RepoPath;
       if DirHeader = '' then
@@ -4009,7 +4053,7 @@ begin
           ParentUrl := RepoToRoot(RepoName);
           if ParentPath <> '' then
             ParentUrl := ParentUrl + '/' + ParentPath;
-          ParentDirRow := '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(ParentUrl), 'repo-parent-row', '..') + '</td><td>-</td><td>-</td><td>-</td></tr>';
+          ParentDirRow := '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(ParentUrl), 'repo-parent-row', '..') + '</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>';
         end;
       end;
 
@@ -4034,7 +4078,7 @@ begin
         '<h2>' + T('directory', Translations) + ': /' + HtmlEncode(RepoPath) + '</h2>' +
         '<hr>' +
         '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
-        '<tr bgcolor="#333333"><th><font color="white">' + T('name', Translations) + '</font></th><th><font color="white">' + T('size', Translations) + '</font></th><th><font color="white">' + T('last-modified', Translations) + '</font></th><th><font color="white">' + T('actions', Translations) + '</font></th></tr>' +
+        '<tr bgcolor="#333333"><th><font color="white">' + T('name', Translations) + '</font></th><th><font color="white">' + T('size', Translations) + '</font></th><th><font color="white">' + T('last-modified', Translations) + '</font></th><th><font color="white">' + T('uploaded', Translations) + '</font></th><th><font color="white">' + T('uploaded-by', Translations) + '</font></th><th><font color="white">' + T('actions', Translations) + '</font></th></tr>' +
         ParentDirRow +
         TableRows +
         '</table>' +

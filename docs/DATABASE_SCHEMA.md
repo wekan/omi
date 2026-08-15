@@ -42,11 +42,18 @@ Stores file metadata for each commit.
 | filename | TEXT | File path and name |
 | hash | TEXT | Reference to blob (SHA256) |
 | datetime | TEXT | ISO format timestamp |
+| uploaded_at | TEXT | Original upload timestamp |
+| uploaded_by | TEXT | Username that originally uploaded the file |
 | commit_id | INTEGER | Which commit this file version belongs to |
 
 **Relationships:**
 - `hash` → `blobs.hash` (which content this file contains)
 - `commit_id` → `commits.id` (which commit this file is part of)
+
+`uploaded_at` and `uploaded_by` are copied unchanged into later snapshots, including
+edits and renames. When an older database is opened, Omi adds these columns and
+backfills them from the earliest commit containing the same path. Metadata for all
+new operations is persistent and does not need inference.
 
 **Example:**
 ```
@@ -54,6 +61,8 @@ id: 1
 filename: "README.md"
 hash: "abc123..."
 datetime: "2026-02-10 10:30:45"
+uploaded_at: "2026-02-10 10:30:45"
+uploaded_by: "admin"
 commit_id: 1
 ```
 
