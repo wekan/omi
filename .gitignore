@@ -9,7 +9,8 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
+# Embedded SQLite and Free Pascal build output
+/build/
 develop-eggs/
 dist/
 downloads/
