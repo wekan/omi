@@ -3790,7 +3790,10 @@ begin
           if Pos(RepoPath + '/', Relative) = 1 then
             Relative := Copy(Relative, Length(RepoPath) + 2, Length(Relative));
         end;
-        if (Relative = '.omidir') or (ExtractFileName(Relative) = '.omidir') then
+        // The marker for the directory currently being viewed is hidden, but a
+        // nested "name/.omidir" must continue to the slash handling below so
+        // its parent directory appears in this listing.
+        if Relative = '.omidir' then
           Continue;
         SlashPos := Pos('/', Relative);
         if SlashPos > 0 then
