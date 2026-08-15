@@ -26,6 +26,7 @@ program OmiServer;
 {$MODE OBJFPC}
 {$H+}
 {$CODEPAGE UTF8}
+{$LINK ../build/sqlite3.o}
 
 uses
   {$IFDEF UNIX}
@@ -41,6 +42,7 @@ uses
 
 const
   VERSION = '1.0.0';
+  SQLITE_OK = 0;
   DEFAULT_PORT = 3001;
   SETTINGS_FILE = '../settings.txt';
   USERS_FILE = '../users.txt';
@@ -52,9 +54,13 @@ const
   SESSION_META_SEP = #2;
   
 type
+  TSqliteExecCallback = function(UserData: Pointer; ColumnCount: Integer;
+    Values, ColumnNames: PPChar): Integer; cdecl;
+  TPCharArray = array[0..(MaxInt div SizeOf(PChar)) - 1] of PChar;
+  PPCharArray = ^TPCharArray;
+
   TSettings = record
     Port: Integer;
-    SqliteCmd: string;
     DbPath: string;
   end;
 
@@ -75,6 +81,14 @@ type
   end;
 
   TRepoEntryArray = array of TRepoEntry;
+
+function sqlite3_open(FileName: PChar; var Db: Pointer): Integer; cdecl; external name 'sqlite3_open';
+function sqlite3_close(Db: Pointer): Integer; cdecl; external name 'sqlite3_close';
+function sqlite3_exec(Db: Pointer; Sql: PChar; Callback: TSqliteExecCallback;
+  UserData: Pointer; var ErrorMessage: PChar): Integer; cdecl; external name 'sqlite3_exec';
+procedure sqlite3_free(Value: Pointer); cdecl; external name 'sqlite3_free';
+function sqlite3_errmsg(Db: Pointer): PChar; cdecl; external name 'sqlite3_errmsg';
+function sqlite3_libversion: PChar; cdecl; external name 'sqlite3_libversion';
 
 var
   Settings: TSettings;
@@ -802,7 +816,6 @@ var
   EqPos: Integer;
 begin
   Result.Port := DEFAULT_PORT;
-  Result.SqliteCmd := 'sqlite3';
   Result.DbPath := 'omi.db';
 
   if FileExists(DataPath(SETTINGS_FILE)) then
@@ -820,17 +833,13 @@ begin
         EqPos := Pos('=', Line);
         if EqPos > 0 then
         begin
-          // LOWERCASED, because the settings.txt that ships with Omi writes
-          // its keys in capitals - SQLITE=sqlite3, PORT=3001 - and this
-          // compared them against lowercase literals, so every line in that
-          // file was read and then ignored.
+          // LOWERCASED, because settings.txt writes its keys in capitals and
+          // these comparisons use lowercase literals.
           Key := LowerCase(Trim(Copy(Line, 1, EqPos - 1)));
           Value := Trim(Copy(Line, EqPos + 1, Length(Line)));
 
           if Key = 'port' then
             Result.Port := StrToIntDef(Value, DEFAULT_PORT)
-          else if Key = 'sqlite' then
-            Result.SqliteCmd := Value
           else if Key = 'db' then
             Result.DbPath := Value;
         end;
@@ -1282,48 +1291,67 @@ begin
   end;
 end;
 
+function CollectSqlRows(UserData: Pointer; ColumnCount: Integer;
+  Values, ColumnNames: PPChar): Integer; cdecl;
+var
+  I: Integer;
+  ValueArray: PPCharArray;
+  Output: PString;
+begin
+  Result := 0;
+  Output := PString(UserData);
+  ValueArray := PPCharArray(Values);
+  for I := 0 to ColumnCount - 1 do
+  begin
+    if I > 0 then
+      Output^ := Output^ + '|';
+    if Assigned(ValueArray^[I]) then
+      Output^ := Output^ + StrPas(ValueArray^[I]);
+  end;
+  Output^ := Output^ + LineEnding;
+end;
+
 function RunSqlOnDb(const DbPath, Query: string; out OutputText, ErrorText: string): Boolean;
 var
-  Proc: TProcess;
-  OutputStream: TStringStream;
+  Db: Pointer;
+  SqlError: PChar;
+  ReturnCode: Integer;
   DbAbs: string;
 begin
   Result := False;
   OutputText := '';
   ErrorText := '';
   DbAbs := ExpandFileName(DbPath);
+  Db := nil;
+  SqlError := nil;
 
-  Proc := TProcess.Create(nil);
-  OutputStream := TStringStream.Create('');
+  ReturnCode := sqlite3_open(PChar(DbAbs), Db);
+  if ReturnCode <> SQLITE_OK then
+  begin
+    if Assigned(Db) then
+      ErrorText := StrPas(sqlite3_errmsg(Db))
+    else
+      ErrorText := 'SQLite could not allocate a database handle';
+    if Assigned(Db) then
+      sqlite3_close(Db);
+    Exit;
+  end;
+
   try
-    Proc.Executable := ResolveExecutablePath(Settings.SqliteCmd);
-    Proc.Parameters.Add(DbAbs);
-    Proc.Parameters.Add('-separator');
-    Proc.Parameters.Add('|');
-    Proc.Parameters.Add('-batch');
-    Proc.Parameters.Add('-noheader');
-    Proc.Parameters.Add(Query);
-    Proc.Options := [poWaitOnExit, poUsePipes, poStderrToOutPut];
-
-    try
-      Proc.Execute;
-      if Assigned(Proc.Output) then
-      begin
-        OutputStream.CopyFrom(Proc.Output, 0);
-        OutputText := OutputStream.DataString;
-        Result := Proc.ExitStatus = 0;
-        if not Result then
-          ErrorText := Trim(OutputText);
-      end;
-    except
-      on E: Exception do
-        ErrorText := E.ClassName + ': ' + E.Message;
+    ReturnCode := sqlite3_exec(Db, PChar(Query), @CollectSqlRows,
+      @OutputText, SqlError);
+    Result := ReturnCode = SQLITE_OK;
+    if not Result then
+    begin
+      if Assigned(SqlError) then
+        ErrorText := StrPas(SqlError)
+      else
+        ErrorText := StrPas(sqlite3_errmsg(Db));
     end;
-    if not Result and (ErrorText = '') then
-      ErrorText := 'SQLite exited with status ' + IntToStr(Proc.ExitStatus);
   finally
-    OutputStream.Free;
-    Proc.Free;
+    if Assigned(SqlError) then
+      sqlite3_free(SqlError);
+    sqlite3_close(Db);
   end;
 end;
 
@@ -2719,8 +2747,6 @@ begin
           AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
           Exit;
         end;
-        if ARequest.ContentFields.Values['SQLITE'] <> '' then
-          SettingsMap.Values['SQLITE'] := ARequest.ContentFields.Values['SQLITE'];
         if ARequest.ContentFields.Values['USERNAME'] <> '' then
           SettingsMap.Values['USERNAME'] := ARequest.ContentFields.Values['USERNAME'];
         if ARequest.ContentFields.Values['PASSWORD'] <> '' then
@@ -2734,8 +2760,6 @@ begin
           ErrorMsg := T('settings-update-failed', Translations);
       end;
 
-      if SettingsMap.Values['SQLITE'] = '' then
-        SettingsMap.Values['SQLITE'] := 'sqlite3';
       if SettingsMap.Values['CURL'] = '' then
         SettingsMap.Values['CURL'] := 'curl';
 
@@ -2764,7 +2788,6 @@ begin
         '<form method="POST">' +
         SaveAuth +
         '<table border="1" cellpadding="5">' +
-        '<tr><td>SQLITE executable:</td><td><input type="text" name="SQLITE" size="50" value="' + HtmlEncode(SettingsMap.Values['SQLITE']) + '"></td></tr>' +
         '<tr><td>USERNAME:</td><td><input type="text" name="USERNAME" size="50" value="' + HtmlEncode(SettingsMap.Values['USERNAME']) + '"></td></tr>' +
         '<tr><td>PASSWORD:</td><td><input type="password" name="PASSWORD" size="50" value="' + HtmlEncode(SettingsMap.Values['PASSWORD']) + '"></td></tr>' +
         '<tr><td>REPOS (server URL):</td><td><input type="text" name="REPOS" size="50" value="' + HtmlEncode(SettingsMap.Values['REPOS']) + '"></td></tr>' +
@@ -3955,7 +3978,7 @@ begin
   if Settings.Port <> PreferredPort then
     WriteLn('Port ', PreferredPort, ' is unavailable; using ', Settings.Port, '.');
   WriteLn('Port: ', Settings.Port);
-  WriteLn('SQLite: ', Settings.SqliteCmd);
+  WriteLn('SQLite: embedded ', StrPas(sqlite3_libversion));
   WriteLn('Users file: ', DataPath(USERS_FILE));
   WriteLn('Repos dir: ', DataPath(REPOS_DIR));
   WriteLn('');

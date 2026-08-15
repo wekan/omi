@@ -7,7 +7,8 @@
 
 This guide covers setting up Omi's web server using the FreePascal standalone compiled implementation. The FreePascal server provides a feature-complete, lightweight HTTP server with SQLite backend storage.
 
-**Key Advantage:** Single compiled executable with no external dependencies (except SQLite). Ideal for retro systems and minimal deployments.
+**Key Advantage:** SQLite is embedded in the final executable. Running Omi does
+not require the `sqlite3` command or a system SQLite library.
 
 ## Requirements
 
@@ -24,10 +25,12 @@ The FreePascal server uses standard library units:
 - `Process` - External process handling
 - `inifiles` - Configuration file parsing
 
-### SQLite Database
-- SQLite3 library (available on most systems)
-- Used via external `sqlite3` command-line tool
-- Or compiled SQLite library binding (alternative)
+### Build Tools
+- A C compiler (`cc`)
+- `curl`, `unzip`, and `openssl` for the first amalgamation download
+
+The build pins SQLite 3.53.4 and verifies its published SHA3-256 checksum.
+These download tools are not runtime dependencies.
 
 ## Installation
 
@@ -71,28 +74,14 @@ fpc -h | head     # Show help
 
 ### Compile FreePascal Server
 
-**Basic Compilation:**
 ```bash
-cd /path/to/wekan
-fpc -o public/server public/server.pas
+./freepascalserver.sh
 ```
 
-**Optimized Build (Release):**
-```bash
-fpc -O3 -o public/server public/server.pas
-```
-
-**With Debug Info:**
-```bash
-fpc -g -o public/server public/server.pas
-```
-
-**Production Build (Optimized + Stripped):**
-```bash
-fpc -O3 -Xs -o public/server public/server.pas
-# Strip debug symbols (Unix only)
-strip public/server
-```
+On the first run, the script downloads the official SQLite amalgamation into
+`build/sqlite3.c`, verifies it, compiles SQLite and Omi under `build/`, copies
+the final executable to `public/server`, and starts it. Later builds reuse the
+cached amalgamation.
 
 ### Build Output
 
@@ -165,7 +154,6 @@ Press Ctrl+C to stop
 Located in project root (parent directory of public/). Controls server behavior:
 
 ```cfg
-SQLITE=/usr/bin/sqlite3
 USERNAME=admin
 PASSWORD=password
 REPOS=http://localhost:3001
@@ -182,7 +170,6 @@ ACCOUNTS_LOCKOUT_UNKNOWN_USERS_LOCKOUT_PERIOD=60
 ```
 
 **Parameters:**
-- **SQLITE** - Path to sqlite3 executable
 - **USERNAME** - Default username for CLI
 - **PASSWORD** - Default password for CLI
 - **REPOS** - Server root URL (used by CLI for push/pull)
@@ -195,13 +182,12 @@ ACCOUNTS_LOCKOUT_UNKNOWN_USERS_LOCKOUT_PERIOD=60
 ### Default Configuration
 If settings.txt is not found, server uses defaults:
 - **Port:** 3001
-- **SQLite:** `sqlite3` (system PATH)
+- **SQLite:** embedded in `public/server`
 - **Admin:** `admin:password`
 - **Repos:** `http://localhost:3001`
 
 **Creating/Editing settings.txt:**
 ```cfg
-SQLITE=/usr/bin/sqlite3
 USERNAME=admin
 PASSWORD=mySecurePassword123
 REPOS=http://myserver.com:3001
@@ -514,23 +500,11 @@ Solution: Install FreePascal development package with httpd components
 **Linux:** `sudo apt install fp-units-http`  
 **macOS:** `brew install fpc` (includes units)
 
-### Server Won't Start
-```
-Error: Cannot find sqlite3 executable
-```
-Solution: Install SQLite or update SQLITE path in settings.txt
+### SQLite Amalgamation Download Fails
 
-**Install SQLite:**
-```bash
-# Linux
-sudo apt install sqlite3
-
-# macOS
-brew install sqlite
-
-# Windows
-Download from https://www.sqlite.org/download.html
-```
+Ensure `curl`, `unzip`, and `openssl` are installed and that
+`https://www.sqlite.org/` is reachable. A checksum mismatch stops the build;
+never bypass it. Delete the incomplete `.part` file and retry.
 
 ### Port Already in Use
 ```
@@ -617,4 +591,3 @@ Stripped/optimized: ~2-4 MB
 - **FreePascal Documentation:** https://wiki.lazarus.freepascal.org/
 - **Omi GitHub:** https://github.com/wekan/omi
 - **Project Root:** [../](../)
-
