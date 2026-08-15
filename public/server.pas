@@ -2509,7 +2509,7 @@ begin
           '<td>' + HtmlEncode(SizeText) + '</td>' +
           '<td>' + HtmlEncode(FormatDateTime('yyyy-mm-dd hh:nn:ss', FileDateToDateTime(Repos[I].Modified))) + '</td>' +
           '<td>' + BuildNavTargetButton(ARequest, '/', '/?download=' + HtmlEncode(Repos[I].Name), 'home-download-repo-' + IntToStr(I), T('download', Translations)) +
-          ' ' + BuildNavTargetButton(ARequest, '/', '/?log=' + HtmlEncode(Repos[I].Name), 'home-log-repo-' + IntToStr(I), T('log', Translations)) +
+          ' <a href="' + HtmlEncode(AddSessionIdToTarget('/?log=' + Repos[I].Name, SessionId)) + '">' + T('log', Translations) + '</a>' +
           ifthen(Username <> '', ' <form method="POST" style="display:inline"><input type="hidden" name="action" value="delete_repo_request"><input type="hidden" name="repo_name" value="' + HtmlEncode(Repos[I].Name) + '">' + DeleteRepoAuth + '<input type="submit" value="' + T('delete', Translations) + '"></form>', '') + '</td></tr>';
       end;
     end;
