@@ -67,11 +67,12 @@ Do not hand-build authentication fields at each call site. Use the server's
 authentication-field helper and its navigation or signed-form helper.
 
 Because Omi deliberately uses neither cookies nor URL sessions, a browser reload
-cannot reuse the button session. A sessionless GET or a replayed/consumed POST on an
-authenticated page redirects to the public home URL `/`. The user stays logged in
-by clicking Omi buttons, which POST the hidden session to the next clean URL. Login
-ends with a signed Continue button so the newly created session also enters the
-interface without a URL token.
+cannot reuse the button session. Public repository, directory, file, and historical
+commit URLs reload at the same location in logged-out mode. A replayed POST is
+converted to a GET of that public URL. Authenticated-only pages return to `/`. The
+user stays logged in by clicking Omi buttons, which POST the hidden session to the
+next clean URL. Login ends with a signed Continue button so the newly created
+session also enters the interface without a URL token.
 
 ## Repository entries
 
@@ -99,8 +100,8 @@ earlier commits and their blobs remain available.
 - Do not reduce an available diagnostic to only `Error`.
 - Confirmation boxes identify the exact destructive target and contain Confirm
   and Cancel controls.
-- Invalid, expired, or consumed page tokens return the browser to `/`, where the
-  user can sign in again.
+- Invalid, expired, or consumed page tokens return public repository pages to the
+  same logged-out URL; authenticated-only pages return to `/`.
 
 ## Internationalization and escaping
 

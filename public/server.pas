@@ -3475,6 +3475,14 @@ var
     Result := '/' + StringReplace(Name, '.omi', '', []);
   end;
 
+  function PublicReloadTarget: string;
+  begin
+    Result := PathInfo;
+    if ARequest.QueryFields.Values['commit'] <> '' then
+      Result := Result + '?commit=' +
+        IntToStr(StrToInt64Def(ARequest.QueryFields.Values['commit'], 0));
+  end;
+
   function BuildRepoBreadcrumb(IsFileView: Boolean): string;
   var
     BreadcrumbParts: TStringArray;
@@ -3556,11 +3564,6 @@ begin
 
   Username := GetUsernameFromRequest(ARequest);
   SessionId := GetSessionIdFromRequest(ARequest);
-  if Username = '' then
-  begin
-    RedirectToPublicHome(ARequest, AResponse);
-    Exit;
-  end;
   CurrentPath := PathInfo;
   Translations := LoadTranslations('en');
   try
@@ -3597,7 +3600,9 @@ begin
       if (PostedAuthAction = '') or not VerifyAndConsumeActionToken(ARequest,
         PostedAuthAction, SessionId, Username) then
       begin
-        RedirectToPublicHome(ARequest, AResponse);
+        AResponse.Code := 303;
+        AResponse.Location := PublicReloadTarget;
+        AResponse.Content := '';
         Exit;
       end;
     end;

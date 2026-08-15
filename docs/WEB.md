@@ -45,8 +45,9 @@ Both servers provide:
 
 Omi keeps sessions only in hidden fields on signed buttons. Session IDs are not
 placed in URLs, so authenticated pages use normal paths such as `/settings` and
-`/repository/file`. Click Omi's buttons to keep the session. Reloading or manually
-opening an authenticated URL without button state returns the browser to `/`.
+`/repository/file`. Click Omi's buttons to keep the session. Reloading a public
+repository URL without button state shows that same page as a logged-out user.
+Authenticated-only pages return to `/`.
 
 ### Sign Up (Register)
 1. Click [Sign Up] from home page
