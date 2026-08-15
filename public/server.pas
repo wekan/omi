@@ -33,6 +33,7 @@ uses
   {$ENDIF}
   SysUtils, fphttpapp, HTTPDefs, httproute, Classes,
   StrUtils, Math, fpjson, jsonparser,
+  BaseUnix, Sockets,
   // ssockets: for ESocketError, so "that port is already in use" can be caught
   // and reported instead of ending the program with a core dump.
   ssockets,
@@ -84,6 +85,7 @@ var
   FallbackTranslations: TJSONObject;
   // --port / -p on the command line, read in the main block below.
   ArgIndex: Integer;
+  PreferredPort: Integer;
 
 function GetLogoutIdleSeconds: Int64; forward;
 procedure LogActivity(const Username, SessionId, ActionName, StatusText, DetailText: string; ARequest: TRequest; ClickCounter: Int64); forward;
@@ -3790,6 +3792,45 @@ begin
   if Assigned(FallbackTranslations) then FreeAndNil(FallbackTranslations);
 end;
 
+// Test the same IPv4 wildcard address the HTTP server will bind. The socket is
+// closed immediately; Application.Run performs the real bind below.
+function PortAvailable(APort: Integer): Boolean;
+var
+  ProbeSocket: LongInt;
+  Address: TInetSockAddr;
+begin
+  Result := False;
+  ProbeSocket := fpSocket(AF_INET, SOCK_STREAM, 0);
+  if ProbeSocket < 0 then Exit;
+  try
+    FillChar(Address, SizeOf(Address), 0);
+    Address.sin_family := AF_INET;
+    Address.sin_port := htons(APort);
+    Address.sin_addr.s_addr := htonl(INADDR_ANY);
+    Result := fpBind(ProbeSocket, @Address, SizeOf(Address)) = 0;
+  finally
+    fpClose(ProbeSocket);
+  end;
+end;
+
+function FindAvailablePort(PreferredPort: Integer): Integer;
+var
+  Candidate: Integer;
+begin
+  if (PreferredPort < 1) or (PreferredPort > 65535) then
+    PreferredPort := DEFAULT_PORT;
+
+  for Candidate := PreferredPort to 65535 do
+    if PortAvailable(Candidate) then Exit(Candidate);
+
+  // If the preferred port was near the end of the range, wrap to the first
+  // unprivileged port and continue until reaching it again.
+  for Candidate := 1024 to PreferredPort - 1 do
+    if PortAvailable(Candidate) then Exit(Candidate);
+
+  raise Exception.Create('No available TCP port was found');
+end;
+
 begin
   DefaultSystemCodePage := CP_UTF8;
   FallbackTranslations := LoadTranslations('en');
@@ -3808,6 +3849,10 @@ begin
       Settings.Port := StrToIntDef(ParamStr(ArgIndex + 1), Settings.Port);
 
   WriteLn('Omi Server v', VERSION);
+  PreferredPort := Settings.Port;
+  Settings.Port := FindAvailablePort(Settings.Port);
+  if Settings.Port <> PreferredPort then
+    WriteLn('Port ', PreferredPort, ' is unavailable; using ', Settings.Port, '.');
   WriteLn('Port: ', Settings.Port);
   WriteLn('SQLite: ', Settings.SqliteCmd);
   WriteLn('Users file: ', DataPath(USERS_FILE));
