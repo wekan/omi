@@ -93,8 +93,9 @@ The `VerifyAndConsumeActionToken` function implements the counter mechanism you 
   POST fields inside buttons. They are never added to URLs. Authenticated pages
   therefore keep normal addresses such as `/`, `/settings`, `/activity`, and
   `/wekan/path`.
-* **Reload behavior:** Reloading a clean URL sends no session fields and shows the
-  logged-out view. Use Omi's buttons to move between pages while staying logged in.
+* **Reload behavior:** Reloading an authenticated page sends no reusable session
+  state and returns the browser to the public home URL `/`. Use Omi's buttons to
+  move between pages while staying logged in.
 * **Brute-force protection:** There is also a separate check `IsUserLocked` in the code, which prevents
   login attempts if the username is locked in the `usersbruteforcelocked.txt` file.
 

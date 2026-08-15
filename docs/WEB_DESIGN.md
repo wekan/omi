@@ -66,10 +66,12 @@ request. This is part of the interface contract, not only visual styling.
 Do not hand-build authentication fields at each call site. Use the server's
 authentication-field helper and its navigation or signed-form helper.
 
-Because Omi deliberately uses neither cookies nor URL sessions, a browser reload is
-a new unauthenticated GET. The user stays logged in by clicking Omi buttons, which
-POST the hidden session to the next clean URL. Login ends with a signed Continue
-button so the newly created session also enters the interface without a URL token.
+Because Omi deliberately uses neither cookies nor URL sessions, a browser reload
+cannot reuse the button session. A sessionless GET or a replayed/consumed POST on an
+authenticated page redirects to the public home URL `/`. The user stays logged in
+by clicking Omi buttons, which POST the hidden session to the next clean URL. Login
+ends with a signed Continue button so the newly created session also enters the
+interface without a URL token.
 
 ## Repository entries
 
@@ -97,8 +99,8 @@ earlier commits and their blobs remain available.
 - Do not reduce an available diagnostic to only `Error`.
 - Confirmation boxes identify the exact destructive target and contain Confirm
   and Cancel controls.
-- Invalid, expired, or consumed one-time tokens tell the user to reload or log in
-  again, as appropriate.
+- Invalid, expired, or consumed page tokens return the browser to `/`, where the
+  user can sign in again.
 
 ## Internationalization and escaping
 

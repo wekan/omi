@@ -12,7 +12,7 @@ This guide covers setting up Omi's web server using the FreePascal standalone co
 
 Sessions are carried only in hidden fields of signed POST buttons. They are never
 written to URLs or cookies. Authenticated navigation therefore keeps clean paths;
-reloading one of those paths intentionally performs a logged-out GET.
+reloading one of those paths returns the browser to the public home URL `/`.
 
 **Key Advantage:** SQLite is embedded in the final executable. Running Omi does
 not require the `sqlite3` command or a system SQLite library.

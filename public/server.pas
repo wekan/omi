@@ -608,6 +608,16 @@ begin
   Result := Result + '</tr></table>';
 end;
 
+procedure RedirectToPublicHome(ARequest: TRequest; AResponse: TResponse);
+begin
+  if ARequest.Method = 'POST' then
+    AResponse.Code := 303
+  else
+    AResponse.Code := 302;
+  AResponse.Location := '/';
+  AResponse.Content := '';
+end;
+
 function PrettyHtml32(const Html: string): string;
 var
   Normalized: string;
@@ -2331,10 +2341,7 @@ begin
     begin
       if Username = '' then
       begin
-        AResponse.Code := 403;
-        AResponse.ContentType := 'text/plain; charset=UTF-8';
-        AResponse.Content := T('error', Translations) +
-          ': The session is missing or expired. Log in again.';
+        RedirectToPublicHome(ARequest, AResponse);
         Exit;
       end;
       PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
@@ -2343,11 +2350,9 @@ begin
       if (PostedAuthAction = '') or not VerifyAndConsumeActionTokenDetailed(
         ARequest, PostedAuthAction, SessionId, Username, TokenFailureReason) then
       begin
-        AResponse.Code := 403;
-        AResponse.ContentType := 'text/plain; charset=UTF-8';
-        AResponse.Content := T('error', Translations) + ': ' + TokenFailureReason;
         LogActivity(Username, SessionId, 'home-post', 'forbidden',
           TokenFailureReason, ARequest, -1);
+        RedirectToPublicHome(ARequest, AResponse);
         Exit;
       end;
     end;
@@ -2712,10 +2717,8 @@ begin
     PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
     if (PostedAuthAction = '') or not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
     begin
-      AResponse.Code := 403;
-      AResponse.ContentType := 'text/plain; charset=UTF-8';
-      AResponse.Content := T('error', FallbackTranslations) + ': ' + T('invalid-logout-token', FallbackTranslations);
       LogActivity(Username, SessionId, 'logout', 'forbidden', 'invalid token', ARequest, -1);
+      RedirectToPublicHome(ARequest, AResponse);
       Exit;
     end;
   end;
@@ -2855,9 +2858,7 @@ begin
   SessionId := GetSessionIdFromRequest(ARequest);
   if Username = '' then
   begin
-    AResponse.Code := 302;
-    AResponse.Location := '/sign-in';
-    AResponse.Content := '';
+    RedirectToPublicHome(ARequest, AResponse);
     Exit;
   end;
 
@@ -2883,11 +2884,10 @@ begin
       if ARequest.Method = 'POST' then
       begin
         PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
-        if (PostedAuthAction <> '') and not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
+        if (PostedAuthAction = '') or not VerifyAndConsumeActionToken(ARequest,
+          PostedAuthAction, SessionId, Username) then
         begin
-          AResponse.Code := 403;
-          AResponse.ContentType := 'text/plain; charset=UTF-8';
-          AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
+          RedirectToPublicHome(ARequest, AResponse);
           Exit;
         end;
         if ARequest.ContentFields.Values['USERNAME'] <> '' then
@@ -2975,9 +2975,7 @@ begin
   SessionId := GetSessionIdFromRequest(ARequest);
   if Username = '' then
   begin
-    AResponse.Code := 302;
-    AResponse.Location := '/sign-in';
-    AResponse.Content := '';
+    RedirectToPublicHome(ARequest, AResponse);
     Exit;
   end;
 
@@ -2990,23 +2988,10 @@ begin
     if ARequest.Method = 'POST' then
     begin
       PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
-      if (PostedAuthAction <> '') and not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
+      if (PostedAuthAction = '') or not VerifyAndConsumeActionToken(ARequest,
+        PostedAuthAction, SessionId, Username) then
       begin
-        AResponse.Code := 403;
-        AResponse.ContentType := 'text/plain; charset=UTF-8';
-        // Translations is loaded further down, AFTER this branch, so it was an
-        // uninitialised pointer here and T() dereferenced whatever the stack held.
-        // The compiler says exactly that: server.pas(2719,53) Warning: Local
-        // variable "Translations" does not seem to be initialized. Load it for the
-        // message and free it here, because this branch returns before the block
-        // that owns it.
-        Translations := LoadTranslations(CurrentLanguage);
-        try
-          AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
-        finally
-          if Assigned(Translations) then
-            FreeAndNil(Translations);
-        end;
+        RedirectToPublicHome(ARequest, AResponse);
         Exit;
       end;
       if ARequest.ContentFields.Values['language'] <> '' then
@@ -3100,9 +3085,7 @@ begin
   SessionId := GetSessionIdFromRequest(ARequest);
   if Username = '' then
   begin
-    AResponse.Code := 302;
-    AResponse.Location := '/sign-in';
-    AResponse.Content := '';
+    RedirectToPublicHome(ARequest, AResponse);
     Exit;
   end;
 
@@ -3122,11 +3105,10 @@ begin
   if ARequest.Method = 'POST' then
   begin
     PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
-    if (PostedAuthAction <> '') and not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
+    if (PostedAuthAction = '') or not VerifyAndConsumeActionToken(ARequest,
+      PostedAuthAction, SessionId, Username) then
     begin
-      AResponse.Code := 403;
-      AResponse.ContentType := 'text/plain; charset=UTF-8';
-      AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
+      RedirectToPublicHome(ARequest, AResponse);
       Exit;
     end;
   end;
@@ -3208,9 +3190,7 @@ begin
   SessionId := GetSessionIdFromRequest(ARequest);
   if Username = '' then
   begin
-    AResponse.Code := 302;
-    AResponse.Location := '/sign-in';
-    AResponse.Content := '';
+    RedirectToPublicHome(ARequest, AResponse);
     Exit;
   end;
 
@@ -3231,9 +3211,7 @@ begin
       PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
       if (PostedAuthAction = '') or not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
       begin
-        AResponse.Code := 403;
-        AResponse.ContentType := 'text/plain; charset=UTF-8';
-        AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
+        RedirectToPublicHome(ARequest, AResponse);
         Exit;
       end;
 
@@ -3578,6 +3556,11 @@ begin
 
   Username := GetUsernameFromRequest(ARequest);
   SessionId := GetSessionIdFromRequest(ARequest);
+  if Username = '' then
+  begin
+    RedirectToPublicHome(ARequest, AResponse);
+    Exit;
+  end;
   CurrentPath := PathInfo;
   Translations := LoadTranslations('en');
   try
@@ -3610,21 +3593,11 @@ begin
 
     if ARequest.Method = 'POST' then
     begin
-      if Username = '' then
-      begin
-        AResponse.Code := 403;
-        AResponse.ContentType := 'text/plain; charset=UTF-8';
-        AResponse.Content := T('error', Translations) +
-          ': The session is missing or expired. Log in again.';
-        Exit;
-      end;
       PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
       if (PostedAuthAction = '') or not VerifyAndConsumeActionToken(ARequest,
         PostedAuthAction, SessionId, Username) then
       begin
-        AResponse.Code := 403;
-        AResponse.ContentType := 'text/plain; charset=UTF-8';
-        AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
+        RedirectToPublicHome(ARequest, AResponse);
         Exit;
       end;
     end;
