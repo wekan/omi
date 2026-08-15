@@ -1773,6 +1773,90 @@ begin
   Result := True;
 end;
 
+function DeleteDirectoryFromRepo(const DbPath, DirectoryName,
+  Username: string): Boolean;
+var
+  Files: TFileEntryArray;
+  I: Integer;
+  CommitId: Int64;
+  DirectoryPrefix: string;
+  FoundDirectory: Boolean;
+begin
+  Result := False;
+  if DirectoryName = '' then
+    Exit;
+  DirectoryPrefix := DirectoryName + '/';
+  Files := GetLatestFiles(DbPath, '');
+  FoundDirectory := False;
+  for I := 0 to High(Files) do
+    if Pos(DirectoryPrefix, Files[I].Filename) = 1 then
+    begin
+      FoundDirectory := True;
+      Break;
+    end;
+  if not FoundDirectory then
+    Exit;
+
+  CommitId := CreateCommit(DbPath, 'Delete directory', Username);
+  if CommitId = 0 then
+    Exit;
+  for I := 0 to High(Files) do
+  begin
+    if Pos(DirectoryPrefix, Files[I].Filename) = 1 then
+      Continue;
+    InsertFileRecord(DbPath, Files[I].Filename, Files[I].Hash,
+      Files[I].DateTimeStr, CommitId);
+  end;
+  Result := True;
+end;
+
+function RenameDirectoryInRepo(const DbPath, OldName, NewName,
+  Username: string): Boolean;
+var
+  Files: TFileEntryArray;
+  I: Integer;
+  CommitId: Int64;
+  OldPrefix: string;
+  NewPrefix: string;
+  Filename: string;
+  FoundDirectory: Boolean;
+begin
+  Result := False;
+  if (OldName = '') or (NewName = '') or SameText(OldName, NewName) then
+    Exit;
+  OldPrefix := OldName + '/';
+  NewPrefix := NewName + '/';
+  if Pos(OldPrefix, NewPrefix) = 1 then
+    Exit;
+
+  Files := GetLatestFiles(DbPath, '');
+  FoundDirectory := False;
+  for I := 0 to High(Files) do
+  begin
+    if Pos(OldPrefix, Files[I].Filename) = 1 then
+      FoundDirectory := True
+    else if (Files[I].Filename = NewName) or
+      (Pos(NewPrefix, Files[I].Filename) = 1) then
+      Exit;
+  end;
+  if not FoundDirectory then
+    Exit;
+
+  CommitId := CreateCommit(DbPath, 'Rename directory', Username);
+  if CommitId = 0 then
+    Exit;
+  for I := 0 to High(Files) do
+  begin
+    Filename := Files[I].Filename;
+    if Pos(OldPrefix, Filename) = 1 then
+      Filename := NewName + Copy(Filename, Length(OldName) + 1,
+        Length(Filename));
+    InsertFileRecord(DbPath, Filename, Files[I].Hash,
+      Files[I].DateTimeStr, CommitId);
+  end;
+  Result := True;
+end;
+
 function ParsePostFormData(const PostData: string): TStringList;
 var
   Lines: TStringArray;
@@ -3685,7 +3769,41 @@ begin
       if (ARequest.Method = 'POST') and (Username <> '') and not IsHistoricView then
       begin
         Action := ARequest.ContentFields.Values['action'];
-        if Action = 'delete_file' then
+        if Action = 'delete_dir' then
+        begin
+          Target := SanitizePathSegment(ARequest.ContentFields.Values['target']);
+          EntryPath := RepoPath;
+          if EntryPath <> '' then
+            EntryPath := EntryPath + '/' + Target
+          else
+            EntryPath := Target;
+          if DeleteDirectoryFromRepo(DbPath, EntryPath, Username) then
+            UploadMsg := T('delete', Translations)
+          else
+            UploadError := T('error', Translations);
+        end
+        else if Action = 'rename_dir' then
+        begin
+          Target := SanitizePathSegment(ARequest.ContentFields.Values['target']);
+          NewName := SanitizePathSegment(ARequest.ContentFields.Values['new_name']);
+          if (Target <> '') and (NewName <> '') then
+          begin
+            EntryPath := RepoPath;
+            if EntryPath <> '' then
+              EntryPath := EntryPath + '/' + Target
+            else
+              EntryPath := Target;
+            if RepoPath <> '' then
+              NewName := RepoPath + '/' + NewName;
+            if RenameDirectoryInRepo(DbPath, EntryPath, NewName, Username) then
+              UploadMsg := T('save', Translations)
+            else
+              UploadError := T('error', Translations);
+          end
+          else
+            UploadError := T('error', Translations);
+        end
+        else if Action = 'delete_file' then
         begin
           Target := SanitizePathSegment(ARequest.ContentFields.Values['target']);
           EntryPath := RepoPath;
@@ -3811,7 +3929,21 @@ begin
         if RepoPath <> '' then
           EntryPath := EntryPath + '/' + RepoPath;
         EntryPath := EntryPath + '/' + DisplayName;
-        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-dir-open-' + IntToStr(I), DisplayName + '/') + '</td><td>-</td><td>-</td><td>-</td></tr>';
+        RowActions := '-';
+        if (Username <> '') and not IsHistoricView then
+          RowActions := '<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">' +
+            '<div><form method="POST" style="display:inline">' +
+            BuildAuthHiddenFields(ARequest, 'repo-dir-rename-' + DisplayName) +
+            '<input type="hidden" name="action" value="rename_dir">' +
+            '<input type="hidden" name="target" value="' + HtmlEncode(DisplayName) + '">' +
+            '<input type="text" name="new_name" size="12" placeholder="' + T('new-name', Translations) + '">' +
+            '<input type="submit" value="' + T('rename', Translations) + '"></form></div>' +
+            '<div><form method="POST" style="display:inline">' +
+            BuildAuthHiddenFields(ARequest, 'repo-dir-delete-' + DisplayName) +
+            '<input type="hidden" name="action" value="delete_dir">' +
+            '<input type="hidden" name="target" value="' + HtmlEncode(DisplayName) + '">' +
+            '<input type="submit" value="' + T('delete', Translations) + '"></form></div></div>';
+        TableRows := TableRows + '<tr><td>' + BuildNavTargetButton(ARequest, CurrentPath, WithCommit(EntryPath), 'repo-dir-open-' + IntToStr(I), DisplayName + '/') + '</td><td>-</td><td>-</td><td>' + RowActions + '</td></tr>';
       end;
 
       for I := 0 to FileList.Count - 1 do
