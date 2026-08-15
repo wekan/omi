@@ -81,7 +81,8 @@ fpc -h | head     # Show help
 On the first run, the script downloads the official SQLite amalgamation into
 `build/sqlite3.c`, verifies it, compiles SQLite and Omi under `build/`, copies
 the final executable to `public/server`, and starts it. Later builds reuse the
-cached amalgamation.
+cached amalgamation. They also reuse `build/sqlite3.o` when it is newer than
+`sqlite3.c`, so SQLite is only linked into Omi instead of being compiled again.
 
 ### Build Output
 
