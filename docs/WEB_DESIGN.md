@@ -41,8 +41,10 @@ Navigation and actions are buttons when a logged-in session must travel with the
 request. This is part of the interface contract, not only visual styling.
 
 - Public destinations may use ordinary links.
-- Authenticated navigation uses a POST form with a `nav_target` field and signed
-  one-time authentication fields.
+- Authenticated navigation uses a POST form whose `action` is the clean destination
+  URL and whose hidden fields contain the session and signed one-time token.
+- Session IDs and authentication tokens never appear in URLs. Addresses remain
+  ordinary paths such as `/sign-in`, `/settings`, `/activity`, and `/repo/file`.
 - Mutations always use POST and signed one-time authentication fields.
 - Every independent action has its own form and token action name.
 - Related actions are grouped on one row. Destructive actions are placed at the
@@ -53,6 +55,11 @@ request. This is part of the interface contract, not only visual styling.
 
 Do not hand-build authentication fields at each call site. Use the server's
 authentication-field helper and its navigation or signed-form helper.
+
+Because Omi deliberately uses neither cookies nor URL sessions, a browser reload is
+a new unauthenticated GET. The user stays logged in by clicking Omi buttons, which
+POST the hidden session to the next clean URL. Login ends with a signed Continue
+button so the newly created session also enters the interface without a URL token.
 
 ## Repository entries
 
@@ -138,6 +145,7 @@ servers if maintenance of those implementations resumes.
 When adding or changing a web feature, verify that:
 
 - it works without JavaScript and cookies;
+- no generated URL contains a session ID or authentication token;
 - authenticated buttons contain a distinct signed action token;
 - mutations use POST and cannot appear in historical views;
 - dynamic values and translated labels are escaped;

@@ -395,21 +395,6 @@ end;
 function GetSessionIdFromRequest(ARequest: TRequest): string;
 begin
   Result := Trim(GetFormFieldValue(ARequest, 'sessionId'));
-  if Result = '' then
-    Result := Trim(ARequest.QueryFields.Values['sessionId']);
-end;
-
-function AddSessionIdToTarget(const TargetPath, SessionId: string): string;
-begin
-  Result := TargetPath;
-  if Trim(SessionId) = '' then
-    Exit;
-  if Pos('sessionId=', Result) > 0 then
-    Exit;
-  if Pos('?', Result) > 0 then
-    Result := Result + '&sessionId=' + SessionId
-  else
-    Result := Result + '?sessionId=' + SessionId;
 end;
 
 function GetClientIp(ARequest: TRequest): string;
@@ -606,20 +591,8 @@ begin
 end;
 
 function BuildNavTargetButton(ARequest: TRequest; const PostPath, TargetPath, ActionName, LabelText: string): string;
-var
-  AuthFields: string;
 begin
-  AuthFields := BuildAuthHiddenFields(ARequest, ActionName);
-  if AuthFields = '' then
-  begin
-    Result := '<a href="' + HtmlEncode(TargetPath) + '">' + HtmlEncode(LabelText) + '</a>';
-    Exit;
-  end;
-  Result := '<form method="POST" action="' + HtmlEncode(PostPath) + '" style="display:inline; margin:0; padding:0;">' +
-    AuthFields +
-    '<input type="hidden" name="nav_target" value="' + HtmlEncode(TargetPath) + '">' +
-    '<input type="submit" value="' + HtmlEncode(LabelText) + '" style="padding:0 2px;">' +
-    '</form>';
+  Result := BuildActionButton(ARequest, TargetPath, ActionName, LabelText);
 end;
 
 function BuildNavRow(const Items: array of string): string;
@@ -2207,9 +2180,15 @@ begin
             begin
               SessionId := CreateSession(ARequest, Username, StoredPassword);
               LogActivity(Username, SessionId, 'login', 'ok', 'login success', ARequest, 0);
-              AResponse.Code := 302;
-              AResponse.Location := '/?sessionId=' + HtmlEncode(SessionId);
-              AResponse.Content := '';
+              ARequest.ContentFields.Values['sessionId'] := SessionId;
+              AResponse.ContentType := 'text/html; charset=UTF-8';
+              AResponse.Content := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
+                '<html><head><meta charset="UTF-8"><title>' +
+                T('login', Translations) + ' - Omi Server</title></head>' +
+                '<body bgcolor="#f0f0f0"><h1>Omi Server</h1><p><strong>' +
+                HtmlEncode(Username) + '</strong></p><p>' +
+                BuildActionButton(ARequest, '/', 'login-continue',
+                  T('continue', Translations)) + '</p></body></html>';
               Exit;
             end;
           end;
@@ -2309,7 +2288,6 @@ var
   PostedAuthAction: string;
   TokenFailureReason: string;
   SessionId: string;
-  NavTarget: string;
   RepoRootPath: string;
   PendingDeleteRepo: string;
   DeleteRepoAuth: string;
@@ -2317,28 +2295,6 @@ var
 begin
   Username := GetUsernameFromRequest(ARequest);
   SessionId := GetSessionIdFromRequest(ARequest);
-
-  // Session IDs are kept in memory and become invalid after logout, expiry, or
-  // a server restart. Remove a stale ID from the address bar. For a reloaded
-  // POST, 303 tells the browser to follow with GET instead of submitting the
-  // old repository action again.
-  if Username = '' then
-  begin
-    if UpperCase(ARequest.Method) = 'POST' then
-    begin
-      AResponse.Code := 303;
-      AResponse.Location := '/';
-      AResponse.Content := '';
-      Exit;
-    end
-    else if SessionId <> '' then
-    begin
-      AResponse.Code := 302;
-      AResponse.Location := '/';
-      AResponse.Content := '';
-      Exit;
-    end;
-  end;
 
   UserLang := '';
   UsersMap := LoadUsersMap;
@@ -2370,6 +2326,31 @@ begin
     FormatParam := ARequest.QueryFields.Values['format'];
     LogName := ARequest.QueryFields.Values['log'];
     ImageParam := ARequest.QueryFields.Values['image'];
+
+    if ARequest.Method = 'POST' then
+    begin
+      if Username = '' then
+      begin
+        AResponse.Code := 403;
+        AResponse.ContentType := 'text/plain; charset=UTF-8';
+        AResponse.Content := T('error', Translations) +
+          ': The session is missing or expired. Log in again.';
+        Exit;
+      end;
+      PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
+      if PostedAuthAction = '' then
+        TokenFailureReason := 'The page did not send an action token. Reload the page and try again.';
+      if (PostedAuthAction = '') or not VerifyAndConsumeActionTokenDetailed(
+        ARequest, PostedAuthAction, SessionId, Username, TokenFailureReason) then
+      begin
+        AResponse.Code := 403;
+        AResponse.ContentType := 'text/plain; charset=UTF-8';
+        AResponse.Content := T('error', Translations) + ': ' + TokenFailureReason;
+        LogActivity(Username, SessionId, 'home-post', 'forbidden',
+          TokenFailureReason, ARequest, -1);
+        Exit;
+      end;
+    end;
 
     if DownloadName <> '' then
     begin
@@ -2514,40 +2495,6 @@ begin
     PendingDeleteRepo := '';
     if (ARequest.Method = 'POST') then
     begin
-      // Every POST handled here mutates state or carries authenticated
-      // navigation state. Never fall through to repository actions when a
-      // missing, expired, or restarted-server session resolves to no user.
-      if Username = '' then
-      begin
-        AResponse.Code := 303;
-        AResponse.Location := '/';
-        AResponse.Content := '';
-        Exit;
-      end
-      else
-      begin
-        PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
-        if PostedAuthAction = '' then
-          TokenFailureReason := 'The page did not send an action token. Reload the page and try again.';
-        if (PostedAuthAction = '') or not VerifyAndConsumeActionTokenDetailed(
-          ARequest, PostedAuthAction, SessionId, Username, TokenFailureReason) then
-        begin
-          AResponse.Code := 403;
-          AResponse.ContentType := 'text/plain; charset=UTF-8';
-          AResponse.Content := T('error', Translations) + ': ' + TokenFailureReason;
-          LogActivity(Username, SessionId, 'home-post', 'forbidden', TokenFailureReason, ARequest, -1);
-          Exit;
-        end;
-        NavTarget := GetFormFieldValue(ARequest, 'nav_target');
-        if NavTarget <> '' then
-        begin
-          AResponse.Code := 302;
-          AResponse.Location := AddSessionIdToTarget(NavTarget, SessionId);
-          AResponse.Content := '';
-          Exit;
-        end;
-      end;
-
       Action := ARequest.ContentFields.Values['action'];
       if Action = 'create_repo' then
       begin
@@ -3523,9 +3470,9 @@ var
   Query: string;
   Output: string;
   FileDir: string;
+  FileParentPath: string;
   SessionId: string;
   PostedAuthAction: string;
-  NavTarget: string;
   HeaderRight: string;
   MainNav: string;
   CurrentPath: string;
@@ -3625,22 +3572,23 @@ begin
     UploadMsg := '';
     UploadError := '';
 
-    if (ARequest.Method = 'POST') and (Username <> '') then
+    if ARequest.Method = 'POST' then
     begin
+      if Username = '' then
+      begin
+        AResponse.Code := 403;
+        AResponse.ContentType := 'text/plain; charset=UTF-8';
+        AResponse.Content := T('error', Translations) +
+          ': The session is missing or expired. Log in again.';
+        Exit;
+      end;
       PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
-      if (PostedAuthAction <> '') and not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
+      if (PostedAuthAction = '') or not VerifyAndConsumeActionToken(ARequest,
+        PostedAuthAction, SessionId, Username) then
       begin
         AResponse.Code := 403;
         AResponse.ContentType := 'text/plain; charset=UTF-8';
         AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
-        Exit;
-      end;
-      NavTarget := GetFormFieldValue(ARequest, 'nav_target');
-      if NavTarget <> '' then
-      begin
-        AResponse.Code := 302;
-        AResponse.Location := AddSessionIdToTarget(NavTarget, SessionId);
-        AResponse.Content := '';
         Exit;
       end;
     end;
@@ -3654,20 +3602,6 @@ begin
         AResponse.Content := FileContent;
         AResponse.CustomHeaders.Values['Content-Disposition'] := 'attachment; filename="' + HtmlEncode(ExtractFileName(RepoPath)) + '"';
         Exit;
-      end;
-
-      if (ARequest.Method = 'POST') and (ARequest.ContentFields.Values['delete_confirm'] = '1') and (Username <> '') and not IsHistoricView then
-      begin
-        if DeleteFileFromRepo(DbPath, RepoPath, Username) then
-        begin
-          AResponse.Code := 302;
-          AResponse.Location := AddSessionIdToTarget(RepoToRoot(RepoName),
-            SessionId);
-          AResponse.Content := '';
-          Exit;
-        end
-        else
-          ErrorMsg := T('file-delete-failed', Translations);
       end;
 
       ShowDeleteConfirm := (DeleteFlag = '1') and (Username <> '') and not IsHistoricView;
@@ -3711,12 +3645,22 @@ begin
 
       if ShowDeleteConfirm then
       begin
+        FileParentPath := ExtractFileDir(RepoPath);
+        if FileParentPath = '.' then
+          FileParentPath := '';
+        FileParentPath := RepoToRoot(RepoName) +
+          ifthen(FileParentPath <> '', '/' + FileParentPath, '');
         Html := Html + '<div style="border:2px solid #ff0000; padding:10px; background-color:#ffcccc;">' +
           '<p><font color="red"><strong>⚠️ ' + T('confirm-delete', Translations) + '</strong></font></p>' +
           '<p>' + T('delete-file-question', Translations) + ' <strong>' + HtmlEncode(RepoPath) + '</strong>?</p>' +
           '<p>' + T('delete-file-warning', Translations) + '</p>' +
-          '<form method="POST">' + BuildAuthHiddenFields(ARequest, 'repo-file-confirm-delete') + '<input type="hidden" name="delete_confirm" value="1">' +
-          '<input type="submit" value="' + T('confirm-delete', Translations) + '"> | <button type="submit" name="nav_target" value="' + HtmlEncode(CurrentPath) + '">' + T('cancel', Translations) + '</button></form>' +
+          '<form method="POST" action="' + HtmlEncode(FileParentPath) + '">' +
+          BuildAuthHiddenFields(ARequest, 'repo-file-confirm-delete') +
+          BuildHiddenInput('action', 'delete_file') +
+          BuildHiddenInput('target', ExtractFileName(RepoPath)) +
+          '<input type="submit" value="' + T('confirm-delete', Translations) + '"></form> | ' +
+          BuildNavTargetButton(ARequest, CurrentPath, CurrentPath,
+            'repo-file-cancel-delete', T('cancel', Translations)) +
           '</div><hr>';
       end
       else
@@ -3742,9 +3686,9 @@ begin
         Html := Html + '<form method="POST">' +
           BuildAuthHiddenFields(ARequest, 'repo-file-save') +
           '<textarea name="file_content" rows="20" cols="80" style="width:100%; max-width:800px; font-family:monospace; box-sizing:border-box;">' + HtmlEncode(FileContent) + '</textarea><br><br>' +
-          '<input type="submit" name="save_file" value="Save"> ' +
-          '<button type="submit" name="nav_target" value="' + HtmlEncode(CurrentPath) + '">Cancel</button>' +
-          '</form>';
+          '<input type="submit" name="save_file" value="Save"></form> ' +
+          BuildNavTargetButton(ARequest, CurrentPath, CurrentPath,
+            'repo-file-cancel-edit', T('cancel', Translations));
       end
       else if IsText then
       begin

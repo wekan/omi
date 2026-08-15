@@ -1666,6 +1666,7 @@
   "last-modified": "Last Modified",
   "uploaded": "Uploaded",
   "uploaded-by": "Uploaded By",
+  "continue": "Continue",
   "no-repositories": "No repositories found",
   "create-repository": "Create Repository",
   "upload-repository": "Upload/Update Repository",

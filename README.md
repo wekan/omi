@@ -89,8 +89,12 @@ The `VerifyAndConsumeActionToken` function implements the counter mechanism you 
 
 * **Form-based navigation:** Since cookies are not used, navigation is often done via POST requests.
   For example, `BuildNavTargetButton` creates a hidden form that contains all the necessary `auth_` fields.
-* **Session-ID passing:** If traditional links are used, the session ID is added as a URL parameter
-  with the `AddSessionIdToTarget` function.
+* **Button-only sessions:** Session IDs and one-time tokens exist only in hidden
+  POST fields inside buttons. They are never added to URLs. Authenticated pages
+  therefore keep normal addresses such as `/`, `/settings`, `/activity`, and
+  `/wekan/path`.
+* **Reload behavior:** Reloading a clean URL sends no session fields and shows the
+  logged-out view. Use Omi's buttons to move between pages while staying logged in.
 * **Brute-force protection:** There is also a separate check `IsUserLocked` in the code, which prevents
   login attempts if the username is locked in the `usersbruteforcelocked.txt` file.
 
