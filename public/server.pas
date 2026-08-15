@@ -2100,46 +2100,6 @@ begin
   end;
 end;
 
-function RenderRepositoryPage(Username: string; Translations: TJSONObject): string;
-begin
-  Result := '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Omi</title>' +
-    '<style>body{font-family:sans-serif;background:#f5f5f5;margin:20px;} ' +
-    '.header{display:flex;justify-content:space-between;} a{color:#0066cc;} ' +
-    '.repo{background:white;padding:10px;margin:5px 0;border-radius:3px;}</style>' +
-    '</head><body>' +
-    '<div class="header"><h1>Omi Server v' + VERSION + '</h1>' +
-    '<a href="/logout">' + T('logout', Translations) + '</a></div>' +
-    '<h2>' + T('repositories', Translations) + '</h2>' +
-    '<p><a href="/">' + T('home', Translations) + '</a></p>' +
-    '</body></html>';
-end;
-
-function RenderFilesPage(RepoPath: string; FilePath: string; Translations: TJSONObject): string;
-begin
-  Result := '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + RepoPath + '</title>' +
-    '<style>body{font-family:sans-serif;background:#f5f5f5;margin:20px;} ' +
-    '.files{background:white;padding:10px;}</style>' +
-    '</head><body>' +
-    '<h1>' + RepoPath + '</h1>' +
-    '<div><a href="/">' + T('home', Translations) + '</a></div>' +
-    '<div class="files">' +
-    '<p>' + T('no-files', Translations) + '</p>' +
-    '</div>' +
-    '</body></html>';
-end;
-
-function RenderFilePage(FullPath: string; Content: string; Translations: TJSONObject; IsMarkdown: Boolean): string;
-begin
-  Result := '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + FullPath + '</title>' +
-    '<style>body{font-family:sans-serif;background:#f5f5f5;margin:20px;} ' +
-    '.content{background:white;padding:20px;white-space:pre-wrap;font-family:monospace;}</style>' +
-    '</head><body>' +
-    '<h1>' + FullPath + '</h1>' +
-    '<div><a href="/">' + T('back', Translations) + '</a></div>' +
-    '<div class="content">' + Content + '</div>' +
-    '</body></html>';
-end;
-
 procedure LoginEndpoint(ARequest: TRequest; AResponse: TResponse);
 var
   Translations: TJSONObject;
@@ -2671,7 +2631,7 @@ begin
       '<strong>' + T('protocol', Translations) + ':</strong> HTTP<br>' +
       '<strong>' + T('repositories', Translations) + ':</strong> ' + IntToStr(Length(Repos)) + '</td></tr></table>' +
       ifthen(RepoMessage <> '', '<p><font color="' + ifthen(RepoError, 'red', 'green') + '"><strong>' + HtmlEncode(RepoMessage) + '</strong></font></p>', '') +
-      ifthen(PendingDeleteRepo <> '', '<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;"><p><font color="red"><strong>⚠️ ' + T('confirm-delete', Translations) + '</strong></font></p><p>' + T('delete-repository-question', Translations) + ' <strong>' + HtmlEncode(PendingDeleteRepo) + '</strong>?</p><form method="POST" style="display:inline"><input type="hidden" name="action" value="delete_repo_confirm"><input type="hidden" name="repo_name" value="' + HtmlEncode(PendingDeleteRepo) + '">' + DeleteConfirmAuth + '<input type="submit" value="' + T('confirm-delete', Translations) + '"></form> <form method="GET" style="display:inline"><input type="submit" value="' + T('cancel', Translations) + '"></form></div>', '') +
+      ifthen(PendingDeleteRepo <> '', '<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;"><p><font color="red"><strong>⚠️ ' + T('confirm-delete', Translations) + '</strong></font></p><p>' + T('delete-repository-question', Translations) + ' <strong>' + HtmlEncode(PendingDeleteRepo) + '</strong>?</p><form method="POST" style="display:inline"><input type="hidden" name="action" value="delete_repo_confirm"><input type="hidden" name="repo_name" value="' + HtmlEncode(PendingDeleteRepo) + '">' + DeleteConfirmAuth + '<input type="submit" value="' + T('confirm-delete', Translations) + '"></form> ' + BuildNavTargetButton(ARequest, '/', '/', 'home-delete-repo-cancel', T('cancel', Translations)) + '</div>', '') +
       '<h2>' + T('available-repositories', Translations) + '</h2>' +
       '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
       '<tr bgcolor="#333333"><th><font color="white">' + T('repository', Translations) + '</font></th><th><font color="white">' + T('size-bytes', Translations) + '</font></th><th><font color="white">' + T('last-modified', Translations) + '</font></th><th><font color="white">' + T('actions', Translations) + '</font></th></tr>';
@@ -3640,7 +3600,8 @@ begin
         if DeleteFileFromRepo(DbPath, RepoPath, Username) then
         begin
           AResponse.Code := 302;
-          AResponse.Location := RepoToRoot(RepoName);
+          AResponse.Location := AddSessionIdToTarget(RepoToRoot(RepoName),
+            SessionId);
           AResponse.Content := '';
           Exit;
         end
