@@ -1282,14 +1282,15 @@ begin
   end;
 end;
 
-function ExecSqlOnDb(const DbPath, Query: string): string;
+function RunSqlOnDb(const DbPath, Query: string; out OutputText, ErrorText: string): Boolean;
 var
   Proc: TProcess;
   OutputStream: TStringStream;
-  OutputText: string;
   DbAbs: string;
 begin
-  Result := '';
+  Result := False;
+  OutputText := '';
+  ErrorText := '';
   DbAbs := ExpandFileName(DbPath);
 
   Proc := TProcess.Create(nil);
@@ -1310,18 +1311,27 @@ begin
       begin
         OutputStream.CopyFrom(Proc.Output, 0);
         OutputText := OutputStream.DataString;
-        if Proc.ExitStatus = 0 then
-          Result := OutputText
-        else
-          Result := '';
+        Result := Proc.ExitStatus = 0;
+        if not Result then
+          ErrorText := Trim(OutputText);
       end;
     except
-      Result := '';
+      on E: Exception do
+        ErrorText := E.ClassName + ': ' + E.Message;
     end;
+    if not Result and (ErrorText = '') then
+      ErrorText := 'SQLite exited with status ' + IntToStr(Proc.ExitStatus);
   finally
     OutputStream.Free;
     Proc.Free;
   end;
+end;
+
+function ExecSqlOnDb(const DbPath, Query: string): string;
+var
+  ErrorText: string;
+begin
+  RunSqlOnDb(DbPath, Query, Result, ErrorText);
 end;
 
 procedure EnsureActivityDb;
@@ -1576,28 +1586,55 @@ begin
   end;
 end;
 
-function CreateEmptyRepository(const RepoFilePath, Username: string): Boolean;
+function CreateEmptyRepository(const RepoFilePath, Username: string; out ErrorMessage: string): Boolean;
 var
   Query: string;
   RepoDir: string;
   InitialCommitId: Int64;
+  SqlOutput: string;
+  SqlError: string;
 begin
   Result := False;
+  ErrorMessage := '';
   RepoDir := ExtractFileDir(RepoFilePath);
   if not DirectoryExists(RepoDir) and not ForceDirectories(RepoDir) then
+  begin
+    ErrorMessage := 'Could not create repository directory: ' + RepoDir;
     Exit;
+  end;
   if FileExists(RepoFilePath) then
+  begin
+    ErrorMessage := 'Repository file already exists: ' + RepoFilePath;
     Exit;
-  ExecSqlOnDb(RepoFilePath, 'PRAGMA foreign_keys=ON;');
-  Query := 'CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, data BLOB, size INTEGER);' +
+  end;
+  Query := 'PRAGMA foreign_keys=ON;' +
+    'CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, data BLOB, size INTEGER);' +
     'CREATE TABLE IF NOT EXISTS commits (id INTEGER PRIMARY KEY AUTOINCREMENT, message TEXT, datetime TEXT, user TEXT);' +
     'CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, hash TEXT, datetime TEXT, commit_id INTEGER);' +
     'CREATE TABLE IF NOT EXISTS staging (filename TEXT PRIMARY KEY, hash TEXT, datetime TEXT);';
-  ExecSqlOnDb(RepoFilePath, Query);
-  InitialCommitId := CreateCommit(RepoFilePath, 'Initial commit', Username);
-  Result := FileExists(RepoFilePath) and (InitialCommitId > 0);
+  if not RunSqlOnDb(RepoFilePath, Query, SqlOutput, SqlError) then
+    ErrorMessage := 'Could not create SQLite schema: ' + SqlError
+  else
+  begin
+    Query := 'INSERT INTO commits(message, datetime, user) VALUES(''Initial commit'', ''' +
+      SqlEscape(FormatDateTime('yyyy-mm-dd hh:nn:ss', Now)) + ''', ''' +
+      SqlEscape(Username) + '''); SELECT last_insert_rowid();';
+    if not RunSqlOnDb(RepoFilePath, Query, SqlOutput, SqlError) then
+      ErrorMessage := 'Could not create initial commit: ' + SqlError
+    else
+    begin
+      InitialCommitId := StrToInt64Def(Trim(SqlOutput), 0);
+      if InitialCommitId < 1 then
+        ErrorMessage := 'SQLite did not return an initial commit ID'
+      else if not FileExists(RepoFilePath) then
+        ErrorMessage := 'SQLite reported success but did not create: ' + RepoFilePath
+      else
+        Result := True;
+    end;
+  end;
   if not Result and FileExists(RepoFilePath) then
-    DeleteFile(RepoFilePath);
+    if not DeleteFile(RepoFilePath) then
+      ErrorMessage := ErrorMessage + '. The incomplete file could not be removed: ' + RepoFilePath;
 end;
 
 function GetRepoPath(const RepoName: string): string;
@@ -2040,6 +2077,7 @@ var
   FileHash: string;
   SizeText: string;
   RepoMessage: string;
+  RepoCreateError: string;
   RepoError: Boolean;
   Action: string;
   RepoNameInput: string;
@@ -2266,13 +2304,14 @@ begin
         else
         begin
           RepoPath := GetRepoPath(RepoName);
-          if CreateEmptyRepository(RepoPath, Username) then
+          if CreateEmptyRepository(RepoPath, Username, RepoCreateError) then
             RepoMessage := T('repository', Translations) + ' ' + RepoName + ': ' +
               T('create', Translations) + ' OK (repos/' + RepoName + ')'
           else
           begin
-            RepoMessage := T('repository-create-failed', Translations);
+            RepoMessage := T('repository-create-failed', Translations) + ': ' + RepoCreateError;
             RepoError := True;
+            WriteLn(StdErr, 'Could not create repos/', RepoName, ': ', RepoCreateError);
           end;
         end;
       end
