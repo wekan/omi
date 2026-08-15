@@ -1,5 +1,8 @@
 # Omi Server - FreePascal Implementation
 
+> **Status: currently maintained.** New Omi server features, fixes, and security
+> updates target this implementation.
+
 > **Documentation Index:** See [README.md](README.md) for documentation overview  
 > **Quick Start:** See [README.md](README.md#web-interface) for web interface guide
 

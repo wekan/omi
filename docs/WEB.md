@@ -8,11 +8,14 @@
 For the common interaction, security, markup, and code-reuse conventions used by
 all server implementations, see [WEB_DESIGN.md](WEB_DESIGN.md).
 
-Omi has web server implementations in PHP (traditional) and JavaScript (Node.js, Bun, Deno).
+Omi's currently maintained web server is the
+[FreePascal implementation](SERVER_FREEPASCAL.md). The PHP and JavaScript servers
+are paused and retained for reference.
 
-**Choose your server:**
-- **[JavaScript Server](SERVER_JS.md)** (Node.js, Bun, Deno) - Modern runtimes, single JavaScript file
-- **PHP Server** (this document) - Traditional web server, widely deployed
+**Implementation status:**
+- **[FreePascal Server](SERVER_FREEPASCAL.md)** - Currently maintained
+- **[JavaScript Server](SERVER_JS.md)** - Paused
+- **[PHP Server](SERVER_PHP.md)** - Paused
 
 Both servers provide:
 - Repository browsing

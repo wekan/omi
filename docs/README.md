@@ -6,6 +6,11 @@
 
 Omi is a lightweight Git-like version control system for retro systems and modern platforms.
 
+> **Maintenance status:** The FreePascal server is Omi's currently maintained
+> implementation. All PHP, JavaScript, and other programming-language versions are
+> paused. Their code and guides are retained for reference and may lag behind the
+> maintained FreePascal behavior.
+
 **New users:** Start with [FEATURES.md](FEATURES.md) for an overview of what's possible.
 
 ## Documentation Files
@@ -13,7 +18,7 @@ Omi is a lightweight Git-like version control system for retro systems and moder
 | Document | Purpose | Audience |
 |----------|---------|----------|
 | **[FEATURES.md](FEATURES.md)** | Feature overview and capabilities | Everyone |
-| **[CLI_PYTHON3.md](CLI_PYTHON3.md)** | Command line for Python 3 (recommended) | Python developers |
+| **[CLI_PYTHON3.md](CLI_PYTHON3.md)** | Paused command line for Python 3 | Python developers |
 | **[CLI_HAXE5.md](CLI_HAXE5.md)** | Command line for Haxe 5 (typed, compiled) | Haxe developers |
 | **[CLI_CSHARP.md](CLI_CSHARP.md)** | Command line for C# / Mono (compiled) | .NET developers |
 | **[CLI_C89.md](CLI_C89.md)** | Command line for C89 (portable C) | C developers |
@@ -24,16 +29,19 @@ Omi is a lightweight Git-like version control system for retro systems and moder
 | **[CLI_LUA.md](CLI_LUA.md)** | Command line for Lua (cross-platform) | Lua developers |
 | **[WEB.md](WEB.md)** | Web interface and browser access | Web users |
 | **[WEB_DESIGN.md](WEB_DESIGN.md)** | Shared web UI and code patterns | Web developers |
-| **[SERVER_JS.md](SERVER_JS.md)** | Web server (JavaScript runtimes) | Node.js/Bun/Deno developers |
-| **[SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md)** | Web server (FreePascal compiled) | System admins |
-| **[SERVER_PHP.md](SERVER_PHP.md)** | Web server (PHP with Apache/Nginx) | PHP/web admins |
+| **[SERVER_JS.md](SERVER_JS.md)** | Paused JavaScript web server | Reference |
+| **[SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md)** | Maintained FreePascal web server | System admins |
+| **[SERVER_PHP.md](SERVER_PHP.md)** | Paused PHP web server | Reference |
 | **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** | Database structure and design | Developers |
 
-## CLI Documentation
+## Paused CLI Documentation
+
+These language-specific CLI ports are currently paused. The guides describe the
+existing implementations but do not indicate active maintenance.
 
 Choose the CLI guide for your platform:
 
-- **Python 3 (Recommended):** [CLI_PYTHON3.md](CLI_PYTHON3.md)
+- **Python 3 (paused):** [CLI_PYTHON3.md](CLI_PYTHON3.md)
   - Pure Python, no external dependencies
   - Works on Windows, macOS, Linux
   - Ideal for automation and CI/CD
@@ -122,9 +130,9 @@ omi push
 ```
 
 ### Web Interface
-1. Copy `public/index.php` to web root
-2. Configure `settings.txt`
-3. Visit `http://localhost/`
+1. Build and start the maintained server with `./freepascalserver.sh`
+2. Configure `settings.txt` and `users.txt`
+3. Visit the port printed by the server (normally `http://localhost:3001/`)
 
 See [CLI_BASH.md](CLI_BASH.md), [CLI_BAT.md](CLI_BAT.md), [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md), or [WEB.md](WEB.md) for detailed setup.
 
@@ -140,17 +148,17 @@ Located in project root:
 
 ## Server Deployment
 
-Choose your server implementation:
+Use the currently maintained server implementation:
 
-**Option 1: FreePascal Server (Recommended for retro systems)**
+**FreePascal Server (currently maintained)**
 - Single compiled binary, minimal dependencies
 - See [SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md) for setup
 
-**Option 2: JavaScript Server (Node.js, Bun, or Deno)**
+**JavaScript Server (paused; Node.js, Bun, or Deno)**
 - Multi-runtime support, modern tooling
 - See [SERVER_JS.md](SERVER_JS.md) for setup
 
-**Option 3: PHP Server (Apache, Nginx, or Caddy)**
+**PHP Server (paused; Apache, Nginx, or Caddy)**
 - Traditional web server deployment
 - See [SERVER_PHP.md](SERVER_PHP.md) for setup
 
@@ -163,13 +171,11 @@ Configuration examples in [webserver/](webserver/) directory:
 
 Project files:
 
-- **omi.sh** (~320 lines) - Bash implementation
-- **omi.bat** (~240 lines) - FreeDOS implementation
-- **omi** (~210 lines) - AmigaShell implementation
-- **omi.c** (~500 lines) - C89 implementation
-- **omi.tcl** (~350 lines) - Tcl implementation
-- **public/server.js** (~800 lines) - JavaScript web server (Node.js, Bun, Deno)
-- **public/index.php** (~1530 lines) - Web interface
+- **public/server.pas** - Maintained FreePascal web server
+- **omi.sh**, **omi.bat**, **omi**, **omi.c**, and **omi.tcl** - Paused CLI
+  implementations
+- **public/server.js** - Paused JavaScript web server
+- **public/index.php** - Paused PHP web server
 - **repos/** - Directory for repository files
 - Database files: `*.omi` (SQLite format)
 
@@ -212,7 +218,8 @@ Project files:
 7. Click `[Upload]` - Add new file to repository
 
 ### Server Workflow
-1. Choose server: [SERVER_FREEPASCAL.md](SERVER_FREEPASCAL.md) | [SERVER_JS.md](SERVER_JS.md) | [SERVER_PHP.md](SERVER_PHP.md)
+1. Use the maintained [FreePascal server](SERVER_FREEPASCAL.md). The
+   [JavaScript](SERVER_JS.md) and [PHP](SERVER_PHP.md) servers are paused.
 2. Configure [settings.txt](../settings.txt)
 3. Create users in [users.txt](../users.txt)
 4. Users can push/pull via CLI
@@ -258,7 +265,7 @@ See [FEATURES.md](FEATURES.md) for complete security information.
 | File | Size | Purpose |
 |------|------|----------|
 | FEATURES.md | Brief | What can you do with Omi |
-| CLI_PYTHON3.md | Detailed | Python 3 CLI guide (recommended) |
+| CLI_PYTHON3.md | Detailed | Paused Python 3 CLI guide |
 | CLI_HAXE5.md | Detailed | Haxe 5 CLI guide (compiled, multi-target) |
 | CLI_CSHARP.md | Detailed | C# / Mono CLI guide (compiled) |
 | CLI_C89.md | Detailed | C89 CLI guide (portable C) |
@@ -268,9 +275,9 @@ See [FEATURES.md](FEATURES.md) for complete security information.
 | CLI_AMIGASHELL.md | Detailed | Amiga CLI guide |
 | CLI_LUA.md | Detailed | Lua CLI guide (cross-platform) |
 | WEB.md | Detailed | Web interface guide |
-| SERVER_JS.md | Detailed | JavaScript server guide (Node.js/Bun/Deno) |
-| SERVER_FREEPASCAL.md | Detailed | FreePascal server guide (compiled) |
-| SERVER_PHP.md | Detailed | PHP server guide (Apache/Nginx) |
+| SERVER_JS.md | Detailed | Paused JavaScript server guide |
+| SERVER_FREEPASCAL.md | Detailed | Maintained FreePascal server guide |
+| SERVER_PHP.md | Detailed | Paused PHP server guide |
 | DATABASE_SCHEMA.md | Reference | Database technical details |
 | README.md | Navigation | This file |
 

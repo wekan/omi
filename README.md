@@ -2,6 +2,12 @@
 
 **Omi** is a lightweight, cross-platform version control system that stores complete repository history in a single SQLite database file (.omi).
 
+> **Maintenance status:** Omi is currently maintained in FreePascal. Active
+> development and fixes target `public/server.pas` and the compiled FreePascal
+> server. The PHP, JavaScript, and other programming-language implementations are
+> currently paused. Their source and documentation remain available for reference,
+> but they may not include current features, fixes, or security behavior.
+
 Difference to Fossil SCM is, that Omi stores deduplicated files to SQLite as blobs without compressing,
 this simplifies implementation and porting to limited CPU resources like Amiga and FreeDOS.
 
@@ -12,7 +18,8 @@ Server is like GitHub, so it has login to API and web UI.
 
 ## Server Web Framework: Extremely strict and stateful security system, implemented completely without cookies and JavaScript
 
-Implementations: FreePascal, PHP, Javascript (Node.js/Bun/Deno)
+Currently maintained implementation: FreePascal. PHP and JavaScript
+(Node.js/Bun/Deno) implementations are paused.
 
 This uses a very strict and secure approach called **Session Binding**.
 By binding a session to multiple variables (IP, User Agent, etc), I make it
@@ -118,10 +125,10 @@ Security: The typed language and native binary make server-side attacks (such as
 
 <img src="public/img/screenshot-phpserver.png" width="100%" alt="Omi PHP Server screenshot" />
 
-### Server Platforms Supported
-- PHP
-- JavaScript: Node.js/Bun/Deno
-- FreePascal
+### Server implementation status
+- **FreePascal** - currently maintained
+- **PHP** - paused
+- **JavaScript: Node.js/Bun/Deno** - paused
 
 ### URLs
 - **Repo default URLs**: PHP `http://localhost:8000`, Node.js `http://localhost:8080/`, FreePascal `http://localhost:3001`
@@ -142,7 +149,10 @@ cd omi/cli
 ./omi.sh list              # Show available repos
 ```
 
-### CLI Platforms Supported
+### CLI implementations (currently paused)
+
+The language-specific CLI implementations below remain available for reference,
+but active maintenance currently focuses on the FreePascal server.
 - **AmigaShell** (Amiga systems) - [cli/omi.amigashell](cli/omi.amigashell)
 - **FreeDOS** (.bat scripts) - [cli/omi.bat](cli/omi.bat)
 - **Linux/Unix/macOS** (Bash) - [cli/omi.sh](cli/omi.sh)
@@ -169,27 +179,27 @@ Key guides:
   - **[CLI_CSHARP.md](docs/CLI_CSHARP.md)** - CLI for C# / Mono (compiled, .NET)
   - **[CLI_HAXE5.md](docs/CLI_HAXE5.md)** - CLI for Haxe 5 (compiled, multi-target)
   - **[CLI_LUA.md](docs/CLI_LUA.md)** - CLI for Lua (cross-platform)
-  - **[CLI_PYTHON3.md](docs/CLI_PYTHON3.md)** - CLI for Python 3 (recommended)
+  - **[CLI_PYTHON3.md](docs/CLI_PYTHON3.md)** - Paused CLI for Python 3
   - **[CLI_TCL.md](docs/CLI_TCL.md)** - CLI for Tcl (tclsh)
 - **[WEB.md](docs/WEB.md)** - Web interface guide
 - **[WEB_DESIGN.md](docs/WEB_DESIGN.md)** - Shared UI and implementation patterns
 - SERVER:
   - **[SERVER_FREEPASCAL.md](docs/SERVER_FREEPASCAL.md)** - FreePascal server (compiled binary)
-  - **[SERVER_JS.md](docs/SERVER_JS.md)** - JavaScript server (Node.js, Bun, Deno)
-  - **[SERVER_PHP.md](docs/SERVER_PHP.md)** - PHP server setup
+  - **[SERVER_JS.md](docs/SERVER_JS.md)** - Paused JavaScript server
+  - **[SERVER_PHP.md](docs/SERVER_PHP.md)** - Paused PHP server
 - **[DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md)** - Database design
 
 ## Setup
 
-Choose your server implementation:
+Use the currently maintained server implementation:
 
-- **FreePascal** (recommended for retro systems): Single compiled binary, minimal dependencies  
+- **FreePascal** (currently maintained): Single compiled binary, minimal dependencies
   See **[`docs/SERVER_FREEPASCAL.md`](docs/SERVER_FREEPASCAL.md)** for setup
 
-- **JavaScript** (Node.js, Bun, or Deno): Multi-runtime support  
+- **JavaScript** (paused; Node.js, Bun, or Deno): Retained for reference
   See **[`docs/SERVER_JS.md`](docs/SERVER_JS.md)** for setup
 
-- **PHP** (Apache, Nginx, or Caddy): Traditional web server deployment  
+- **PHP** (paused; Apache, Nginx, or Caddy): Retained for reference
   See **[`docs/SERVER_PHP.md`](docs/SERVER_PHP.md)** for setup
 
 Configure `settings.txt` and `users.txt` as needed.

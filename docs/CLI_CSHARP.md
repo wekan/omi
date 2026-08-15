@@ -1,5 +1,8 @@
 # Omi CLI for C# (Mono)
 
+> **Status: paused.** This language implementation is retained for reference.
+> Active Omi maintenance currently targets the FreePascal server.
+
 **Other CLI Versions:** [CLI_PYTHON3.md](CLI_PYTHON3.md) | [CLI_HAXE5.md](CLI_HAXE5.md) | [CLI_C89.md](CLI_C89.md) | [CLI_TCL.md](CLI_TCL.md) | [CLI_BASH.md](CLI_BASH.md) | [CLI_BAT.md](CLI_BAT.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md) | [CLI_LUA.md](CLI_LUA.md)  
 
 ## Overview

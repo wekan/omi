@@ -1,5 +1,8 @@
 # Command Line Interface: Python 3
 
+> **Status: paused.** This language implementation is retained for reference.
+> Active Omi maintenance currently targets the FreePascal server.
+
 > **Documentation Index:** See [README.md](README.md) for documentation overview  
 > **Quick Start:** See [README.md](README.md#installation-quick-reference)
 

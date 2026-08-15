@@ -1,5 +1,8 @@
 # AmigaShell CLI (omi)
 
+> **Status: paused.** This language implementation is retained for reference.
+> Active Omi maintenance currently targets the FreePascal server.
+
 > **Documentation:** [README.md](README.md) | [FEATURES.md](FEATURES.md) | [WEB.md](WEB.md) | [SERVER_PHP.md](SERVER_PHP.md) | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)  
 > **CLI Options:** [CLI_BASH.md](CLI_BASH.md) | [CLI_BAT.md](CLI_BAT.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md) | [CLI_C89.md](CLI_C89.md) | [CLI_TCL.md](CLI_TCL.md)
 

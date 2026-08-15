@@ -5,6 +5,10 @@
 
 Omi is a lightweight Git-like version control system designed for retro systems and modern platforms with SQLite-based storage and SHA256 deduplication.
 
+> **Maintenance status:** Current development targets the FreePascal server. All
+> other programming-language implementations listed here are paused and may not
+> have every current feature or fix.
+
 ## Core Features
 
 ### Version Control System
@@ -33,8 +37,8 @@ Omi is a lightweight Git-like version control system designed for retro systems 
 - **log** - View commit history with pagination (configurable limit)
 - **status** - Show current staging area and recent commits
 
-### Platform Support
-- **Python 3.6+** - Pure Python (recommended)
+### Paused CLI implementations
+- **Python 3.6+** - Pure Python (paused)
 - **Haxe 5.0+** - Multi-target compiled language (native, Python, JS, C#)
 - **C# / Mono** - Compiled CLI with .NET compatibility
 - **C89** - Portable C implementation (classic compilers)

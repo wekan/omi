@@ -4,6 +4,10 @@ This document defines the interface and implementation patterns shared by Omi's
 FreePascal, JavaScript, and PHP web servers. New pages and controls should follow
 these patterns so the three implementations remain familiar and interoperable.
 
+The FreePascal server is currently maintained. JavaScript and PHP are paused;
+these shared patterns apply when a paused implementation is compared or resumed,
+but current changes are required only in FreePascal.
+
 ## Design goals
 
 - Work without JavaScript, cookies, or client-side storage.
@@ -126,8 +130,8 @@ The FreePascal server currently uses these common functions:
 | Join repository path segments | `JoinRepoPath` |
 
 Use these functions instead of repeating their HTML or slash-handling rules in an
-endpoint. Equivalent helpers should be maintained in the JavaScript and PHP
-servers as their interfaces converge.
+endpoint. Equivalent helpers should be added to the paused JavaScript and PHP
+servers if maintenance of those implementations resumes.
 
 ## Review checklist
 
@@ -140,5 +144,5 @@ When adding or changing a web feature, verify that:
 - the same component is not independently assembled in multiple call sites;
 - repository changes create a commit and preserve older commits;
 - errors explain the actionable cause;
-- the FreePascal, JavaScript, and PHP interfaces use the same terminology and
-  overall interaction pattern where the feature exists.
+- the maintained FreePascal interface follows this design; when another server is
+  resumed, it adopts the same terminology and interaction pattern.

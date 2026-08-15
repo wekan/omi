@@ -1,5 +1,8 @@
 # Omi CLI for C89 (omi.c)
 
+> **Status: paused.** This language implementation is retained for reference.
+> Active Omi maintenance currently targets the FreePascal server.
+
 **Other CLI Versions:** [CLI_PYTHON3.md](CLI_PYTHON3.md) | [CLI_HAXE5.md](CLI_HAXE5.md) | [CLI_CSHARP.md](CLI_CSHARP.md) | [CLI_BASH.md](CLI_BASH.md) | [CLI_BAT.md](CLI_BAT.md) | [CLI_AMIGASHELL.md](CLI_AMIGASHELL.md) | [CLI_LUA.md](CLI_LUA.md)  
 
 ## Overview

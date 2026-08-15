@@ -1,5 +1,9 @@
 # Omi Server - JavaScript Implementation
 
+> **Status: paused.** This implementation is retained for reference and may not
+> contain current features, fixes, or security behavior. The
+> [FreePascal server](SERVER_FREEPASCAL.md) is currently maintained.
+
 A feature-complete HTTP server implementation for Omi written in JavaScript/TypeScript, compatible with **Node.js**, **Bun**, and **Deno**.
 
 ## Features

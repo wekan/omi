@@ -1,5 +1,9 @@
 # Omi Server - PHP Implementation
 
+> **Status: paused.** This implementation is retained for reference and may not
+> contain current features, fixes, or security behavior. The
+> [FreePascal server](SERVER_FREEPASCAL.md) is currently maintained.
+
 > **Documentation Index:** See [README.md](README.md) for documentation overview  
 > **Quick Start:** See [README.md](README.md#server-deployment)
 
