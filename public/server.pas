@@ -2108,6 +2108,29 @@ var
 begin
   Username := GetUsernameFromRequest(ARequest);
   SessionId := GetSessionIdFromRequest(ARequest);
+
+  // Session IDs are kept in memory and become invalid after logout, expiry, or
+  // a server restart. Remove a stale ID from the address bar. For a reloaded
+  // POST, 303 tells the browser to follow with GET instead of submitting the
+  // old repository action again.
+  if Username = '' then
+  begin
+    if UpperCase(ARequest.Method) = 'POST' then
+    begin
+      AResponse.Code := 303;
+      AResponse.Location := '/';
+      AResponse.Content := '';
+      Exit;
+    end
+    else if SessionId <> '' then
+    begin
+      AResponse.Code := 302;
+      AResponse.Location := '/';
+      AResponse.Content := '';
+      Exit;
+    end;
+  end;
+
   UserLang := '';
   UsersMap := LoadUsersMap;
   try
@@ -2275,9 +2298,9 @@ begin
       // missing, expired, or restarted-server session resolves to no user.
       if Username = '' then
       begin
-        AResponse.Code := 401;
-        AResponse.ContentType := 'text/plain; charset=UTF-8';
-        AResponse.Content := T('error', Translations) + ': ' + T('login', Translations);
+        AResponse.Code := 303;
+        AResponse.Location := '/';
+        AResponse.Content := '';
         Exit;
       end
       else
