@@ -3504,8 +3504,7 @@ var
     BreadcrumbTarget: string;
     K: Integer;
   begin
-    Result := '<p><strong>' + HtmlEncode(T('path', Translations)) +
-      ':</strong> ' + BuildNavTargetButton(ARequest, CurrentPath,
+    Result := '<p>' + BuildNavTargetButton(ARequest, CurrentPath,
       WithCommit(RepoToRoot(RepoName)), 'repo-breadcrumb-root', RepoName);
     if RepoPath <> '' then
     begin
@@ -3662,8 +3661,6 @@ begin
       Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
         '<html><head><meta charset="UTF-8"><title>' + T('file', Translations) + ': ' + HtmlEncode(RepoPath) + ' - ' + HtmlEncode(RepoName) + '</title></head>' +
         '<body bgcolor="#f0f0f0">' +
-        '<table width="100%" border="0" cellpadding="5">' +
-        '<tr><td><h1>' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small></small></td></tr></table>' +
         BuildNavRow([
           BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)),
           ifthen(Username <> '', BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)), ''),
@@ -3678,9 +3675,7 @@ begin
             RepoToRoot(RepoName), 'repo-file-latest', T('latest', Translations)), '')
         ]) +
         BuildRepoBreadcrumb(True) +
-        ifthen(IsHistoricView, '<p><font color="blue"><strong>' + T('viewing-commit', Translations) + ' ' + IntToStr(SelectedCommitId) + '</strong></font></p>', '') +
-        '<h2>' + T('file', Translations) + ': ' +
-        HtmlEncode(ExtractFileName(RepoPath)) + '</h2>';
+        ifthen(IsHistoricView, '<p><font color="blue"><strong>' + T('viewing-commit', Translations) + ' ' + IntToStr(SelectedCommitId) + '</strong></font></p>', '');
 
       if ShowDeleteConfirm then
       begin
@@ -4043,8 +4038,6 @@ begin
       Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
         '<html><head><title>' + HtmlEncode(RepoPath) + ' - ' + HtmlEncode(RepoName) + '</title></head>' +
         '<body bgcolor="#f0f0f0">' +
-        '<table width="100%" border="0" cellpadding="5">' +
-        '<tr><td><h1>' + HtmlEncode(RepoName) + '</h1></td><td align="right"><small></small></td></tr></table>' +
         BuildNavRow([
           BuildActionButton(ARequest, '/', 'nav-home', T('home', Translations)),
           ifthen(Username <> '', BuildActionButton(ARequest, '/language', 'nav-language', T('language', Translations)), ''),
@@ -4059,9 +4052,6 @@ begin
         ]) +
         BuildRepoBreadcrumb(False) +
         ifthen(IsHistoricView, '<p><font color="blue"><strong>' + T('viewing-commit', Translations) + ' ' + IntToStr(SelectedCommitId) + '</strong></font></p>', '') +
-        '<h2>' + T('directory', Translations) + ': ' +
-        ifthen(RepoPath = '', T('root', Translations),
-          HtmlEncode(ExtractFileName(RepoPath))) + '</h2>' +
         '<hr>' +
         '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
         '<tr bgcolor="#333333"><th><font color="white">' + T('name', Translations) + '</font></th><th><font color="white">' + T('size', Translations) + '</font></th><th><font color="white">' + T('last-modified', Translations) + '</font></th><th><font color="white">' + T('uploaded', Translations) + '</font></th><th><font color="white">' + T('uploaded-by', Translations) + '</font></th><th><font color="white">' + T('actions', Translations) + '</font></th></tr>' +

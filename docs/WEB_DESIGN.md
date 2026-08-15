@@ -32,10 +32,12 @@ Pages use server-rendered HTML and a consistent order:
 5. Main content, normally a simple table or form.
 6. Context-specific create or upload forms after the listing.
 
-Repository breadcrumbs begin with the `.omi` repository name and continue with
-one button for each directory. Each button posts directly to that clean path, so
-the browser URL shows the selected location. On a file page, the final segment is
-plain text in `filename (type)` form because it identifies the page already open:
+Repository breadcrumbs sit directly below the primary navigation without a
+separate repository heading or `Path:` label. They begin with the `.omi` repository
+name and continue with one button for each directory. Each button posts directly
+to that clean path, so the browser URL shows the selected location. On a file page,
+the final segment is plain text in `filename (type)` form because it identifies the
+page already open:
 
 `[wekan.omi] / [Directory] / [Subdirectory] / README.md (Markdown)`
 

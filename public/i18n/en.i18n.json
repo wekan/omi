@@ -1667,6 +1667,7 @@
   "uploaded": "Uploaded",
   "uploaded-by": "Uploaded By",
   "continue": "Continue",
+  "no-files-directory": "No files in this directory",
   "no-repositories": "No repositories found",
   "create-repository": "Create Repository",
   "upload-repository": "Upload/Update Repository",
