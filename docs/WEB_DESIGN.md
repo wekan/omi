@@ -27,9 +27,17 @@ Pages use server-rendered HTML and a consistent order:
 
 1. Omi title and logo.
 2. Primary navigation as a compact row of controls.
-3. Page heading and status or error message.
-4. Main content, normally a simple table or form.
-5. Context-specific create or upload forms after the listing.
+3. On repository pages, a breadcrumb path made from signed buttons.
+4. Page heading and status or error message.
+5. Main content, normally a simple table or form.
+6. Context-specific create or upload forms after the listing.
+
+Repository breadcrumbs begin with the `.omi` repository name and continue with
+one button for each directory. Each button posts directly to that clean path, so
+the browser URL shows the selected location. On a file page, the final segment is
+plain text in `filename (type)` form because it identifies the page already open:
+
+`[wekan.omi] / [Directory] / [Subdirectory] / README.md (Markdown)`
 
 Tables use descriptive column headings and `-` for a value or action that is not
 available. Repository listings put the entry button in the first column and the

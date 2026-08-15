@@ -3497,6 +3497,43 @@ var
     Result := '/' + StringReplace(Name, '.omi', '', []);
   end;
 
+  function BuildRepoBreadcrumb(IsFileView: Boolean): string;
+  var
+    BreadcrumbParts: TStringArray;
+    BreadcrumbPath: string;
+    BreadcrumbTarget: string;
+    K: Integer;
+  begin
+    Result := '<p><strong>' + HtmlEncode(T('path', Translations)) +
+      ':</strong> ' + BuildNavTargetButton(ARequest, CurrentPath,
+      WithCommit(RepoToRoot(RepoName)), 'repo-breadcrumb-root', RepoName);
+    if RepoPath <> '' then
+    begin
+      BreadcrumbParts := RepoPath.Split(['/']);
+      BreadcrumbPath := '';
+      for K := 0 to High(BreadcrumbParts) do
+      begin
+        if BreadcrumbParts[K] = '' then
+          Continue;
+        Result := Result + ' / ';
+        if BreadcrumbPath <> '' then
+          BreadcrumbPath := BreadcrumbPath + '/';
+        BreadcrumbPath := BreadcrumbPath + BreadcrumbParts[K];
+        if IsFileView and (K = High(BreadcrumbParts)) then
+          Result := Result + HtmlEncode(BreadcrumbParts[K]) + ' (' +
+            HtmlEncode(GetFileTypeLabel(BreadcrumbParts[K])) + ')'
+        else
+        begin
+          BreadcrumbTarget := RepoToRoot(RepoName) + '/' + BreadcrumbPath;
+          Result := Result + BuildNavTargetButton(ARequest, CurrentPath,
+            WithCommit(BreadcrumbTarget), 'repo-breadcrumb-' + IntToStr(K),
+            BreadcrumbParts[K]);
+        end;
+      end;
+    end;
+    Result := Result + '</p>';
+  end;
+
 begin
   PathInfo := ARequest.PathInfo;
   if (PathInfo = '/') or (PathInfo = '') then
@@ -3640,8 +3677,10 @@ begin
           ifthen(IsHistoricView, BuildNavTargetButton(ARequest, CurrentPath,
             RepoToRoot(RepoName), 'repo-file-latest', T('latest', Translations)), '')
         ]) +
+        BuildRepoBreadcrumb(True) +
         ifthen(IsHistoricView, '<p><font color="blue"><strong>' + T('viewing-commit', Translations) + ' ' + IntToStr(SelectedCommitId) + '</strong></font></p>', '') +
-        '<h2>' + T('file', Translations) + ': ' + HtmlEncode(RepoPath) + '</h2>';
+        '<h2>' + T('file', Translations) + ': ' +
+        HtmlEncode(ExtractFileName(RepoPath)) + '</h2>';
 
       if ShowDeleteConfirm then
       begin
@@ -4018,8 +4057,11 @@ begin
           ifthen(IsHistoricView, BuildNavTargetButton(ARequest, CurrentPath,
             RepoToRoot(RepoName), 'repo-list-latest', T('latest', Translations)), '')
         ]) +
+        BuildRepoBreadcrumb(False) +
         ifthen(IsHistoricView, '<p><font color="blue"><strong>' + T('viewing-commit', Translations) + ' ' + IntToStr(SelectedCommitId) + '</strong></font></p>', '') +
-        '<h2>' + T('directory', Translations) + ': /' + HtmlEncode(RepoPath) + '</h2>' +
+        '<h2>' + T('directory', Translations) + ': ' +
+        ifthen(RepoPath = '', T('root', Translations),
+          HtmlEncode(ExtractFileName(RepoPath))) + '</h2>' +
         '<hr>' +
         '<table border="1" width="100%" cellpadding="5" cellspacing="0">' +
         '<tr bgcolor="#333333"><th><font color="white">' + T('name', Translations) + '</font></th><th><font color="white">' + T('size', Translations) + '</font></th><th><font color="white">' + T('last-modified', Translations) + '</font></th><th><font color="white">' + T('uploaded', Translations) + '</font></th><th><font color="white">' + T('uploaded-by', Translations) + '</font></th><th><font color="white">' + T('actions', Translations) + '</font></th></tr>' +

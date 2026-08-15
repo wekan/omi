@@ -78,7 +78,10 @@ opening the same URL performs a sessionless GET and shows the logged-out view.
 
 ### Navigate Directories
 - Click on directory name to open
-- Breadcrumb shows current path
+- Below the top navigation, the breadcrumb shows the repository and each directory
+  as session-preserving buttons
+- Clicking a breadcrumb button opens that clean path and updates the browser URL
+- File pages end the breadcrumb with the plain filename and detected file type
 - Click [Repository Root] to go back to root
 
 ### View Files
