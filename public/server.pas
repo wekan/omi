@@ -518,7 +518,9 @@ begin
   Result := True;
 end;
 
-function VerifyAndConsumeActionToken(ARequest: TRequest; const RequiredAction, SessionId, Username: string): Boolean;
+function VerifyAndConsumeActionTokenDetailed(ARequest: TRequest;
+  const RequiredAction, SessionId, Username: string;
+  out FailureReason: string): Boolean;
 var
   MetaUsername, PasswordRef, MetaIp, MetaUa: string;
   LoginAt, LastActivityAt, ClickCounter: Int64;
@@ -527,33 +529,62 @@ var
   ExpectedHash: string;
 begin
   Result := False;
+  FailureReason := '';
   PostedAction := GetFormFieldValue(ARequest, 'auth_action');
   PostedHash := GetFormFieldValue(ARequest, 'auth_hash');
   PostedCounter := StrToInt64Def(GetFormFieldValue(ARequest, 'auth_counter'), -1);
 
   if (PostedAction = '') or (PostedHash = '') then
+  begin
+    FailureReason := 'The page did not send all required token fields. Reload the page and try again.';
     Exit;
+  end;
   if not SameText(PostedAction, RequiredAction) then
+  begin
+    FailureReason := 'The token belongs to a different action. Reload the page and try again.';
     Exit;
+  end;
   if not LoadSessionMeta(SessionId, MetaUsername, PasswordRef, MetaIp, MetaUa, LoginAt, LastActivityAt, ClickCounter) then
+  begin
+    FailureReason := 'The session has expired or the server restarted. Log in again.';
     Exit;
+  end;
   if not SameText(MetaUsername, Username) then
+  begin
+    FailureReason := 'The token belongs to a different user. Log in again.';
     Exit;
+  end;
   if PostedCounter <> ClickCounter then
+  begin
+    FailureReason := 'This one-time page token was already used. Reload the page and try again.';
     Exit;
+  end;
   if (MetaIp <> GetClientIp(ARequest)) or (MetaUa <> GetRequestUserAgent(ARequest)) then
   begin
     InvalidateSessionsForUserAndPassword(Username, PasswordRef);
+    FailureReason := 'The IP address or browser identity changed. Log in again.';
     Exit;
   end;
 
   ExpectedHash := BuildActionHash(SessionId, Username, PasswordRef, MetaIp, MetaUa, RequiredAction, LoginAt, ClickCounter);
   if not SameText(ExpectedHash, PostedHash) then
+  begin
+    FailureReason := 'The action token signature is invalid. Reload the page and try again.';
     Exit;
+  end;
 
   SaveSessionMeta(SessionId, MetaUsername, PasswordRef, MetaIp, MetaUa, LoginAt, DateTimeToUnix(Now), ClickCounter + 1);
   LogActivity(Username, SessionId, RequiredAction, 'ok', 'token accepted', ARequest, ClickCounter + 1);
   Result := True;
+end;
+
+function VerifyAndConsumeActionToken(ARequest: TRequest;
+  const RequiredAction, SessionId, Username: string): Boolean;
+var
+  FailureReason: string;
+begin
+  Result := VerifyAndConsumeActionTokenDetailed(ARequest, RequiredAction,
+    SessionId, Username, FailureReason);
 end;
 
 function BuildActionButton(ARequest: TRequest; const Path, ActionName, LabelText: string): string;
@@ -2127,6 +2158,7 @@ var
   CreateRepoAuth: string;
   UploadRepoAuth: string;
   PostedAuthAction: string;
+  TokenFailureReason: string;
   SessionId: string;
   NavTarget: string;
   RepoRootPath: string;
@@ -2334,12 +2366,15 @@ begin
       else
       begin
         PostedAuthAction := GetFormFieldValue(ARequest, 'auth_action');
-        if (PostedAuthAction = '') or not VerifyAndConsumeActionToken(ARequest, PostedAuthAction, SessionId, Username) then
+        if PostedAuthAction = '' then
+          TokenFailureReason := 'The page did not send an action token. Reload the page and try again.';
+        if (PostedAuthAction = '') or not VerifyAndConsumeActionTokenDetailed(
+          ARequest, PostedAuthAction, SessionId, Username, TokenFailureReason) then
         begin
           AResponse.Code := 403;
           AResponse.ContentType := 'text/plain; charset=UTF-8';
-          AResponse.Content := T('error', Translations) + ': ' + T('invalid-action-token', Translations);
-          LogActivity(Username, SessionId, 'home-post', 'forbidden', 'invalid or missing token', ARequest, -1);
+          AResponse.Content := T('error', Translations) + ': ' + TokenFailureReason;
+          LogActivity(Username, SessionId, 'home-post', 'forbidden', TokenFailureReason, ARequest, -1);
           Exit;
         end;
         NavTarget := GetFormFieldValue(ARequest, 'nav_target');
@@ -2509,7 +2544,7 @@ begin
           '<td>' + HtmlEncode(SizeText) + '</td>' +
           '<td>' + HtmlEncode(FormatDateTime('yyyy-mm-dd hh:nn:ss', FileDateToDateTime(Repos[I].Modified))) + '</td>' +
           '<td>' + BuildNavTargetButton(ARequest, '/', '/?download=' + HtmlEncode(Repos[I].Name), 'home-download-repo-' + IntToStr(I), T('download', Translations)) +
-          ' <a href="' + HtmlEncode(AddSessionIdToTarget('/?log=' + Repos[I].Name, SessionId)) + '">' + T('log', Translations) + '</a>' +
+          ' ' + BuildNavTargetButton(ARequest, '/', '/?log=' + HtmlEncode(Repos[I].Name), 'home-log-repo-' + IntToStr(I), T('log', Translations)) +
           ifthen(Username <> '', ' <form method="POST" style="display:inline"><input type="hidden" name="action" value="delete_repo_request"><input type="hidden" name="repo_name" value="' + HtmlEncode(Repos[I].Name) + '">' + DeleteRepoAuth + '<input type="submit" value="' + T('delete', Translations) + '"></form>', '') + '</td></tr>';
       end;
     end;
