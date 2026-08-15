@@ -2434,7 +2434,17 @@ begin
           Continue;
         LogParts := LogLines[I].Split(['|']);
         if Length(LogParts) >= 5 then
-          TableRows := TableRows + '<tr><td><strong><a href="/' + HtmlEncode(StringReplace(RepoName, '.omi', '', [])) + '?commit=' + HtmlEncode(LogParts[0]) + '">' + HtmlEncode(LogParts[0]) + '</a></strong></td><td>' + HtmlEncode(LogParts[1]) + '</td><td>' + HtmlEncode(LogParts[2]) + '</td><td>' + HtmlEncode(LogParts[3]) + '</td><td>' + HtmlEncode(LogParts[4]) + '</td><td><a href="/' + HtmlEncode(StringReplace(RepoName, '.omi', '', [])) + '?commit=' + HtmlEncode(LogParts[0]) + '">View</a></td></tr>';
+          TableRows := TableRows + '<tr><td><strong>' +
+            BuildNavTargetButton(ARequest, '/', '/' +
+              StringReplace(RepoName, '.omi', '', []) + '?commit=' +
+              LogParts[0], 'home-log-commit-id-' + LogParts[0], LogParts[0]) +
+            '</strong></td><td>' + HtmlEncode(LogParts[1]) + '</td><td>' +
+            HtmlEncode(LogParts[2]) + '</td><td>' + HtmlEncode(LogParts[3]) +
+            '</td><td>' + HtmlEncode(LogParts[4]) + '</td><td>' +
+            BuildNavTargetButton(ARequest, '/', '/' +
+              StringReplace(RepoName, '.omi', '', []) + '?commit=' +
+              LogParts[0], 'home-log-commit-view-' + LogParts[0],
+              T('view', Translations)) + '</td></tr>';
       end;
 
       Html := '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">' +
@@ -2457,7 +2467,9 @@ begin
         '<tr bgcolor="#333333"><th><font color="white">' + T('commit-id', Translations) + '</font></th><th><font color="white">' + T('message', Translations) + '</font></th><th><font color="white">' + T('author', Translations) + '</font></th><th><font color="white">' + T('date', Translations) + '</font></th><th><font color="white">' + T('files', Translations) + '</font></th><th><font color="white">' + T('open', Translations) + '</font></th></tr>' +
         TableRows +
         '</table>' +
-        '<p><a href="/' + HtmlEncode(StringReplace(RepoName, '.omi', '', [])) + '">' + T('latest', Translations) + '</a></p>' +
+        '<p>' + BuildNavTargetButton(ARequest, '/', '/' +
+          StringReplace(RepoName, '.omi', '', []), 'home-log-latest',
+          T('latest', Translations)) + '</p>' +
         '<hr><p><small>Omi Server</small></p>' +
         '</body></html>';
       AResponse.Content := PrettyHtml32(Html);
@@ -3669,7 +3681,8 @@ begin
           ifthen(Username <> '', BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), ''),
           BuildNavTargetButton(ARequest, CurrentPath, WithCommit('/?log=' + HtmlEncode(RepoName)), 'repo-nav-log', T('log', Translations)),
           BuildNavTargetButton(ARequest, CurrentPath, WithCommit(RepoToRoot(RepoName)), 'repo-nav-root', T('repository-root', Translations)),
-          ifthen(IsHistoricView, '<a href="' + HtmlEncode(RepoToRoot(RepoName)) + '">' + T('latest', Translations) + '</a>', '')
+          ifthen(IsHistoricView, BuildNavTargetButton(ARequest, CurrentPath,
+            RepoToRoot(RepoName), 'repo-file-latest', T('latest', Translations)), '')
         ]) +
         ifthen(IsHistoricView, '<p><font color="blue"><strong>' + T('viewing-commit', Translations) + ' ' + IntToStr(SelectedCommitId) + '</strong></font></p>', '') +
         '<h2>' + T('file', Translations) + ': ' + HtmlEncode(RepoPath) + '</h2>';
@@ -4021,7 +4034,8 @@ begin
           ifthen(Username <> '', '<strong>' + HtmlEncode(Username) + '</strong>', '<a href="/sign-in">' + T('login', Translations) + '</a>'),
           ifthen(Username <> '', BuildActionButton(ARequest, '/logout', 'nav-logout', T('logout', Translations)), ''),
           BuildNavTargetButton(ARequest, CurrentPath, WithCommit('/?log=' + HtmlEncode(RepoName)), 'repo-nav-log-list', T('log', Translations)),
-          ifthen(IsHistoricView, '<a href="' + HtmlEncode(RepoToRoot(RepoName)) + '">' + T('latest', Translations) + '</a>', '')
+          ifthen(IsHistoricView, BuildNavTargetButton(ARequest, CurrentPath,
+            RepoToRoot(RepoName), 'repo-list-latest', T('latest', Translations)), '')
         ]) +
         ifthen(IsHistoricView, '<p><font color="blue"><strong>' + T('viewing-commit', Translations) + ' ' + IntToStr(SelectedCommitId) + '</strong></font></p>', '') +
         '<h2>' + T('directory', Translations) + ': /' + HtmlEncode(RepoPath) + '</h2>' +
