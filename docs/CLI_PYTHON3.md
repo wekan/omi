@@ -665,7 +665,7 @@ Or import functions from the script similar to a module.
 **Error:** `Error: Failed to push to remote` or `Error: Failed to pull from remote`
 
 **Solution:**
-- Verify settings.ini: `cat settings.ini`
+- Verify settings.ini: `cat ../settings/settings.ini`
 - Test connection: `curl "$REPOS"`
 - Check credentials: username/password in settings.ini
 - Check 2FA: Is OTP code required?

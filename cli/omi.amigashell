@@ -6,7 +6,7 @@
 .KET }
 
 ; Read settings from settings.ini
-Execute >T:omi_settings "Type ../settings.ini"
+Execute >T:omi_settings "Type ../settings/settings.ini"
 Search T:omi_settings "SQLITE=" >T:omi_var
 Execute <T:omi_var
 Search T:omi_settings "USERNAME=" >T:omi_var
@@ -171,8 +171,8 @@ LAB PUSH_CHANGES
   EndIf
 
   ; Check if user has 2FA enabled (simple check for users.ini)
-  If Exists "users.ini"
-    Search "users.ini" "$USERNAME:" >T:omi_user
+  If Exists "../settings/users.ini"
+    Search "../settings/users.ini" "$USERNAME:" >T:omi_user
     If Not WARN
       ; User entry found, check if has OTP (third field)
       ; For AmigaShell simplicity, just prompt for OTP
@@ -206,8 +206,8 @@ LAB PULL_CHANGES
   EndIf
 
   ; Check if user has 2FA enabled (simple check for users.ini)
-  If Exists "users.ini"
-    Search "users.ini" "$USERNAME:" >T:omi_user
+  If Exists "../settings/users.ini"
+    Search "../settings/users.ini" "$USERNAME:" >T:omi_user
     If Not WARN
       ; User entry found, check if has OTP (third field)
       ; For AmigaShell simplicity, just prompt for OTP

@@ -345,16 +345,56 @@ def test_token_cli(work):
         fake.close()
 
 
+def test_file_layout(work):
+    """Settings are .ini files in settings/, Omi's database is in db/: an old
+    settings.txt, users.txt or settings.ini beside public/, and activity.db, are
+    moved there when the server starts, never over a file already there."""
+    import json as _json
+    for old in ("txt", "ini"):
+        d = os.path.join(work, f"layout-{old}")
+        os.makedirs(os.path.join(d, "public"))
+        shutil.copy2(SERVER, os.path.join(d, "public", "server"))
+        shutil.copytree(os.path.join(REPO, "public", "i18n"), os.path.join(d, "public", "i18n"))
+        shutil.copy2(os.path.join(REPO, "public", "languages.json"), os.path.join(d, "public"))
+        for name, text in (("settings", "SQLITE=sqlite3\n"), ("users", "u:p::en\n"), ("github-token", "old\n")):
+            with open(os.path.join(d, f"{name}.{old}"), "w") as f:
+                f.write(text)
+        with open(os.path.join(d, "activity.db"), "wb") as f:
+            f.write(b"")
+        os.makedirs(os.path.join(d, "settings"))
+        with open(os.path.join(d, "settings", "github-token.ini"), "w") as f:
+            f.write("keep\n")
+        r = subprocess.run([os.path.join(d, "public", "server"), "gitea", "status"], cwd=d,
+                           capture_output=True, text=True, timeout=60)
+        check(os.path.isfile(os.path.join(d, "settings", "settings.ini"))
+              and os.path.isfile(os.path.join(d, "settings", "users.ini"))
+              and not os.path.exists(os.path.join(d, f"settings.{old}"))
+              and not os.path.exists(os.path.join(d, f"users.{old}")),
+              f"settings.{old} and users.{old} are moved into settings/ {sorted(os.listdir(d))}")
+        check(os.path.isfile(os.path.join(d, "db", "activity.db")) and not os.path.exists(os.path.join(d, "activity.db")),
+              "activity.db is moved into db/")
+        check(open(os.path.join(d, "settings", "github-token.ini")).read() == "keep\n"
+              and os.path.isfile(os.path.join(d, f"github-token.{old}")),
+              f"negative: an existing settings/github-token.ini is kept, github-token.{old} left as it is")
+    ignored = subprocess.run(["git", "check-ignore", "--no-index", "settings/settings.ini", "settings/users.ini",
+                              "settings/github-token.ini", "db/activity.db"], cwd=REPO, capture_output=True, text=True)
+    check(len(ignored.stdout.split()) == 4, f"settings/*.ini and db/ are in .gitignore {ignored.stdout.split()}")
+    kept = subprocess.run(["git", "check-ignore", "--no-index", "settings/settings.example.ini",
+                           "settings/users.example.ini"], cwd=REPO, capture_output=True, text=True)
+    check(kept.stdout.strip() == "", "negative: the two examples are not ignored")
+
+
 def test_web(work, fixture_ids):
     srv = os.path.join(work, "srv")
     os.makedirs(os.path.join(srv, "public"))
     shutil.copy2(SERVER, os.path.join(srv, "public", "server"))
     shutil.copytree(os.path.join(REPO, "public", "i18n"), os.path.join(srv, "public", "i18n"))
     shutil.copy2(os.path.join(REPO, "public", "languages.json"), os.path.join(srv, "public"))
-    with open(os.path.join(srv, "settings.ini"), "w") as f:
+    os.makedirs(os.path.join(srv, "settings"), exist_ok=True)
+    with open(os.path.join(srv, "settings", "settings.ini"), "w") as f:
         f.write(f"GITEA_APP_INI={os.path.join(work, 'custom', 'conf', 'app.ini')}\nGITEA_INDEX=gitea-index.txt\n"
                 f"GITHUB_TO_GITEA_DIR={MIRROR}\nSYNC_EXCLUDE_FILE=sync-exclude.txt\n")
-    with open(os.path.join(srv, "users.ini"), "w") as f:
+    with open(os.path.join(srv, "settings", "users.ini"), "w") as f:
         f.write("tester:secret::en\n")
     port = free_port()
     log = open(os.path.join(srv, "server.log"), "w")
@@ -459,10 +499,10 @@ def test_web(work, fixture_ids):
         a, fields = b.find(label="Save")
         fields.update({"GITHUB_TOKEN": "ghp_test_TOKEN_never_shown"})
         b.post("/settings", fields)
-        tok = os.path.join(srv, "github-token.ini")
+        tok = os.path.join(srv, "settings", "github-token.ini")
         check(os.path.isfile(tok) and open(tok).read().strip() == "ghp_test_TOKEN_never_shown"
               and (os.stat(tok).st_mode & 0o077) == 0, "the token is saved to its own file, mode 0600")
-        check("ghp_test_TOKEN" not in b.page and "ghp_test_TOKEN" not in open(os.path.join(srv, "settings.ini")).read(),
+        check("ghp_test_TOKEN" not in b.page and "ghp_test_TOKEN" not in open(os.path.join(srv, "settings", "settings.ini")).read(),
               "the token is not shown and not in settings.ini")
         # --- Test the token: GitHub's GET /user, from Settings and the import page ---
         b.click(action="/settings")
@@ -475,7 +515,7 @@ def test_web(work, fixture_ids):
         b.click(label="Test the token")
         check("GitHub accepts the token. Signed in as octo" in b.page and "4987 / 5000" in b.page
               and "Import from GitHub" in b.page, "Test the token on the import page: the login and the hour's requests")
-        act = sqlite3.connect(os.path.join(srv, "activity.db"))
+        act = sqlite3.connect(os.path.join(srv, "db", "activity.db"))
         tested = [r[0] for r in act.execute(
             "SELECT status_text FROM activity WHERE action_name = 'gitea-token-tested' ORDER BY rowid")]
         act.close()
@@ -559,7 +599,7 @@ def test_web(work, fixture_ids):
         a, fields = b.find(action="/gitea/o/Bob/delete", label="Delete")
         b.post(a, dict(fields, confirm="Bob"))
         check("Started" in b.page and "-delete-Bob.log" in b.page, "the delete runs as a job")
-        act = sqlite3.connect(os.path.join(srv, "activity.db"))
+        act = sqlite3.connect(os.path.join(srv, "db", "activity.db"))
         started = act.execute("SELECT COUNT(*) FROM activity WHERE action_name = 'gitea-delete' AND status_text = 'started'").fetchone()[0]
         act.close()
         check(started == 1, f"one request starts one job ({started})")
@@ -1527,6 +1567,7 @@ def main():
     try:
         test_translations()
         test_token_cli(os.path.join(work, "token"))
+        test_file_layout(os.path.join(work, "layout"))
         test_paths(os.path.join(work, "ini"))
         test_git_setting(os.path.join(work, "git-setting"))
         g = os.path.join(work, "gitea")

@@ -71,10 +71,11 @@ const
   VERSION = '1.0.0';
   SQLITE_OK = 0;
   DEFAULT_PORT = 3001;
-  SETTINGS_FILE = '../settings.ini';
-  USERS_FILE = '../users.ini';
-  USERS_BRUTEFORCE_FILE = '../usersbruteforcelocked.ini';
-  ACTIVITY_DB_FILE = '../activity.db';
+  // Settings in settings/, Omi's own database in db/ (both in .gitignore).
+  SETTINGS_FILE = '../settings/settings.ini';
+  USERS_FILE = '../settings/users.ini';
+  USERS_BRUTEFORCE_FILE = '../settings/usersbruteforcelocked.ini';
+  ACTIVITY_DB_FILE = '../db/activity.db';
   REPOS_DIR = '../repos';
   SESSION_TIMEOUT = 24 * 60 * 60;
   USER_VALUE_SEP = #1;
@@ -4253,9 +4254,9 @@ begin
     Exit;
   if Copy(Value, 1, 2) = '~/' then
     Value := IncludeTrailingPathDelimiter(GetEnvironmentVariable('HOME')) + Copy(Value, 3, MaxInt);
-  // A relative directory is beside settings.ini.
+  // A relative directory is in the Omi folder (where settings/ and db/ are).
   if not GtIsAbs(Value) then
-    Value := ExtractFilePath(DataPath(SETTINGS_FILE)) + Value;
+    Value := IncludeTrailingPathDelimiter(DataPath('..')) + Value;
   Result := ExcludeTrailingPathDelimiter(ExpandFileName(Value));
 end;
 
@@ -6073,7 +6074,7 @@ begin
     Value := IncludeTrailingPathDelimiter(GetEnvironmentVariable('HOME')) + Copy(Value, 3, MaxInt);
   if not ((Value[1] = '/') or (Value[1] = '\') or
     ((Length(Value) > 1) and (Value[2] = ':'))) then
-    Value := ExtractFilePath(DataPath(SETTINGS_FILE)) + Value;
+    Value := IncludeTrailingPathDelimiter(DataPath('..')) + Value;
   Result := ExcludeTrailingPathDelimiter(ExpandFileName(Value));
 end;
 
@@ -6389,7 +6390,7 @@ end;
 
 function GetGithubTokenFile: string;
 begin
-  Result := SettingPath('GITHUB_TOKEN_FILE', 'github-token.ini');
+  Result := SettingPath('GITHUB_TOKEN_FILE', 'settings/github-token.ini');
 end;
 
 // GitHub's API: OMI_GITHUB_API for the tests' fake GitHub, else GitHub's own.
@@ -8476,38 +8477,57 @@ begin
   raise Exception.Create('No available TCP port was found');
 end;
 
-// Omi's own files were .txt before 2026-11-24 and are .ini now, so that one
-// .gitignore line (*.ini) keeps every one of them - passwords, users, the
-// GitHub token - out of git. An old .txt is renamed once, and never over an
-// .ini that already exists. The token file only when GITHUB_TOKEN_FILE does
-// not name it.
-procedure MigrateTxtToIni;
+// Omi's settings are .ini files in settings/ and its own database is in db/
+// (2026-11-24), so that .gitignore keeps every one of them - passwords, users,
+// the GitHub token, the activity - out of git. Before, they were .txt (or .ini)
+// files and activity.db beside public/. An old file is moved once, and never
+// over one that already exists; the token file only when GITHUB_TOKEN_FILE
+// does not name it.
+procedure MigrateFileLayout;
 const
   NAMES: array[0..3] of string = ('settings', 'users', 'usersbruteforcelocked', 'github-token');
 var
-  I: Integer;
+  I, K: Integer;
   OldPath, NewPath, SettingsText: string;
+  Olds: array[0..1] of string;
 begin
-  SettingsText := '';
+  ForceDirectories(DataPath('../settings'));
+  ForceDirectories(DataPath('../db'));
   for I := 0 to High(NAMES) do
   begin
-    OldPath := DataPath('../' + NAMES[I] + '.txt');
-    NewPath := DataPath('../' + NAMES[I] + '.ini');
-    if (NAMES[I] = 'github-token') and FileExists(DataPath('../settings.ini')) then
+    NewPath := DataPath('../settings/' + NAMES[I] + '.ini');
+    if NAMES[I] = 'github-token' then
     begin
-      SettingsText := ReadFileToString(DataPath('../settings.ini'));
+      SettingsText := '';
+      if FileExists(DataPath(SETTINGS_FILE)) then
+        SettingsText := ReadFileToString(DataPath(SETTINGS_FILE));
+      if FileExists(DataPath('../settings.ini')) then
+        SettingsText := SettingsText + ReadFileToString(DataPath('../settings.ini'));
+      if FileExists(DataPath('../settings.txt')) then
+        SettingsText := SettingsText + ReadFileToString(DataPath('../settings.txt'));
       if Pos('GITHUB_TOKEN_FILE=', SettingsText) > 0 then
         Continue;
     end;
-    if FileExists(OldPath) and not FileExists(NewPath) then
-      if RenameFile(OldPath, NewPath) then
-        WriteLn('Renamed ', OldPath, ' to ', NewPath);
+    Olds[0] := DataPath('../' + NAMES[I] + '.ini');
+    Olds[1] := DataPath('../' + NAMES[I] + '.txt');
+    for K := 0 to High(Olds) do
+    begin
+      OldPath := Olds[K];
+      if FileExists(OldPath) and not FileExists(NewPath) then
+        if RenameFile(OldPath, NewPath) then
+          WriteLn('Moved ', OldPath, ' to ', NewPath);
+    end;
   end;
+  OldPath := DataPath('../activity.db');
+  NewPath := DataPath(ACTIVITY_DB_FILE);
+  if FileExists(OldPath) and not FileExists(NewPath) then
+    if RenameFile(OldPath, NewPath) then
+      WriteLn('Moved ', OldPath, ' to ', NewPath);
 end;
 
 begin
   DefaultSystemCodePage := CP_UTF8;
-  MigrateTxtToIni;
+  MigrateFileLayout;
   // ./public/server gitea ...: the command line, no web server.
   if ParamStr(1) = 'gitea' then
   begin

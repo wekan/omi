@@ -36,12 +36,12 @@ class Settings {
     public static function load(): Settings {
         var settings = new Settings();
         
-        if (!FileSystem.exists("../settings.ini")) {
+        if (!FileSystem.exists("../settings/settings.ini")) {
             Sys.println("Error: settings.ini not found");
             Sys.exit(1);
         }
         
-        var content = File.getContent("../settings.ini");
+        var content = File.getContent("../settings/settings.ini");
         var lines = content.split("\n");
         
         for (line in lines) {
@@ -381,11 +381,11 @@ class OmiRepository {
     }
 
     private function has2FAEnabled(): Bool {
-        if (!FileSystem.exists("users.ini")) {
+        if (!FileSystem.exists("../settings/users.ini")) {
             return false;
         }
         
-        var content = File.getContent("users.ini");
+        var content = File.getContent("../settings/users.ini");
         var lines = content.split("\n");
         
         for (line in lines) {

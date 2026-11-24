@@ -31,11 +31,11 @@ class Settings:
         """Load settings from settings.ini file"""
         settings = {}
         
-        if not os.path.exists("../settings.ini"):
+        if not os.path.exists("../settings/settings.ini"):
             print("Error: settings.ini not found")
             sys.exit(1)
         
-        with open("../settings.ini", "r") as f:
+        with open("../settings/settings.ini", "r") as f:
             for line in f:
                 match = re.match(r"^([^=]+)=(.*)$", line.strip())
                 if match:
@@ -497,11 +497,11 @@ class OmiRepository:
     
     def _has_2fa_enabled(self):
         """Check if user has 2FA enabled"""
-        if not os.path.isfile("users.ini"):
+        if not os.path.isfile("../settings/users.ini"):
             return False
         
         username = self.settings.get("USERNAME", "")
-        with open("users.ini", "r") as f:
+        with open("../settings/users.ini", "r") as f:
             for line in f:
                 parts = line.strip().split(":")
                 if len(parts) >= 3 and parts[0] == username and parts[2]:

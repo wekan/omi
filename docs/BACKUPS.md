@@ -90,7 +90,7 @@ Set the directory in `settings.ini`, or on the Settings page:
 BACKUPS_DIR=/srv/github-to-gitea-backup
 ```
 
-A relative directory is beside `settings.ini`; `~/` is the home directory. Then
+A relative directory is in the Omi folder (where `settings/` is); `~/` is the home directory. Then
 log in and press **Backups** in the menu.
 
 The server needs read access to the backups to show them, and write access to the

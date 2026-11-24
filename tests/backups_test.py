@@ -4,8 +4,8 @@
   python3 -I tests/backups_test.py            builds with ./freepascalserver.sh first
   OMI_SKIP_BUILD=1 python3 -I tests/backups_test.py   uses the public/server already built
 
-It makes a scratch Omi (public/server, i18n, settings.ini with BACKUPS_DIR,
-users.ini) under $TMPDIR, writes backups with tests/make_backup_fixture.py,
+It makes a scratch Omi (public/server, i18n, settings/settings.ini with BACKUPS_DIR,
+settings/users.ini) under $TMPDIR, writes backups with tests/make_backup_fixture.py,
 starts the server on a free port, and drives it the way a browser without
 JavaScript or cookies does: it logs in and then only clicks the signed POST
 buttons the pages contain. It checks what the pages show and what saving
@@ -136,9 +136,10 @@ def main():
         shutil.copy2(os.path.join(REPO, "public", "server"), os.path.join(work, "public", "server"))
         shutil.copytree(os.path.join(REPO, "public", "i18n"), os.path.join(work, "public", "i18n"))
         shutil.copy2(os.path.join(REPO, "public", "languages.json"), os.path.join(work, "public"))
-        with open(os.path.join(work, "settings.ini"), "w") as f:
+        os.makedirs(os.path.join(work, "settings"), exist_ok=True)
+        with open(os.path.join(work, "settings", "settings.ini"), "w") as f:
             f.write("BACKUPS_DIR=backups\n")
-        with open(os.path.join(work, "users.ini"), "w") as f:
+        with open(os.path.join(work, "settings", "users.ini"), "w") as f:
             f.write("tester:secret::en\n")
         backups = os.path.join(work, "backups")
         fixture.make(backups, "acme", None)

@@ -399,10 +399,10 @@ CLI automatically:
 ### "Authentication failed"
 ```
 REM Check settings.ini
-Type settings.ini
+Type ../settings/settings.ini
 
 REM Verify user exists
-Type users.ini
+Type ../settings/users.ini
 ```
 
 ### OTP dialog won't appear

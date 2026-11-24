@@ -402,7 +402,7 @@ grep USERNAME settings.ini
 grep PASSWORD settings.ini
 
 # Verify user exists on server
-cat users.ini
+cat ../settings/users.ini
 ```
 
 ### "OTP_REQUIRED" or "Invalid OTP"

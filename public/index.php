@@ -24,26 +24,39 @@ session_start();
 
 // Configuration
 define('REPOS_DIR', __DIR__ . '/../repos');
-define('SETTINGS_FILE', __DIR__ . '/../settings.ini');
-define('USERS_FILE', __DIR__ . '/../users.ini');
-define('LOCKED_USERS_FILE', __DIR__ . '/../usersbruteforcelocked.ini');
+// Settings in settings/ (in .gitignore, as every .ini is).
+define('SETTINGS_DIR', __DIR__ . '/../settings');
+define('SETTINGS_FILE', SETTINGS_DIR . '/settings.ini');
+define('USERS_FILE', SETTINGS_DIR . '/users.ini');
+define('LOCKED_USERS_FILE', SETTINGS_DIR . '/usersbruteforcelocked.ini');
 define('FAILED_ATTEMPTS_FILE', __DIR__ . '/../usersfailedattempts.txt');
 define('ACTIVITY_LOG_FILE', __DIR__ . '/../activity.log');
 define('SESSION_INVALIDATE_FILE', __DIR__ . '/../session_invalidate_flags.json');
 
-// Omi's own files were .txt before 2026-11-24 and are .ini now, so that one
-// .gitignore line (*.ini) keeps every one of them - passwords, users, the
-// GitHub token - out of git. An old .txt is renamed once, never over an
-// existing .ini; the token file only when GITHUB_TOKEN_FILE does not name it.
+// Omi's settings are .ini files in settings/ (2026-11-24), so that .gitignore
+// keeps every one of them - passwords, users, the GitHub token - out of git.
+// Before, they were .txt (or .ini) files beside public/. An old file is moved
+// once, never over one that exists; the token file only when GITHUB_TOKEN_FILE
+// does not name it.
+if (!is_dir(SETTINGS_DIR)) {
+    @mkdir(SETTINGS_DIR, 0700, true);
+}
+$omiSettingsText = '';
+foreach ([SETTINGS_FILE, __DIR__ . '/../settings.ini', __DIR__ . '/../settings.txt'] as $f) {
+    if (is_file($f)) {
+        $omiSettingsText .= (string) file_get_contents($f);
+    }
+}
 foreach (['settings', 'users', 'usersbruteforcelocked', 'github-token'] as $name) {
-    $oldPath = __DIR__ . '/../' . $name . '.txt';
-    $newPath = __DIR__ . '/../' . $name . '.ini';
-    if ($name === 'github-token' && is_file(SETTINGS_FILE)
-        && strpos((string) file_get_contents(SETTINGS_FILE), 'GITHUB_TOKEN_FILE=') !== false) {
+    if ($name === 'github-token' && strpos($omiSettingsText, 'GITHUB_TOKEN_FILE=') !== false) {
         continue;
     }
-    if (is_file($oldPath) && !file_exists($newPath)) {
-        @rename($oldPath, $newPath);
+    $newPath = SETTINGS_DIR . '/' . $name . '.ini';
+    foreach (['ini', 'txt'] as $ext) {
+        $oldPath = __DIR__ . '/../' . $name . '.' . $ext;
+        if (is_file($oldPath) && !file_exists($newPath)) {
+            @rename($oldPath, $newPath);
+        }
     }
 }
 

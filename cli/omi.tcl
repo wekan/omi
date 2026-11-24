@@ -98,8 +98,8 @@ proc load_file {path} {
 
 proc has_2fa_enabled {} {
     global settings
-    if {![file exists "users.ini"]} { return 0 }
-    set f [open "users.ini" r]
+    if {![file exists "../settings/users.ini"]} { return 0 }
+    set f [open "../settings/users.ini" r]
     while {[gets $f line] >= 0} {
         if {[string match "$settings(username):*" $line]} {
             set parts [split $line ":"]
@@ -373,7 +373,7 @@ proc print_help {} {
 }
 
 settings_init
-settings_load "../settings.ini"
+settings_load "../settings/settings.ini"
 set db [read_dotomi]
 
 if {[llength $argv] < 1} {

@@ -623,10 +623,10 @@ chmod 600 settings.ini
 
 ```bash
 # Add to .gitignore
-echo "settings.ini" >> .gitignore
+echo "settings/*.ini" >> .gitignore
 
 # Use separate config for each environment
-cp settings.example.txt settings.ini
+cp settings/settings.example.ini settings/settings.ini
 # Now edit settings.ini with real values
 ```
 

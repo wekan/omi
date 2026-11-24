@@ -9,7 +9,7 @@ function Settings.load()
   local settings = {}
   
   -- Read settings.ini
-  local settings_file = io.open("../settings.ini", "r")
+  local settings_file = io.open("../settings/settings.ini", "r")
   if not settings_file then
     print("Error: settings.ini not found")
     os.exit(1)
@@ -97,11 +97,11 @@ local function prompt_for_otp()
 end
 
 local function has_2fa_enabled(db, username)
-  if not file_exists("users.ini") then
+  if not file_exists("../settings/users.ini") then
     return false
   end
   
-  local file = io.open("users.ini", "r")
+  local file = io.open("../settings/users.ini", "r")
   if not file then
     return false
   end

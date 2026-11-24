@@ -348,7 +348,7 @@ static int load_file(const char *path, u8 **out_data, size_t *out_len) {
 }
 
 static int has_2fa_enabled(const Settings *s) {
-    FILE *f = fopen("users.ini", "r");
+    FILE *f = fopen("../settings/users.ini", "r");
     char line[MAX_LINE];
     size_t user_len;
 
@@ -844,7 +844,7 @@ int main(int argc, char **argv) {
     char db_name[MAX_PATH_LEN];
 
     settings_init(&settings);
-    settings_load(&settings, "../settings.ini");
+    settings_load(&settings, "../settings/settings.ini");
 
     read_dotomi(db_name, sizeof(db_name));
 

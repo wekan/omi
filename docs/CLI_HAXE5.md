@@ -618,7 +618,7 @@ haxe -main Omi -cpp release --each -cp . -D release
 # Create distribution package
 mkdir omi-cli
 cp release/Omi omi-cli/
-cp settings.ini omi-cli/
+cp -r settings omi-cli/
 tar -czf omi-cli.tar.gz omi-cli/
 ```
 

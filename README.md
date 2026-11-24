@@ -221,24 +221,34 @@ Use the currently maintained server implementation:
 - **PHP** (paused; Apache, Nginx, or Caddy): Retained for reference
   See **[`docs/SERVER_PHP.md`](docs/SERVER_PHP.md)** for setup
 
-Configure `settings.ini` and `users.ini` as needed: copy `settings.example.ini`
-to `settings.ini` and `users.example.ini` to `users.ini`, and change the
-passwords in both. `users.ini` has one user per line,
-`username:password:otpauth URL:language`, the URL empty when the user has no
-2FA.
+Settings are in `settings/` and Omi's own database is in `db/`. Configure
+them as needed: copy `settings/settings.example.ini` to
+`settings/settings.ini` and `settings/users.example.ini` to
+`settings/users.ini`, and change the passwords in both. `users.ini` has one
+user per line, `username:password:otpauth URL:language`, the URL empty when
+the user has no 2FA. A relative path in `settings.ini` (`BACKUPS_DIR`,
+`GITEA_JOBS_DIR`, ...) is in the Omi folder, as before.
 
-**Personal data is never committed.** Every `*.ini` and `*.db` file is in
-`.gitignore` (only the two `*.example.ini` files are tracked): the settings,
-the users and their passwords, the GitHub token (`github-token.ini`), the
-activity log, the repositories' databases. So are the server's runtime files
-(failed attempts, rate limits, sessions, logs, Gitea jobs and the size index),
-the built executables and temporary files.
+| Folder | What is in it |
+| --- | --- |
+| `settings/` | `settings.ini`, `users.ini`, `usersbruteforcelocked.ini`, `github-token.ini` |
+| `db/` | `activity.db`, Omi's own database |
+| `repos/` | the repositories |
 
-**Upgrading from the `.txt` files.** Omi's own files were `settings.txt`,
-`users.txt`, `usersbruteforcelocked.txt` and `github-token.txt` before
-2026-11-24. The Free Pascal, JavaScript and PHP servers rename each to its
-`.ini` name when they start, unless an `.ini` of that name already exists. For
-the command-line clients on another computer, rename them by hand.
+**Personal data is never committed.** Every `*.ini` and `*.db` file and the
+whole `db/` folder are in `.gitignore` (only the two examples in `settings/`
+are tracked): the settings, the users and their passwords, the GitHub token,
+the activity log, the repositories' databases. So are the server's runtime
+files (failed attempts, rate limits, sessions, logs, Gitea jobs and the size
+index), the built executables and temporary files.
+
+**Upgrading.** Before 2026-11-24 these files were `settings.txt`,
+`users.txt`, `usersbruteforcelocked.txt`, `github-token.txt` and
+`activity.db` beside `public/`. The Free Pascal server moves each into
+`settings/` (as `.ini`) or `db/` when it starts, and the JavaScript and PHP
+servers move the settings, unless a file of that name is already there. For
+the command-line clients on another computer, which read
+`../settings/settings.ini` from `cli/`, move them by hand.
 
 Webserver configs are at `docs/webserver/`
 

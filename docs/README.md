@@ -222,8 +222,8 @@ Project files:
 ### Server Workflow
 1. Use the maintained [FreePascal server](SERVER_FREEPASCAL.md). The
    [JavaScript](SERVER_JS.md) and [PHP](SERVER_PHP.md) servers are paused.
-2. Configure [settings.ini](../settings.ini)
-3. Create users in [users.ini](../users.ini)
+2. Configure `settings/settings.ini` (from [settings/settings.example.ini](../settings/settings.example.ini))
+3. Create users in `settings/users.ini` (from [settings/users.example.ini](../settings/users.example.ini))
 4. Users can push/pull via CLI
 5. Browse via web interface
 

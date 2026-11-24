@@ -18,27 +18,34 @@ const __dirname = path.dirname(__filename);
 
 // Configuration
 const REPOS_DIR = path.join(__dirname, '..', 'repos');
-const SETTINGS_FILE = path.join(__dirname, '..', 'settings.ini');
-const USERS_FILE = path.join(__dirname, '..', 'users.ini');
-const LOCKED_USERS_FILE = path.join(__dirname, '..', 'usersbruteforcelocked.ini');
+// Settings in settings/ (in .gitignore, as every .ini is).
+const SETTINGS_DIR = path.join(__dirname, '..', 'settings');
+const SETTINGS_FILE = path.join(SETTINGS_DIR, 'settings.ini');
+const USERS_FILE = path.join(SETTINGS_DIR, 'users.ini');
+const LOCKED_USERS_FILE = path.join(SETTINGS_DIR, 'usersbruteforcelocked.ini');
 const FAILED_ATTEMPTS_FILE = path.join(__dirname, '..', 'usersfailedattempts.txt');
 const API_RATE_LIMIT_FILE = path.join(__dirname, '..', 'api_rate_limit.txt');
 const ACTIVITY_LOG_FILE = path.join(__dirname, '..', 'activity.log');
 const SESSION_INVALIDATE_FILE = path.join(__dirname, '..', 'session_invalidate_flags.json');
 
-// Omi's own files were .txt before 2026-11-24 and are .ini now, so that one
-// .gitignore line (*.ini) keeps every one of them - passwords, users, the
-// GitHub token - out of git. An old .txt is renamed once, never over an
-// existing .ini; the token file only when GITHUB_TOKEN_FILE does not name it.
-(function migrateTxtToIni() {
+// Omi's settings are .ini files in settings/ (2026-11-24), so that .gitignore
+// keeps every one of them - passwords, users, the GitHub token - out of git.
+// Before, they were .txt (or .ini) files beside public/. An old file is moved
+// once, never over one that exists; the token file only when GITHUB_TOKEN_FILE
+// does not name it.
+(function migrateFileLayout() {
+  fs.mkdirSync(SETTINGS_DIR, { recursive: true });
+  const settingsText = [SETTINGS_FILE, path.join(__dirname, '..', 'settings.ini'), path.join(__dirname, '..', 'settings.txt')]
+    .filter(f => fs.existsSync(f)).map(f => fs.readFileSync(f, 'utf8')).join('\n');
   for (const name of ['settings', 'users', 'usersbruteforcelocked', 'github-token']) {
-    const oldPath = path.join(__dirname, '..', `${name}.txt`);
-    const newPath = path.join(__dirname, '..', `${name}.ini`);
-    if (name === 'github-token' && fs.existsSync(SETTINGS_FILE) &&
-        fs.readFileSync(SETTINGS_FILE, 'utf8').includes('GITHUB_TOKEN_FILE=')) continue;
-    if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
-      fs.renameSync(oldPath, newPath);
-      console.log(`Renamed ${oldPath} to ${newPath}`);
+    if (name === 'github-token' && settingsText.includes('GITHUB_TOKEN_FILE=')) continue;
+    const newPath = path.join(SETTINGS_DIR, `${name}.ini`);
+    for (const ext of ['ini', 'txt']) {
+      const oldPath = path.join(__dirname, '..', `${name}.${ext}`);
+      if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+        fs.renameSync(oldPath, newPath);
+        console.log(`Moved ${oldPath} to ${newPath}`);
+      }
     }
   }
 })();

@@ -73,7 +73,7 @@ deno run --allow-net --allow-read --allow-write server.js
 
 ## Configuration
 
-The server reads from `settings.ini` in the parent directory (`../settings.ini`):
+The server reads `settings/settings.ini` in the parent directory (`../settings/settings.ini`):
 
 ```
 SQLITE=sqlite

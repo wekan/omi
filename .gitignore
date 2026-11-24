@@ -1,9 +1,11 @@
-# Omi keeps personal data out of git by its file names: every setting, user,
-# password and token is in an .ini file, and every database is a .db file.
-# Only the two examples, with placeholder passwords, are tracked.
+# Omi keeps personal data out of git by where and how it stores it: every
+# setting, user, password and token is an .ini file in settings/, and Omi's
+# own database is in db/. Only the two examples in settings/, with placeholder
+# passwords, are tracked.
 *.ini
-!settings.example.ini
-!users.example.ini
+!/settings/settings.example.ini
+!/settings/users.example.ini
+/db/
 *.db
 *.db-journal
 *.db-wal
@@ -11,7 +13,7 @@
 *.sqlite
 *.sqlite3
 
-# The server's runtime files beside settings.ini: who failed to log in, rate
+# The server's runtime files in the Omi folder: who failed to log in, rate
 # limits, sessions, activity, repositories, Gitea jobs and the size index.
 /repos/
 /usersfailedattempts.txt

@@ -3,13 +3,13 @@ REM Omi - Version Control for FreeDOS
 REM Optimized Micro Index - Git-like commands with SQLite storage
 
 REM Read settings from settings.ini
-FOR /F "tokens=2 delims==" %%A IN ('FIND "SQLITE=" .\..\settings.ini') DO SET SQLITE=%%A
-FOR /F "tokens=2 delims==" %%A IN ('FIND "USERNAME=" .\..\settings.ini') DO SET USERNAME=%%A
-FOR /F "tokens=2 delims==" %%A IN ('FIND "PASSWORD=" .\..\settings.ini') DO SET PASSWORD=%%A
-FOR /F "tokens=2 delims==" %%A IN ('FIND "REPOS=" .\..\settings.ini') DO SET REPOS=%%A
-FOR /F "tokens=2 delims==" %%A IN ('FIND "CURL=" .\..\settings.ini') DO SET CURL=%%A
-FOR /F "tokens=2 delims==" %%A IN ('FIND "API_ENABLED=" .\..\settings.ini') DO SET API_ENABLED=%%A
-FOR /F "tokens=2 delims==" %%A IN ('FIND "API_RATE_LIMIT=" .\..\settings.ini') DO SET API_RATE_LIMIT=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "SQLITE=" .\..\settings\settings.ini') DO SET SQLITE=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "USERNAME=" .\..\settings\settings.ini') DO SET USERNAME=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "PASSWORD=" .\..\settings\settings.ini') DO SET PASSWORD=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "REPOS=" .\..\settings\settings.ini') DO SET REPOS=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "CURL=" .\..\settings\settings.ini') DO SET CURL=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "API_ENABLED=" .\..\settings\settings.ini') DO SET API_ENABLED=%%A
+FOR /F "tokens=2 delims==" %%A IN ('FIND "API_RATE_LIMIT=" .\..\settings\settings.ini') DO SET API_RATE_LIMIT=%%A
 
 REM Set defaults
 IF "%API_ENABLED%"=="" SET API_ENABLED=1
@@ -193,8 +193,8 @@ GOTO END
 
   REM Check if user has 2FA enabled (users.ini exists and user has OTP URL)
   SET HAS_2FA=0
-  IF EXIST "users.ini" (
-    FOR /F "tokens=3 delims=:" %%O IN ('FIND "%USERNAME%:" users.ini') DO (
+  IF EXIST "..\settings\users.ini" (
+    FOR /F "tokens=3 delims=:" %%O IN ('FIND "%USERNAME%:" ..\settings\users.ini') DO (
       IF NOT "%%O"=="" SET HAS_2FA=1
     )
   )
@@ -228,8 +228,8 @@ GOTO END
 
   REM Check if user has 2FA enabled (users.ini exists and user has OTP URL)
   SET HAS_2FA=0
-  IF EXIST "users.ini" (
-    FOR /F "tokens=3 delims=:" %%O IN ('FIND "%USERNAME%:" users.ini') DO (
+  IF EXIST "..\settings\users.ini" (
+    FOR /F "tokens=3 delims=:" %%O IN ('FIND "%USERNAME%:" ..\settings\users.ini') DO (
       IF NOT "%%O"=="" SET HAS_2FA=1
     )
   )

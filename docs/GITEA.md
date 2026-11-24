@@ -21,7 +21,7 @@ page:
 GITEA_APP_INI=/srv/gitea/custom/conf/app.ini
 ```
 
-A relative path is beside `settings.ini`; `~/` is the home directory. Then log
+A relative path is in the Omi folder (where `settings/` is); `~/` is the home directory. Then log
 in and press **Gitea folder** in the menu.
 
 Optional settings:
@@ -413,7 +413,7 @@ A write runs in the background, in a thread of the server, so it outlives the
 request (where the server is built without threads - the Amiga - it runs inside
 the request that starts it, and the page that follows shows its finished
 log). Its output goes to `gitea-jobs/<time>-<kind>-<owner>.log`
-beside `settings.ini` (`GITEA_JOBS_DIR`), which ends with `exit <code>`.
+in the Omi folder (`GITEA_JOBS_DIR`), which ends with `exit <code>`.
 `/gitea/jobs` lists the jobs, newest first, and `/gitea/jobs/<name>` shows a
 log. A job name is never a path.
 
@@ -441,7 +441,7 @@ has no Stop: it is one short write. From a terminal, `gitea import
 |---------|---------|------------|
 | `GITEA_PID_FILE` | none | Gitea's PID file, when it is started with `--pid` |
 | `GITHUB_TO_GITEA_DIR` | `../gitea-patches/mirror` | github-to-gitea's `mirror` directory, where the shared exclude file is |
-| `GITHUB_TOKEN` | - | Typed on the Settings page, saved to `github-token.ini` (`GITHUB_TOKEN_FILE`) with mode 0600; never shown, never in `settings.ini`, never on a command line or in a log |
+| `GITHUB_TOKEN` | - | Typed on the Settings page, saved to `settings/github-token.ini` (`GITHUB_TOKEN_FILE`) with mode 0600; never shown, never in `settings.ini`, never on a command line or in a log |
 | `SYNC_EXCLUDE_FILE` | `<GITHUB_TO_GITEA_DIR>/github-to-gitea/github-to-gitea.exclude.txt` | the repositories no longer synced, shared with github-to-gitea |
 | `GITEA_DOER`, `GITEA_BINARY` | the first administrator; found from an existing repository's hooks | for importing |
 | `GIT_FETCH` | `pascal` | `pascal`: git is fetched and read by Omi itself. `program`: the `git` program runs for the clone and the fetch, and only for them |

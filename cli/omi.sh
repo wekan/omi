@@ -3,16 +3,16 @@
 # Optimized Micro Index - Git-like commands with SQLite storage
 
 # Read settings from settings.ini
-SQLITE=$(grep "^SQLITE=" ../settings.ini | cut -d'=' -f2)
-USERNAME=$(grep "^USERNAME=" ../settings.ini | cut -d'=' -f2)
-PASSWORD=$(grep "^PASSWORD=" ../settings.ini | cut -d'=' -f2)
-REPOS=$(grep "^REPOS=" ../settings.ini | cut -d'=' -f2)
-CURL=$(grep "^CURL=" ../settings.ini | cut -d'=' -f2)
-API_ENABLED=$(grep "^API_ENABLED=" ../settings.ini | cut -d'=' -f2)
-API_RATE_LIMIT=$(grep "^API_RATE_LIMIT=" ../settings.ini | cut -d'=' -f2)
-API_RATE_LIMIT_WINDOW=$(grep "^API_RATE_LIMIT_WINDOW=" ../settings.ini | cut -d'=' -f2)
-USE_INTERNAL_HTTP=$(grep "^USE_INTERNAL_HTTP=" ../settings.ini | cut -d'=' -f2)
-HTTP_TIMEOUT=$(grep "^HTTP_TIMEOUT=" ../settings.ini | cut -d'=' -f2)
+SQLITE=$(grep "^SQLITE=" ../settings/settings.ini | cut -d'=' -f2)
+USERNAME=$(grep "^USERNAME=" ../settings/settings.ini | cut -d'=' -f2)
+PASSWORD=$(grep "^PASSWORD=" ../settings/settings.ini | cut -d'=' -f2)
+REPOS=$(grep "^REPOS=" ../settings/settings.ini | cut -d'=' -f2)
+CURL=$(grep "^CURL=" ../settings/settings.ini | cut -d'=' -f2)
+API_ENABLED=$(grep "^API_ENABLED=" ../settings/settings.ini | cut -d'=' -f2)
+API_RATE_LIMIT=$(grep "^API_RATE_LIMIT=" ../settings/settings.ini | cut -d'=' -f2)
+API_RATE_LIMIT_WINDOW=$(grep "^API_RATE_LIMIT_WINDOW=" ../settings/settings.ini | cut -d'=' -f2)
+USE_INTERNAL_HTTP=$(grep "^USE_INTERNAL_HTTP=" ../settings/settings.ini | cut -d'=' -f2)
+HTTP_TIMEOUT=$(grep "^HTTP_TIMEOUT=" ../settings/settings.ini | cut -d'=' -f2)
 
 # Set defaults
 API_ENABLED=${API_ENABLED:-1}
@@ -30,10 +30,10 @@ fi
 
 # Helper function to check if user has 2FA enabled
 function has_2fa_enabled() {
-  if [ ! -f "users.ini" ]; then
+  if [ ! -f "../settings/users.ini" ]; then
     return 1
   fi
-  local otpauth=$(grep "^$USERNAME:" users.ini | cut -d':' -f3)
+  local otpauth=$(grep "^$USERNAME:" ../settings/users.ini | cut -d':' -f3)
   [ -n "$otpauth" ]
 }
 
