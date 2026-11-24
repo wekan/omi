@@ -1,0 +1,76 @@
+# Omi keeps personal data out of git by its file names: every setting, user,
+# password and token is in an .ini file, and every database is a .db file.
+# Only the two examples, with placeholder passwords, are tracked.
+*.ini
+!settings.example.ini
+!users.example.ini
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# The server's runtime files beside settings.ini: who failed to log in, rate
+# limits, sessions, activity, repositories, Gitea jobs and the size index.
+/repos/
+/usersfailedattempts.txt
+/api_rate_limit.txt
+/session_invalidate_flags.json
+/activity.log
+/gitea-jobs/
+/gitea-index.txt
+/gitea-index.txt.tmp
+*.stop
+.env
+.env.*
+
+# Executables and build output: the Free Pascal server and its objects,
+# embedded SQLite, the command-line clients, the Amiga build.
+/build/
+/public/server
+/public/server.new
+/public/*.o
+/public/*.ppu
+/cli/build/
+*.o
+*.obj
+*.ppu
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.com
+*.hdll
+*.class
+*.jar
+*.pyc
+*.pyo
+__pycache__/
+node_modules/
+bin/
+obj/
+*.pdb
+*.n
+*.hl
+
+# Temporary files
+/tmp/
+*.tmp
+*.temp
+*.bak
+*.backup
+*.orig
+*.rej
+*.log
+*.swp
+*.swo
+*~
+.#*
+.directory
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,2673 @@
+#!/usr/bin/env node
+/**
+ * Omi Server - Version Control Server
+ * Compatible with Node.js, Bun, and Deno
+ * Manages SQLite repository files with authentication
+ */
+
+import fs from 'fs';
+import path from 'path';
+import { createHash, randomBytes } from 'crypto';
+import { createServer } from 'http';
+import { URL } from 'url';
+import { fileURLToPath } from 'url';
+
+// Get __dirname equivalent in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Configuration
+const REPOS_DIR = path.join(__dirname, '..', 'repos');
+const SETTINGS_FILE = path.join(__dirname, '..', 'settings.ini');
+const USERS_FILE = path.join(__dirname, '..', 'users.ini');
+const LOCKED_USERS_FILE = path.join(__dirname, '..', 'usersbruteforcelocked.ini');
+const FAILED_ATTEMPTS_FILE = path.join(__dirname, '..', 'usersfailedattempts.txt');
+const API_RATE_LIMIT_FILE = path.join(__dirname, '..', 'api_rate_limit.txt');
+const ACTIVITY_LOG_FILE = path.join(__dirname, '..', 'activity.log');
+const SESSION_INVALIDATE_FILE = path.join(__dirname, '..', 'session_invalidate_flags.json');
+
+// Omi's own files were .txt before 2026-11-24 and are .ini now, so that one
+// .gitignore line (*.ini) keeps every one of them - passwords, users, the
+// GitHub token - out of git. An old .txt is renamed once, never over an
+// existing .ini; the token file only when GITHUB_TOKEN_FILE does not name it.
+(function migrateTxtToIni() {
+  for (const name of ['settings', 'users', 'usersbruteforcelocked', 'github-token']) {
+    const oldPath = path.join(__dirname, '..', `${name}.txt`);
+    const newPath = path.join(__dirname, '..', `${name}.ini`);
+    if (name === 'github-token' && fs.existsSync(SETTINGS_FILE) &&
+        fs.readFileSync(SETTINGS_FILE, 'utf8').includes('GITHUB_TOKEN_FILE=')) continue;
+    if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+      fs.renameSync(oldPath, newPath);
+      console.log(`Renamed ${oldPath} to ${newPath}`);
+    }
+  }
+})();
+
+// Ensure repos directory exists
+if (!fs.existsSync(REPOS_DIR)) {
+  fs.mkdirSync(REPOS_DIR, { recursive: true });
+}
+
+// Session storage (in-memory for simplicity; production should use persistent storage)
+const sessions = new Map();
+const sessionMeta = new Map();
+
+// Load settings from settings.ini
+function loadSettings() {
+  const settings = {};
+  if (fs.existsSync(SETTINGS_FILE)) {
+    const content = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+    const lines = content.split('\n').filter(line => line.trim() && !line.startsWith('#'));
+    for (const line of lines) {
+      const [key, value] = line.split('=').map(s => s.trim());
+      if (key && value !== undefined) {
+        settings[key] = value;
+      }
+    }
+  }
+  return settings;
+}
+
+function getLogoutIdleSeconds() {
+  const settings = loadSettings();
+  const hours = parseInt(settings.LOGOUT_ON_HOURS || '0', 10);
+  if (Number.isFinite(hours) && hours > 0) {
+    return hours * 60 * 60;
+  }
+  return 24 * 60 * 60;
+}
+
+function getClientIp(req) {
+  const xff = (req.headers['x-forwarded-for'] || '').toString().trim();
+  if (xff) {
+    return xff.split(',')[0].trim();
+  }
+  return (req.socket?.remoteAddress || '0.0.0.0').toString();
+}
+
+function getUserAgent(req) {
+  return (req.headers['user-agent'] || '').toString();
+}
+
+function hashText(value) {
+  return createHash('sha256').update(String(value)).digest('hex');
+}
+
+function getPasswordRef(username) {
+  const users = loadUsers();
+  if (!users[username]) return '';
+  return hashText(users[username].password || '');
+}
+
+function loadInvalidateFlags() {
+  try {
+    if (!fs.existsSync(SESSION_INVALIDATE_FILE)) return {};
+    return JSON.parse(fs.readFileSync(SESSION_INVALIDATE_FILE, 'utf-8')) || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveInvalidateFlags(flags) {
+  fs.writeFileSync(SESSION_INVALIDATE_FILE, JSON.stringify(flags), 'utf-8');
+}
+
+function invalidateSessionsForUserPassword(username, passwordRef) {
+  for (const [sid, meta] of sessionMeta.entries()) {
+    if (meta.username === username && meta.passwordRef === passwordRef) {
+      sessions.delete(sid);
+      sessionMeta.delete(sid);
+    }
+  }
+  const flags = loadInvalidateFlags();
+  flags[`${username}|${passwordRef}`] = Math.floor(Date.now() / 1000);
+  saveInvalidateFlags(flags);
+}
+
+function logActivity(req, username, sessionId, actionName, statusText, detailText, clickCounter) {
+  const row = {
+    ts: Math.floor(Date.now() / 1000),
+    username: username || '',
+    sessionId: sessionId || '',
+    ip: getClientIp(req),
+    userAgent: getUserAgent(req),
+    action: actionName || '',
+    status: statusText || '',
+    detail: detailText || '',
+    clickCounter: Number.isFinite(clickCounter) ? clickCounter : -1
+  };
+  try {
+    fs.appendFileSync(ACTIVITY_LOG_FILE, JSON.stringify(row) + '\n');
+  } catch {
+    // ignore logging failures
+  }
+}
+
+function buildActionHash(meta, actionName, clickCounter, sessionId) {
+  return hashText(`${actionName}|${meta.username}|${meta.passwordRef}|${meta.ip}|${meta.userAgent}|${meta.loginAt}|${clickCounter}|${sessionId}`);
+}
+
+function getSessionId(req) {
+  try {
+    const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    const querySessionId = parsedUrl.searchParams.get('sessionId');
+    if (querySessionId) return querySessionId;
+  } catch {
+    // ignore URL parse errors
+  }
+  return '';
+}
+
+function ensureSessionContext(req, sessionId) {
+  const username = sessions.get(sessionId);
+  const meta = sessionMeta.get(sessionId);
+  if (!username || !meta) return null;
+
+  const nowTs = Math.floor(Date.now() / 1000);
+  const flags = loadInvalidateFlags();
+  const key = `${meta.username}|${meta.passwordRef}`;
+  if ((flags[key] || 0) > (meta.loginAt || 0)) {
+    sessions.delete(sessionId);
+    sessionMeta.delete(sessionId);
+    return null;
+  }
+
+  if ((nowTs - (meta.lastActivityAt || meta.loginAt || nowTs)) > getLogoutIdleSeconds()) {
+    logActivity(req, meta.username, sessionId, 'session-check', 'idle-timeout', 'idle timeout reached', meta.clickCounter || 0);
+    sessions.delete(sessionId);
+    sessionMeta.delete(sessionId);
+    return null;
+  }
+
+  if (meta.ip !== getClientIp(req) || meta.userAgent !== getUserAgent(req)) {
+    logActivity(req, meta.username, sessionId, 'session-check', 'context-mismatch', 'ip/user-agent mismatch', meta.clickCounter || 0);
+    invalidateSessionsForUserPassword(meta.username, meta.passwordRef);
+    return null;
+  }
+
+  meta.lastActivityAt = nowTs;
+  sessionMeta.set(sessionId, meta);
+  return { username, meta };
+}
+
+function verifyAndConsumeActionToken(req, postData, sessionId, requiredAction = '') {
+  if (!sessionId && postData && postData.sessionId) {
+    sessionId = String(postData.sessionId);
+  }
+  const context = ensureSessionContext(req, sessionId);
+  if (!context) return false;
+  const { meta } = context;
+  const action = String(postData.auth_action || '');
+  const hash = String(postData.auth_hash || '');
+  const postedCounter = parseInt(postData.auth_counter || '-1', 10);
+
+  if (!action || !hash || !Number.isFinite(postedCounter)) return false;
+  if (requiredAction && action !== requiredAction) return false;
+  if (postedCounter !== (meta.clickCounter || 0)) return false;
+
+  const expected = buildActionHash(meta, action, postedCounter, sessionId);
+  if (expected !== hash) return false;
+
+  meta.clickCounter = (meta.clickCounter || 0) + 1;
+  meta.lastActivityAt = Math.floor(Date.now() / 1000);
+  sessionMeta.set(sessionId, meta);
+  logActivity(req, meta.username, sessionId, action, 'ok', 'token accepted', meta.clickCounter);
+  return true;
+}
+
+function buildAuthHiddenFields(req, actionName) {
+  const sessionId = getSessionId(req);
+  const context = sessionId ? ensureSessionContext(req, sessionId) : null;
+  if (!context) return '';
+  const { meta } = context;
+  const counter = meta.clickCounter || 0;
+  const hash = buildActionHash(meta, actionName, counter, sessionId);
+  return `<input type="hidden" name="sessionId" value="${escapeHtml(sessionId)}">` +
+    `<input type="hidden" name="auth_action" value="${escapeHtml(actionName)}">` +
+    `<input type="hidden" name="auth_counter" value="${counter}">` +
+    `<input type="hidden" name="auth_hash" value="${escapeHtml(hash)}">`;
+}
+
+function isAllowedNavTarget(target) {
+  if (['/', '/settings', '/people', '/language', '/activity', '/logout'].includes(target)) {
+    return true;
+  }
+  return /^\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/.test(String(target || ''));
+}
+
+function appendSessionIdToTarget(target, sessionId) {
+  const cleanTarget = String(target || '/');
+  const sid = String(sessionId || '');
+  if (!sid || cleanTarget.includes('sessionId=')) {
+    return cleanTarget;
+  }
+  const sep = cleanTarget.includes('?') ? '&' : '?';
+  return `${cleanTarget}${sep}sessionId=${encodeURIComponent(sid)}`;
+}
+
+function buildNavButton(req, target, label) {
+  const safeTarget = isAllowedNavTarget(target) ? target : '/';
+  const authFields = buildAuthHiddenFields(req, 'nav-go');
+  if (!authFields) {
+    return `<a href="${escapeHtml(safeTarget)}">${escapeHtml(label)}</a>`;
+  }
+  return `<form method="POST" action="/" style="display:inline;margin:0 2px;">` +
+    authFields +
+    `<input type="hidden" name="nav_target" value="${escapeHtml(safeTarget)}">` +
+    `<input type="submit" value="${escapeHtml(label)}">` +
+    `</form>`;
+}
+
+function buildPrimaryNav(req, translations, username, extraItems = [], options = {}) {
+  const showRestrictedWhenLoggedOut = options.showRestrictedWhenLoggedOut !== false;
+  const showRestricted = !!username || showRestrictedWhenLoggedOut;
+  const items = [
+    buildNavButton(req, '/', t('home', translations))
+  ];
+
+  if (showRestricted) {
+    items.push(buildNavButton(req, '/language', t('language', translations)));
+    items.push(buildNavButton(req, '/settings', t('settings', translations)));
+    items.push(buildNavButton(req, '/people', t('people', translations)));
+    items.push(buildNavButton(req, '/activity', t('activity', translations)));
+  }
+
+  if (username) {
+    items.push(`<strong>${escapeHtml(username)}</strong>`);
+    items.push(buildNavButton(req, '/logout', t('logout', translations)));
+  } else {
+    items.push(`<a href="/sign-in">${t('login', translations)}</a>`);
+  }
+
+  for (const extra of extraItems) {
+    if (extra) items.push(extra);
+  }
+
+  const navCells = items.map(item => `<td style="padding-right:8px; vertical-align:middle; white-space:nowrap;">${item}</td>`).join('');
+  return `<table border="0" cellpadding="0" cellspacing="0"><tr>${navCells}</tr></table>`;
+}
+
+// Check if user is locked due to brute force
+function isUserLocked(username) {
+  if (!fs.existsSync(LOCKED_USERS_FILE)) {
+    return false;
+  }
+  const content = fs.readFileSync(LOCKED_USERS_FILE, 'utf-8');
+  const lines = content.split('\n').filter(l => l.trim());
+  
+  for (const line of lines) {
+    const [user, lockTimeStr] = line.split(':');
+    if (user.trim() === username) {
+      const lockTime = parseInt(lockTimeStr, 10);
+      const settings = loadSettings();
+      const users = loadUsers();
+      const isKnownUser = username in users;
+      const lockPeriod = isKnownUser
+        ? parseInt(settings['ACCOUNTS_LOCKOUT_KNOWN_USERS_PERIOD'] || '60', 10)
+        : parseInt(settings['ACCOUNTS_LOCKOUT_UNKNOWN_USERS_LOCKOUT_PERIOD'] || '60', 10);
+      
+      if (Date.now() - lockTime * 1000 < lockPeriod * 1000) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Get failed attempts for username
+function getFailedAttempts(username) {
+  if (!fs.existsSync(FAILED_ATTEMPTS_FILE)) {
+    return [];
+  }
+  const content = fs.readFileSync(FAILED_ATTEMPTS_FILE, 'utf-8');
+  const lines = content.split('\n').filter(l => l.trim());
+  const attempts = [];
+  
+  for (const line of lines) {
+    const [user, timestamp] = line.split(':');
+    if (user.trim() === username) {
+      attempts.push(parseInt(timestamp, 10));
+    }
+  }
+  return attempts;
+}
+
+// Record failed attempt
+function recordFailedAttempt(username) {
+  const line = `${username}:${Math.floor(Date.now() / 1000)}\n`;
+  fs.appendFileSync(FAILED_ATTEMPTS_FILE, line);
+}
+
+// Clear failed attempts for user
+function clearFailedAttempts(username) {
+  if (!fs.existsSync(FAILED_ATTEMPTS_FILE)) {
+    return;
+  }
+  const content = fs.readFileSync(FAILED_ATTEMPTS_FILE, 'utf-8');
+  let newContent = '';
+  const lines = content.split('\n').filter(l => l.trim());
+  
+  for (const line of lines) {
+    const [user] = line.split(':');
+    if (user.trim() !== username) {
+      newContent += line + '\n';
+    }
+  }
+  
+  if (newContent.trim()) {
+    fs.writeFileSync(FAILED_ATTEMPTS_FILE, newContent);
+  } else {
+    fs.unlinkSync(FAILED_ATTEMPTS_FILE);
+  }
+}
+
+// Lock user account
+function lockUser(username) {
+  const line = `${username}:${Math.floor(Date.now() / 1000)}\n`;
+  fs.appendFileSync(LOCKED_USERS_FILE, line);
+}
+
+// Check if brute force threshold reached
+function checkBruteForce(username) {
+  const settings = loadSettings();
+  const users = loadUsers();
+  const isKnownUser = username in users;
+
+  const failuresThreshold = isKnownUser
+    ? parseInt(settings['ACCOUNTS_LOCKOUT_KNOWN_USERS_FAILURES_BEFORE'] || '3', 10)
+    : parseInt(settings['ACCOUNTS_LOCKOUT_UNKNOWN_USERS_FAILURES_BEFORE'] || '3', 10);
+
+  const failureWindow = isKnownUser
+    ? parseInt(settings['ACCOUNTS_LOCKOUT_KNOWN_USERS_FAILURE_WINDOW'] || '15', 10)
+    : parseInt(settings['ACCOUNTS_LOCKOUT_UNKNOWN_USERS_FAILURE_WINDOW'] || '15', 10);
+
+  const attempts = getFailedAttempts(username);
+  const now = Date.now() / 1000;
+  const recentAttempts = attempts.filter(timestamp => (now - timestamp) < failureWindow);
+
+  if (recentAttempts.length >= failuresThreshold) {
+    lockUser(username);
+    clearFailedAttempts(username);
+    return true;
+  }
+
+  return false;
+}
+
+// Load users (format: username:password:otp:language)
+function loadUsers() {
+  const users = {};
+  if (fs.existsSync(USERS_FILE)) {
+    const content = fs.readFileSync(USERS_FILE, 'utf-8');
+    const lines = content.split('\n').filter(l => l.trim());
+    
+    for (const line of lines) {
+      const parts = line.split(':');
+      if (parts.length >= 2) {
+        const username = parts[0].trim();
+        const password = parts[1].trim();
+        const otp = parts[2] ? parts[2].trim() : '';
+        const language = parts[3] ? parts[3].trim() : 'en';
+        users[username] = { password, otp, language };
+      }
+    }
+  }
+  return users;
+}
+
+// Get browser language from Accept-Language header
+function getBrowserLanguage(req) {
+  const acceptLanguage = req.headers['accept-language'] || 'en';
+  const languages = acceptLanguage.split(',');
+  const lang = languages[0].split(';')[0].trim();
+  // Normalize language code (en-US -> en)
+  if (lang.includes('-')) {
+    return lang.split('-')[0].toLowerCase();
+  }
+  return lang.toLowerCase();
+}
+
+// Load translation file
+function loadTranslations(language = 'en') {
+  const fallbackFile = path.join(__dirname, 'i18n', 'en.i18n.json');
+  let fallback = {};
+  try {
+    if (fs.existsSync(fallbackFile)) {
+      fallback = JSON.parse(fs.readFileSync(fallbackFile, 'utf-8')) || {};
+    }
+  } catch {
+    fallback = {};
+  }
+
+  if (language === 'en') {
+    return fallback;
+  }
+
+  const langFile = path.join(__dirname, 'i18n', `${language}.i18n.json`);
+  try {
+    if (fs.existsSync(langFile)) {
+      const selected = JSON.parse(fs.readFileSync(langFile, 'utf-8')) || {};
+      return { ...fallback, ...selected };
+    }
+  } catch {
+    // ignore invalid locale file and keep fallback
+  }
+
+  return fallback;
+}
+
+// Get translation
+function resolveTranslationKey(key) {
+  const normalized = String(key || '').toLowerCase();
+  const explicitMap = {
+    'language-selection': 'language',
+    'select-language': 'language',
+    'save-language': 'save',
+    'language-updated': 'save',
+    'list-repos-json': 'repositories',
+    'settings-update-failed': 'error',
+    'repository-created': 'create',
+    'repository-create-failed': 'error',
+    'file-saved-success': 'save',
+    'file-save-failed': 'error',
+    'file-delete-failed': 'error',
+    'invalid-action-token': 'error',
+    'invalid-logout-token': 'error'
+  };
+  if (explicitMap[normalized]) return explicitMap[normalized];
+
+  if (normalized.includes('create')) return 'create';
+  if (normalized.includes('delete')) return 'delete';
+  if (normalized.includes('upload')) return 'upload';
+  if (normalized.includes('download')) return 'download';
+  if (normalized.includes('repository')) return 'repository';
+  if (normalized.includes('directory') || normalized === 'root') return 'repository';
+  if (normalized === 'files' || normalized === 'no-files' || normalized === 'no-files-directory') return 'file';
+  if (normalized.includes('file')) return 'file';
+  if (normalized.includes('otp')) return 'otp';
+  if (normalized.includes('password')) return 'password';
+  if (normalized.includes('email')) return 'email';
+  if (normalized.includes('name')) return 'name';
+  if (normalized.includes('user')) return 'username';
+  if (normalized.includes('author') || normalized.includes('message') || normalized.includes('image')) return 'activity';
+  if (normalized.includes('commit') || normalized.includes('activity')) return 'activity';
+  if (normalized.includes('login')) return 'login';
+  if (normalized.includes('logout')) return 'logout';
+  if (normalized.includes('setting')) return 'settings';
+  if (normalized === 'update') return 'save';
+  if (normalized.includes('enable') || normalized.includes('disable') || normalized.includes('updated') || normalized.includes('saved')) return 'save';
+  if (normalized.includes('failed') || normalized.includes('invalid') || normalized.includes('not-implemented')) return 'error';
+
+  return key;
+}
+
+function t(key, translations = {}) {
+  if (Object.prototype.hasOwnProperty.call(translations, key)) {
+    const value = translations[key];
+    if (value !== key) {
+      return value;
+    }
+  }
+  const resolvedKey = resolveTranslationKey(key);
+  if (Object.prototype.hasOwnProperty.call(translations, resolvedKey)) {
+    return translations[resolvedKey];
+  }
+  return resolvedKey;
+}
+
+// Generate TOTP secret
+function generateSecret(length = 32) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let secret = '';
+  for (let i = 0; i < length; i++) {
+    secret += chars[Math.floor(Math.random() * 32)];
+  }
+  return secret;
+}
+
+// Base32 decode for TOTP
+function base32Decode(secret) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  secret = secret.toUpperCase().replace(/=/g, '');
+  let binaryString = '';
+  
+  for (let i = 0; i < secret.length; i += 8) {
+    let x = '';
+    for (let j = 0; j < 8 && i + j < secret.length; j++) {
+      const idx = chars.indexOf(secret[i + j]);
+      if (idx === -1) return null;
+      x += idx.toString(2).padStart(5, '0');
+    }
+    const eightBits = x.match(/.{1,8}/g) || [];
+    for (const bits of eightBits) {
+      if (bits.length === 8) {
+        binaryString += String.fromCharCode(parseInt(bits, 2));
+      }
+    }
+  }
+  
+  return Buffer.from(binaryString, 'binary');
+}
+
+// Verify TOTP code
+function verifyTOTP(secret, code, window = 1) {
+  const secretKey = base32Decode(secret);
+  if (!secretKey) return false;
+
+  const time = Math.floor(Date.now() / 1000 / 30);
+  const codeNum = parseInt(code, 10);
+
+  for (let i = -window; i <= window; i++) {
+    const testTime = time + i;
+    const timeBytes = Buffer.alloc(8);
+    timeBytes.writeBigInt64BE(BigInt(testTime), 0);
+    
+    const hmac = require('crypto').createHmac('sha1', secretKey);
+    hmac.update(timeBytes);
+    const hash = hmac.digest();
+    
+    const offset = hash[19] & 0xf;
+    const otp = (
+      ((hash[offset] & 0x7f) << 24) |
+      ((hash[offset + 1] & 0xff) << 16) |
+      ((hash[offset + 2] & 0xff) << 8) |
+      (hash[offset + 3] & 0xff)
+    ) % 1000000;
+    
+    const otpStr = otp.toString().padStart(6, '0');
+    if (otpStr === code) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function extractOtpSecret(otpValue) {
+  const otp = String(otpValue || '').trim();
+  if (!otp) {
+    return '';
+  }
+
+  const match = otp.match(/[?&]secret=([A-Z2-7]+)/i);
+  return match ? match[1].toUpperCase() : '';
+}
+
+// Simple authentication check with OTP support
+function authenticate(username, password, otpCode = '') {
+  const users = loadUsers();
+  if (!(username in users)) return false;
+
+  const user = users[username];
+
+  // Check password
+  if (user.password !== password) return false;
+
+  // Check OTP only when a valid TOTP secret is configured for this user
+  const secret = extractOtpSecret(user.otp);
+  if (secret) {
+    if (!otpCode || !verifyTOTP(secret, otpCode)) {
+      return 'OTP_REQUIRED';
+    }
+  }
+
+  return true;
+}
+
+// Sanitize repository name to prevent directory traversal
+function sanitizeRepoName(name) {
+  name = name.replace(/\.\.\//g, '').replace(/\.\.\\/g, '').replace(/\0/g, '');
+  name = path.basename(name);
+  name = name.replace(/[^a-zA-Z0-9._-]/g, '');
+  return name;
+}
+
+// Validate path is within REPOS_DIR
+function isPathSafe(filePath) {
+  try {
+    const realReposDir = fs.realpathSync(REPOS_DIR);
+    const realPath = fs.existsSync(filePath) 
+      ? fs.realpathSync(filePath)
+      : fs.realpathSync(path.dirname(filePath));
+    
+    return realPath.startsWith(realReposDir);
+  } catch {
+    return false;
+  }
+}
+
+// Get list of repositories
+function getReposList() {
+  const repos = [];
+  if (fs.existsSync(REPOS_DIR)) {
+    const files = fs.readdirSync(REPOS_DIR);
+    for (const file of files) {
+      if (file.endsWith('.omi')) {
+        const filePath = path.join(REPOS_DIR, file);
+        const stat = fs.statSync(filePath);
+        repos.push({
+          name: file,
+          size: stat.size,
+          modified: stat.mtimeMs / 1000
+        });
+      }
+    }
+  }
+  return repos;
+}
+
+function normalizeRepoName(name) {
+  let repoName = sanitizeRepoName(name || '');
+  if (!repoName) return '';
+  if (!repoName.endsWith('.omi')) repoName += '.omi';
+  return repoName;
+}
+
+function buildRepoSchemaSql(username) {
+  const commitUser = username || 'system';
+  return [
+    'CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, data BLOB, size INTEGER)',
+    'CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY, filename TEXT, hash TEXT, datetime TEXT, commit_id INTEGER)',
+    'CREATE TABLE IF NOT EXISTS commits (id INTEGER PRIMARY KEY, message TEXT, datetime TEXT, user TEXT)',
+    'CREATE TABLE IF NOT EXISTS staging (filename TEXT PRIMARY KEY, hash TEXT, datetime TEXT)',
+    'CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash)',
+    'CREATE INDEX IF NOT EXISTS idx_files_commit ON files(commit_id)',
+    'CREATE INDEX IF NOT EXISTS idx_blobs_hash ON blobs(hash)',
+    `INSERT INTO commits (message, datetime, user) VALUES ("Initial commit", strftime("%Y-%m-%d %H:%M:%S","now"), ${JSON.stringify(commitUser)})`
+  ].join('; ');
+}
+
+async function runSqliteCommand(sqliteCmd, dbPath, sql) {
+  if (typeof Deno !== 'undefined' && Deno.Command) {
+    const command = new Deno.Command(sqliteCmd, { args: [dbPath, sql] });
+    const result = await command.output();
+    if (!result.success) {
+      const message = new TextDecoder().decode(result.stderr || new Uint8Array());
+      throw new Error(message || 'sqlite command failed');
+    }
+    return;
+  }
+
+  const { execFileSync } = await import('child_process');
+  try {
+    execFileSync(sqliteCmd, [dbPath, sql], { stdio: 'ignore' });
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      throw new Error('SQLite CLI not found. Set SQLITE=sqlite3 in settings.ini or install sqlite3.');
+    }
+    throw error;
+  }
+}
+
+async function createEmptyRepository(repoName, username) {
+  const normalized = normalizeRepoName(repoName);
+  if (!normalized) {
+    return { ok: false, message: 'Repository name is required' };
+  }
+  if (!/^[a-zA-Z0-9._-]+\.omi$/.test(normalized)) {
+    return { ok: false, message: 'Invalid repository name. Use letters, numbers, dot, dash, or underscore.' };
+  }
+
+  const repoPath = path.join(REPOS_DIR, normalized);
+  if (fs.existsSync(repoPath)) {
+    return { ok: false, message: 'Repository already exists' };
+  }
+
+  const settings = loadSettings();
+  const sqliteCmd = settings.SQLITE || 'sqlite3';
+  const schemaSql = buildRepoSchemaSql(username);
+
+  try {
+    await runSqliteCommand(sqliteCmd, repoPath, schemaSql);
+    return { ok: true, message: 'Repository created successfully' };
+  } catch (error) {
+    if (fs.existsSync(repoPath)) {
+      try {
+        fs.unlinkSync(repoPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+    return { ok: false, message: 'Failed to create repository' };
+  }
+}
+
+function escapeSqliteString(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+function formatDateTime(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+async function runSqliteQuery(sqliteCmd, dbPath, sql) {
+  const separator = '\x1f';
+
+  if (typeof Deno !== 'undefined' && Deno.Command) {
+    const command = new Deno.Command(sqliteCmd, {
+      args: ['-separator', separator, '-noheader', dbPath, sql]
+    });
+    const result = await command.output();
+    if (!result.success) {
+      const message = new TextDecoder().decode(result.stderr || new Uint8Array());
+      throw new Error(message || 'sqlite query failed');
+    }
+    return new TextDecoder().decode(result.stdout || new Uint8Array());
+  }
+
+  const { execFileSync } = await import('child_process');
+  try {
+    return execFileSync(sqliteCmd, ['-separator', separator, '-noheader', dbPath, sql], { encoding: 'utf8' });
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      throw new Error('SQLite CLI not found. Set SQLITE=sqlite3 in settings.ini or install sqlite3.');
+    }
+    throw error;
+  }
+}
+
+async function getLatestFiles(dbPath, pathPrefix, sqliteCmd) {
+  const commitSql = 'SELECT id FROM commits ORDER BY id DESC LIMIT 1';
+  const commitOutput = await runSqliteQuery(sqliteCmd, dbPath, commitSql);
+  const commitId = commitOutput.trim();
+  if (!commitId) return [];
+
+  let sql = 'SELECT f.filename, f.hash, f.datetime, IFNULL(b.size, 0) FROM files f LEFT JOIN blobs b ON f.hash = b.hash WHERE f.commit_id = ' + commitId;
+  if (pathPrefix) {
+    const escapedPath = escapeSqliteString(pathPrefix);
+    sql += ` AND (f.filename LIKE '${escapedPath}/%' OR f.filename = '${escapedPath}')`;
+  }
+
+  const output = await runSqliteQuery(sqliteCmd, dbPath, sql);
+  if (!output.trim()) return [];
+
+  return output.trim().split('\n').map(line => {
+    const [filename, hash, datetime, size] = line.split('\x1f');
+    return {
+      filename,
+      hash,
+      datetime,
+      size: Number(size || 0)
+    };
+  });
+}
+
+async function getFilesForCommit(dbPath, pathPrefix, commitId, sqliteCmd) {
+  const safeCommitId = Number(commitId);
+  if (!Number.isInteger(safeCommitId) || safeCommitId <= 0) return [];
+
+  let sql = 'SELECT f.filename, f.hash, f.datetime, IFNULL(b.size, 0) FROM files f LEFT JOIN blobs b ON f.hash = b.hash WHERE f.commit_id = ' + safeCommitId;
+  if (pathPrefix) {
+    const escapedPath = escapeSqliteString(pathPrefix);
+    sql += ` AND (f.filename LIKE '${escapedPath}/%' OR f.filename = '${escapedPath}')`;
+  }
+
+  const output = await runSqliteQuery(sqliteCmd, dbPath, sql);
+  if (!output.trim()) return [];
+
+  return output.trim().split('\n').map(line => {
+    const [filename, hash, datetime, size] = line.split('\x1f');
+    return {
+      filename,
+      hash,
+      datetime,
+      size: Number(size || 0)
+    };
+  });
+}
+
+async function getCommitRows(dbPath, sqliteCmd) {
+  const sql = "SELECT c.id, c.message, c.user, c.datetime, COUNT(f.id) FROM commits c LEFT JOIN files f ON c.id=f.commit_id GROUP BY c.id ORDER BY c.id DESC";
+  const output = await runSqliteQuery(sqliteCmd, dbPath, sql);
+  if (!output.trim()) return [];
+  return output.trim().split('\n').map(line => {
+    const [id, message, user, datetime, fileCount] = line.split('\x1f');
+    return {
+      id: Number(id || 0),
+      message: message || '',
+      user: user || '',
+      datetime: datetime || '',
+      fileCount: Number(fileCount || 0)
+    };
+  });
+}
+
+function organizeFiles(files, basePath = '') {
+  const result = { dirs: {}, files: [] };
+
+  for (const file of files) {
+    const filename = file.filename;
+    const isDirMarker = /(^|\/)\.omidir$/.test(filename);
+
+    if (basePath && !filename.startsWith(basePath + '/') && filename !== basePath) {
+      continue;
+    }
+
+    if (basePath && filename === basePath) {
+      if (!isDirMarker) {
+        result.files.push(file);
+      }
+      continue;
+    }
+
+    const relativePath = basePath ? filename.slice(basePath.length + 1) : filename;
+    const parts = relativePath.split('/');
+
+    if (parts.length > 1) {
+      const dirName = parts[0];
+      if (!result.dirs[dirName]) {
+        result.dirs[dirName] = {
+          name: dirName,
+          path: basePath ? `${basePath}/${dirName}` : dirName,
+          datetime: file.datetime
+        };
+      }
+    } else if (!isDirMarker) {
+      result.files.push(file);
+    }
+  }
+
+  return { dirs: Object.values(result.dirs), files: result.files };
+}
+
+async function getFileContent(dbPath, hash, sqliteCmd) {
+  const sql = `SELECT hex(data) FROM blobs WHERE hash = '${escapeSqliteString(hash)}' LIMIT 1`;
+  const output = await runSqliteQuery(sqliteCmd, dbPath, sql);
+  const hexData = output.trim();
+  if (!hexData) return null;
+  return Buffer.from(hexData, 'hex');
+}
+
+async function commitFileToRepo(dbPath, filename, content, username, message, sqliteCmd) {
+  const dataBuffer = Buffer.isBuffer(content) ? content : Buffer.from(content || '', 'utf8');
+  const hash = createHash('sha256').update(dataBuffer).digest('hex');
+  const size = dataBuffer.length;
+  const hexData = dataBuffer.toString('hex');
+  const datetime = formatDateTime(new Date());
+
+  const safeFilename = escapeSqliteString(filename);
+  const safeMessage = escapeSqliteString(message);
+  const safeUser = escapeSqliteString(username || 'system');
+
+  // Get all files from the latest commit to preserve them
+  const latestCommitSql = 'SELECT id FROM commits ORDER BY id DESC LIMIT 1';
+  const latestCommitOutput = await runSqliteQuery(sqliteCmd, dbPath, latestCommitSql);
+  const latestCommitId = latestCommitOutput.trim();
+  
+  let preserveFilesSql = '';
+  if (latestCommitId) {
+    // Get all files from latest commit except the one being updated
+    const filesSql = `SELECT filename, hash, datetime FROM files WHERE commit_id = ${latestCommitId} AND filename != '${safeFilename}'`;
+    const filesOutput = await runSqliteQuery(sqliteCmd, dbPath, filesSql);
+    
+    if (filesOutput.trim()) {
+      const existingFiles = filesOutput.trim().split('\n').map(line => {
+        const [fname, fhash, fdatetime] = line.split('\x1f');
+        return { filename: fname, hash: fhash, datetime: fdatetime };
+      });
+      
+      // Build SQL to re-insert existing files into new commit
+      for (const file of existingFiles) {
+        const safeFname = escapeSqliteString(file.filename);
+        const safeFhash = escapeSqliteString(file.hash);
+        const safeFdatetime = escapeSqliteString(file.datetime);
+        preserveFilesSql += `INSERT INTO files (filename, hash, datetime, commit_id) VALUES ('${safeFname}', '${safeFhash}', '${safeFdatetime}', (SELECT id FROM commits ORDER BY id DESC LIMIT 1)); `;
+      }
+    }
+  }
+
+  const sql = `BEGIN; ` +
+    `INSERT OR IGNORE INTO blobs (hash, data, size) VALUES ('${hash}', X'${hexData}', ${size}); ` +
+    `INSERT INTO commits (message, datetime, user) VALUES ('${safeMessage}', '${datetime}', '${safeUser}'); ` +
+    preserveFilesSql +
+    `INSERT INTO files (filename, hash, datetime, commit_id) VALUES ('${safeFilename}', '${hash}', '${datetime}', (SELECT id FROM commits ORDER BY id DESC LIMIT 1)); ` +
+    `COMMIT;`;
+
+  await runSqliteCommand(sqliteCmd, dbPath, sql);
+}
+
+async function deleteFileFromRepo(dbPath, filename, username, message, sqliteCmd) {
+  const datetime = formatDateTime(new Date());
+  const safeMessage = escapeSqliteString(message);
+  const safeUser = escapeSqliteString(username || 'system');
+  const safeFilename = escapeSqliteString(filename);
+
+  // Get all files from the latest commit to preserve them (except the deleted one)
+  const latestCommitSql = 'SELECT id FROM commits ORDER BY id DESC LIMIT 1';
+  const latestCommitOutput = await runSqliteQuery(sqliteCmd, dbPath, latestCommitSql);
+  const latestCommitId = latestCommitOutput.trim();
+  
+  let preserveFilesSql = '';
+  if (latestCommitId) {
+    // Get all files from latest commit except the one being deleted
+    const filesSql = `SELECT filename, hash, datetime FROM files WHERE commit_id = ${latestCommitId} AND filename != '${safeFilename}'`;
+    const filesOutput = await runSqliteQuery(sqliteCmd, dbPath, filesSql);
+    
+    if (filesOutput.trim()) {
+      const existingFiles = filesOutput.trim().split('\n').map(line => {
+        const [fname, fhash, fdatetime] = line.split('\x1f');
+        return { filename: fname, hash: fhash, datetime: fdatetime };
+      });
+      
+      // Build SQL to re-insert existing files into new commit
+      for (const file of existingFiles) {
+        const safeFname = escapeSqliteString(file.filename);
+        const safeFhash = escapeSqliteString(file.hash);
+        const safeFdatetime = escapeSqliteString(file.datetime);
+        preserveFilesSql += `INSERT INTO files (filename, hash, datetime, commit_id) VALUES ('${safeFname}', '${safeFhash}', '${safeFdatetime}', (SELECT id FROM commits ORDER BY id DESC LIMIT 1)); `;
+      }
+    }
+  }
+
+  const sql = `BEGIN; ` +
+    `INSERT INTO commits (message, datetime, user) VALUES ('${safeMessage}', '${datetime}', '${safeUser}'); ` +
+    preserveFilesSql +
+    `COMMIT;`;
+  
+  await runSqliteCommand(sqliteCmd, dbPath, sql);
+}
+
+function sanitizePathSegment(name) {
+  return String(name || '').replace(/\.\.\//g, '').replace(/\.\.\\/g, '').replace(/[\\/]/g, '_').replace(/\0/g, '').trim();
+}
+
+function parseRequestPath(pathname) {
+  const parts = pathname.split('/').filter(Boolean);
+  if (parts.length === 0) {
+    return { type: 'list' };
+  }
+
+  const repoPart = parts.shift();
+  let repoName = sanitizeRepoName(repoPart);
+  if (!repoName) {
+    return { type: 'error', message: 'error' };
+  }
+  if (!repoName.endsWith('.omi')) {
+    repoName += '.omi';
+  }
+
+  const repoPath = path.join(REPOS_DIR, repoName);
+  if (!isPathSafe(repoPath) || !fs.existsSync(repoPath)) {
+    return { type: 'error', message: 'error' };
+  }
+
+  const cleanParts = parts.map(sanitizePathSegment).filter(Boolean);
+  const repoSubpath = cleanParts.join('/');
+
+  return {
+    type: 'browse',
+    repo: repoName,
+    path: repoSubpath,
+    db: repoPath
+  };
+}
+
+// Check if content is text
+function isTextFile(content) {
+  if (!content || content.length === 0) return true;
+  if (Buffer.isBuffer(content)) {
+    return !content.includes(0);
+  }
+  return !content.includes('\0');
+}
+
+// Check if filename is markdown
+function isMarkdownFile(filename) {
+  const ext = path.extname(filename).toLowerCase();
+  return ext === '.md' || ext === '.markdown';
+}
+
+// Check if filename is SVG
+function isSVGFile(filename) {
+  const ext = path.extname(filename).toLowerCase();
+  return ext === '.svg';
+}
+
+// Check if filename is an image file
+function isImageFile(filename) {
+  const ext = path.extname(filename).toLowerCase().slice(1);
+  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'ico', 'tiff', 'tif'];
+  return imageExts.includes(ext);
+}
+
+// Get media type
+function getMediaType(filename) {
+  const ext = path.extname(filename).toLowerCase().slice(1);
+  const audioExts = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'];
+  const videoExts = ['mp4', 'webm', 'ogg', 'mkv', 'avi', 'mov', 'flv', 'wmv'];
+  
+  if (audioExts.includes(ext)) return 'audio';
+  if (videoExts.includes(ext)) return 'video';
+  return null;
+}
+
+// Get file type label for display
+function getFileTypeLabel(filename) {
+  const ext = path.extname(filename).toLowerCase().slice(1);
+  const fileTypes = {
+    'md': 'Markdown',
+    'markdown': 'Markdown',
+    'txt': 'Text',
+    'json': 'JSON',
+    'csv': 'CSV',
+    'xml': 'XML',
+    'yaml': 'YAML',
+    'yml': 'YAML',
+    'html': 'HTML',
+    'htm': 'HTML',
+    'css': 'CSS',
+    'js': 'JavaScript',
+    'py': 'Python',
+    'php': 'PHP',
+    'java': 'Java',
+    'cpp': 'C++',
+    'c': 'C',
+    'sh': 'Shell',
+    'bash': 'Bash',
+    'sql': 'SQL',
+    'pdf': 'PDF',
+    'doc': 'Word Document',
+    'docx': 'Word Document',
+    'xls': 'Excel',
+    'xlsx': 'Excel',
+    'ppt': 'PowerPoint',
+    'pptx': 'PowerPoint',
+    'zip': 'ZIP Archive',
+    'tar': 'TAR Archive',
+    'gz': 'GZ Archive',
+    'rar': 'RAR Archive',
+    'jpg': 'JPEG',
+    'jpeg': 'JPEG',
+    'png': 'PNG',
+    'gif': 'GIF',
+    'bmp': 'Bitmap',
+    'svg': 'SVG',
+    'webp': 'WebP',
+    'ico': 'Icon',
+    'tiff': 'TIFF',
+    'tif': 'TIFF',
+    'mp3': 'MP3 Audio',
+    'wav': 'WAV Audio',
+    'ogg': 'OGG Audio',
+    'flac': 'FLAC Audio',
+    'm4a': 'M4A Audio',
+    'aac': 'AAC Audio',
+    'mp4': 'MP4 Video',
+    'webm': 'WebM Video',
+    'mkv': 'Matroska Video',
+    'avi': 'AVI Video',
+    'mov': 'QuickTime Video',
+    'flv': 'Flash Video',
+    'wmv': 'Windows Media Video'
+  };
+  return fileTypes[ext] || 'File';
+}
+
+// Simple markdown to HTML converter (basic support)
+function markdownToHtml(markdown, filePath = '', repoRoot = '', imageMap = {}) {
+  let html = markdown.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  
+  // Headers
+  html = html.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.*?)$/gm, '<h1>$1</h1>');
+  
+  // Bold and italic
+  html = html.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+  html = html.replace(/\*(.*?)\*/g, '<i>$1</i>');
+  html = html.replace(/__(.+?)__/g, '<b>$1</b>');
+  html = html.replace(/_(.+?)_/g, '<i>$1</i>');
+  
+  // Images (process before links to avoid conflict)
+  html = html.replace(/!\[(.*?)\]\((.*?)\)/g, (match, alt, src) => {
+    // Check if image is in the map (already loaded as data URI)
+    if (imageMap[src]) {
+      return `<img src="${imageMap[src]}" alt="${alt}" style="max-width: 100%; height: auto; border: 1px solid #ccc; margin: 10px 0;">`;
+    }
+    
+    // If image path is relative (doesn't start with / or http), resolve it relative to current directory
+    let resolvedSrc = src;
+    if (!src.startsWith('/') && !src.startsWith('http://') && !src.startsWith('https://')) {
+      // Get directory of current file
+      const fileDir = filePath.includes('/') ? filePath.slice(0, filePath.lastIndexOf('/')) : '';
+      // Build URL path within the repo
+      if (repoRoot) {
+        resolvedSrc = fileDir ? `/${repoRoot}/${fileDir}/${src}` : `/${repoRoot}/${src}`;
+      } else {
+        resolvedSrc = fileDir ? `${fileDir}/${src}` : src;
+      }
+    }
+    return `<img src="${resolvedSrc}" alt="${alt}" style="max-width: 100%; height: auto; border: 1px solid #ccc; margin: 10px 0;">`;
+  });
+  
+  // Links
+  html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>');
+  
+  // Code blocks
+  html = html.replace(/```(.*?)```/gs, '<pre>$1</pre>');
+  
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  
+  // Line breaks
+  html = html.replace(/\n/g, '<br>');
+  
+  return html;
+}
+
+// Check if SVG contains JavaScript (security risk)
+function svgContainsJavaScript(svgContent) {
+  if (/<script/i.test(svgContent)) return true;
+  
+  const eventPatterns = [
+    'onload', 'onerror', 'onmouseover', 'onmouseout', 'onclick',
+    'onmousemove', 'onmousedown', 'onmouseup', 'ondblclick',
+    'onfocus', 'onblur', 'onchange', 'onsubmit', 'onreset'
+  ];
+  
+  for (const event of eventPatterns) {
+    if (new RegExp(event + '=', 'i').test(svgContent)) {
+      return true;
+    }
+  }
+  
+  if (/javascript:/i.test(svgContent)) return true;
+  if (/data:text\/javascript/i.test(svgContent)) return true;
+  
+  return false;
+}
+
+// Check if SVG contains dangerous XML entities or loops
+function svgContainsXMLDanger(svgContent) {
+  if (/<!DOCTYPE/i.test(svgContent)) return true;
+  if (/<!ENTITY/i.test(svgContent)) return true;
+  if (/&lol|&x/i.test(svgContent)) return true;
+  if (/<!\[CDATA\[.{10000,}/.test(svgContent)) return true;
+  
+  return false;
+}
+
+// Parse cookies
+// Parse form data
+async function parseFormData(req) {
+  return new Promise((resolve) => {
+    let data = '';
+    req.on('data', chunk => {
+      data += chunk.toString();
+    });
+    req.on('end', () => {
+      const params = new URLSearchParams(data);
+      const result = {};
+      for (const [key, value] of params) {
+        result[key] = value;
+      }
+      resolve(result);
+    });
+  });
+}
+
+// Parse multipart form data
+async function parseMultipartForm(req) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    req.on('data', chunk => {
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      // Combine chunks into single buffer
+      const data = Buffer.concat(chunks);
+      const dataStr = data.toString('binary');
+      
+      // Simple multipart parser (limited support)
+      const result = { fields: {}, files: {} };
+      const boundary = req.headers['content-type']?.split('boundary=')[1];
+      
+      if (!boundary) {
+        resolve(result);
+        return;
+      }
+      
+      const boundaryPattern = `--${boundary}`;
+      const parts = dataStr.split(boundaryPattern);
+      
+      for (const part of parts) {
+        if (!part.includes('Content-Disposition')) continue;
+        
+        const nameMatcher = part.match(/name="([^"]*)"/);
+        if (!nameMatcher) continue;
+        
+        const name = nameMatcher[1];
+        const filenameMatcher = part.match(/filename="([^"]*)"/);
+        
+        if (filenameMatcher) {
+          const filename = filenameMatcher[1];
+          // Find the start of file data (after headers)
+          const headerEndIndex = part.indexOf('\r\n\r\n');
+          if (headerEndIndex === -1) continue;
+          
+          const fileDataStart = headerEndIndex + 4; // Skip \r\n\r\n
+          // Find the end (before final \r\n--)
+          let fileDataEnd = part.length;
+          if (part.endsWith('\r\n')) {
+            fileDataEnd -= 2;
+          }
+          
+          const fileDataStr = part.substring(fileDataStart, fileDataEnd);
+          result.files[name] = {
+            filename,
+            data: Buffer.from(fileDataStr, 'binary')
+          };
+        } else {
+          const fieldDataMatch = part.match(/\r\n\r\n([\s\S]*?)(?:\r\n)?$/);
+          if (fieldDataMatch) {
+            result.fields[name] = fieldDataMatch[1].trim();
+          }
+        }
+      }
+      
+      resolve(result);
+    });
+  });
+}
+
+// Set session cookie
+function setSessionCookie(req, res, sessionId) {
+  return;
+}
+
+// Generate session ID
+function generateSessionId() {
+  return randomBytes(32).toString('hex');
+}
+
+// Check if user is logged in (via session)
+function isLoggedIn(req) {
+  const sessionId = getSessionId(req);
+  if (!sessionId) return false;
+  return !!ensureSessionContext(req, sessionId);
+}
+
+// Get username from session
+function getUsername(req) {
+  const sessionId = getSessionId(req);
+  if (!sessionId) return null;
+  const context = ensureSessionContext(req, sessionId);
+  return context ? context.username : null;
+}
+
+function prettyHtml32(html) {
+  const source = String(html || '');
+  if (!/<!DOCTYPE\s+HTML\s+PUBLIC\s+"-\/\/W3C\/\/DTD HTML 3\.2 Final\/\/EN">/i.test(source)) {
+    return source;
+  }
+
+  const compact = source
+    .replace(/\r\n?/g, '\n')
+    .replace(/>\s+</g, '><')
+    .trim();
+
+  const chunks = compact.split(/(?=<)/g).map(item => item.trim()).filter(Boolean);
+  let indent = 0;
+  const lines = [];
+
+  for (const chunk of chunks) {
+    const isClosing = /^<\//.test(chunk);
+    const isDeclaration = /^<!/.test(chunk) || /^<\?/.test(chunk);
+    const isSelfClosing = /\/>$/.test(chunk) || /^<(br|hr|img|input|meta|link)\b/i.test(chunk);
+    const hasInlineClose = /<\/[^>]+>\s*$/.test(chunk) && /^<[^/!][^>]*>/.test(chunk);
+
+    if (isClosing && indent > 0) {
+      indent -= 1;
+    }
+
+    lines.push(`${'  '.repeat(Math.max(indent, 0))}${chunk}`);
+
+    if (!isClosing && !isDeclaration && !isSelfClosing && !hasInlineClose) {
+      indent += 1;
+    }
+  }
+
+  return `${lines.join('\n')}\n`;
+}
+
+// Send HTML response
+function sendHtml(res, html, statusCode = 200) {
+  const body = prettyHtml32(html);
+  res.writeHead(statusCode, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(body);
+}
+
+// Send JSON response
+function sendJson(res, data, statusCode = 200) {
+  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(data));
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Request handler
+async function handleRequest(req, res) {
+  const baseUrl = `http://${req.headers.host || 'localhost'}`;
+  const url = new URL(req.url, baseUrl);
+  const pathname = url.pathname;
+  const query = Object.fromEntries(url.searchParams.entries());
+
+  // Load translations based on user preference or browser language
+  let username = getUsername(req) || null;
+  let userLanguage = null;
+  let browserLanguage = null;
+
+  // If user is logged in, get their language preference
+  if (username) {
+    const users = loadUsers();
+    userLanguage = users[username]?.language || null;
+  }
+
+  // Detect browser language as fallback
+  if (!userLanguage) {
+    browserLanguage = getBrowserLanguage(req);
+  }
+
+  // Determine which language to load
+  const selectedLanguage = userLanguage || browserLanguage || 'en';
+
+  // Load translations
+  const translations = loadTranslations(selectedLanguage);
+
+  // Load languages data for RTL detection
+  let languagesData = {};
+  try {
+    const languagesFile = fs.readFileSync(path.join(__dirname, 'languages.json'), 'utf8');
+    languagesData = JSON.parse(languagesFile);
+  } catch (e) {
+    console.error('Error loading languages.json:', e.message);
+  }
+
+  // Handle logout
+  if (pathname === '/logout') {
+    const sessionId = getSessionId(req);
+    if (sessionId) {
+      const context = ensureSessionContext(req, sessionId);
+      if (context) {
+        logActivity(req, context.username, sessionId, 'logout', 'ok', 'logout success', context.meta.clickCounter || 0);
+      }
+      sessions.delete(sessionId);
+      sessionMeta.delete(sessionId);
+    }
+    res.writeHead(302, { 'Location': '/' });
+    res.end();
+    return;
+  }
+
+  if (pathname === '/activity') {
+    const activityUser = getUsername(req);
+    if (!activityUser) {
+      res.writeHead(302, { Location: '/sign-in' });
+      res.end();
+      return;
+    }
+
+    const toSqliteDateTime = (unixTs) => {
+      const ts = Number(unixTs || 0);
+      if (!Number.isFinite(ts) || ts <= 0) return '';
+      return new Date(ts * 1000).toISOString().slice(0, 19).replace('T', ' ');
+    };
+
+    const grouped = new Map();
+    if (fs.existsSync(ACTIVITY_LOG_FILE)) {
+      const rows = fs.readFileSync(ACTIVITY_LOG_FILE, 'utf-8').split('\n').filter(Boolean);
+      for (const row of rows) {
+        try {
+          const item = JSON.parse(row);
+          const key = `${item.ip}|${item.userAgent}|${item.action || ''}`;
+          if (!grouped.has(key)) {
+            grouped.set(key, { ip: item.ip || '', ua: item.userAgent || '', action: item.action || '', users: new Set(), count: 0, first: item.ts || 0, last: item.ts || 0 });
+          }
+          const group = grouped.get(key);
+          group.count += 1;
+          group.users.add(item.username || '');
+          group.first = Math.min(group.first, item.ts || group.first);
+          group.last = Math.max(group.last, item.ts || group.last);
+        } catch {
+          // ignore broken activity rows
+        }
+      }
+    }
+
+    const rowsHtml = [...grouped.values()].map(group =>
+      `<tr><td>${escapeHtml(group.action)}</td><td>${escapeHtml(group.ip)}</td><td>${escapeHtml(group.ua)}</td><td>${escapeHtml([...group.users].join(', '))}</td><td>${group.count}</td><td>${escapeHtml(toSqliteDateTime(group.first))}</td><td>${escapeHtml(toSqliteDateTime(group.last))}</td></tr>`
+    ).join('\n') || `<tr><td colspan="7">${t('no-activity-yet', translations)}</td></tr>`;
+
+    const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html><head><title>${t('activity', translations)} - Omi Server</title></head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5"><tr><td><h1>${t('activity', translations)}</h1></td><td align="right"><small></small></td></tr></table>
+${buildPrimaryNav(req, translations, activityUser)}
+<table border="1" width="100%" cellpadding="5" cellspacing="0"><tr bgcolor="#333333"><th><font color="white">${t('actions', translations)}</font></th><th><font color="white">${t('ip-address', translations)}</font></th><th><font color="white">${t('user-agent', translations)}</font></th><th><font color="white">${t('users', translations)}</font></th><th><font color="white">${t('events', translations)}</font></th><th><font color="white">${t('first-unix', translations)}</font></th><th><font color="white">${t('last-unix', translations)}</font></th></tr>${rowsHtml}</table>
+<hr><p><small>Omi Server</small></p>
+</body></html>`;
+    sendHtml(res, html);
+    return;
+  }
+
+  // Handle sign-in
+  if (pathname === '/sign-in') {
+    if (req.method === 'POST') {
+      const postData = await parseFormData(req);
+      const username = postData.username || '';
+      const password = postData.password || '';
+      const otpCode = postData.otp || '';
+
+      let error = null;
+      let show_otp = false;
+
+      if (isUserLocked(username)) {
+        error = 'Account is temporarily locked due to too many failed login attempts. Please try again later.';
+      } else {
+        const authResult = authenticate(username, password, otpCode);
+
+        if (authResult === true) {
+          clearFailedAttempts(username);
+          const sessionId = generateSessionId();
+          sessions.set(sessionId, username);
+          const nowTs = Math.floor(Date.now() / 1000);
+          const passwordRef = getPasswordRef(username);
+          sessionMeta.set(sessionId, {
+            username,
+            passwordRef,
+            loginAt: nowTs,
+            lastActivityAt: nowTs,
+            ip: getClientIp(req),
+            userAgent: getUserAgent(req),
+            clickCounter: 0
+          });
+          logActivity(req, username, sessionId, 'login', 'ok', 'login success', 0);
+          res.writeHead(302, { 'Location': `/?sessionId=${encodeURIComponent(sessionId)}` });
+          res.end();
+          return;
+        } else if (authResult === 'OTP_REQUIRED') {
+          error = t('otp-required', translations);
+          show_otp = true;
+        } else {
+          recordFailedAttempt(username);
+          if (checkBruteForce(username)) {
+            error = t('account-locked', translations);
+          } else {
+            error = t('invalid-credentials', translations);
+          }
+        }
+      }
+
+      const usernameValue = username ? ` value="${username.replace(/"/g, '&quot;')}"` : '';
+      const otpInput = show_otp ? `<tr><td>${t('otp', translations)}:</td><td><input type="text" name="otp" size="10" maxlength="6" required pattern="[0-9]{6}" placeholder="${t('otp', translations)}"></td></tr>` : '';
+      const errorMsg = error ? `<p><font color="red"><strong>${t('error', translations)}: ${error.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong></font></p>` : '';
+      const isRTL = languagesData[selectedLanguage]?.rtl === true;
+      const dirAttr = isRTL ? 'rtl' : 'ltr';
+
+      const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html dir="${dirAttr}">
+<head>
+<title>${t('login', translations)} - Omi Server</title>
+</head>
+<body bgcolor="#f0f0f0" dir="${dirAttr}">
+<h1>Omi Server - ${t('login', translations)}</h1>
+<table border="0" cellpadding="5">
+<tr><td colspan="2"><a href="/">${t('home', translations)}</a></td></tr>
+</table>
+${errorMsg}
+<form method="POST">
+<table border="1" cellpadding="5">
+<tr><td>${t('username', translations)}:</td><td><input type="text" name="username" size="30" required${usernameValue}></td></tr>
+<tr><td>${t('password', translations)}:</td><td><input type="password" name="password" size="30" required></td></tr>
+${otpInput}
+<tr><td colspan="2"><input type="submit" value="${t('login', translations)}"></td></tr>
+</table>
+</form>
+<p><a href="/sign-up">${t('create-account', translations)}</a></p>
+</body>
+</html>`;
+
+      sendHtml(res, html);
+      return;
+    }
+
+    const isRTL = languagesData[selectedLanguage]?.rtl === true;
+    const dirAttr = isRTL ? 'rtl' : 'ltr';
+    
+    const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html dir="${dirAttr}">
+<head>
+<title>${t('login', translations)} - Omi Server</title>
+</head>
+<body bgcolor="#f0f0f0" dir="${dirAttr}">
+<h1>Omi Server - ${t('login', translations)}</h1>
+<table border="0" cellpadding="5">
+<tr><td colspan="2"><a href="/">${t('home', translations)}</a></td></tr>
+</table>
+<form method="POST">
+<table border="1" cellpadding="5">
+<tr><td>${t('username', translations)}:</td><td><input type="text" name="username" size="30" required></td></tr>
+<tr><td>${t('password', translations)}:</td><td><input type="password" name="password" size="30" required></td></tr>
+<tr><td colspan="2"><input type="submit" value="${t('login', translations)}"></td></tr>
+</table>
+</form>
+<p><a href="/sign-up">${t('create-account', translations)}</a></p>
+</body>
+</html>`;
+
+    sendHtml(res, html);
+    return;
+  }
+
+  // Handle sign-up
+  if (pathname === '/sign-up') {
+    if (req.method === 'POST') {
+      const postData = await parseFormData(req);
+      const username = postData.username || '';
+      const password = postData.password || '';
+      const password2 = postData.password2 || '';
+
+      let error = null;
+      let success = null;
+
+      if (isUserLocked(username)) {
+        error = t('account-locked', translations);
+      } else if (!username || !password) {
+        error = t('username-password-required', translations);
+      } else if (password !== password2) {
+        error = t('password-mismatch', translations);
+      } else if (username.length < 3) {
+        error = t('username-too-short', translations);
+      } else {
+        const users = loadUsers();
+        if (username in users) {
+          recordFailedAttempt(username);
+          checkBruteForce(username);
+          error = t('user-exists', translations);
+        } else {
+          const browserLanguage = getBrowserLanguage(req);
+          const line = `${username}:${password}::${browserLanguage}\n`;
+          try {
+            fs.appendFileSync(USERS_FILE, line);
+            success = t('account-created', translations);
+          } catch {
+            error = t('account-creation-failed', translations);
+          }
+        }
+      }
+
+      const errorMsg = error ? `<p><font color="red"><strong>${t('error', translations)}: ${error.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong></font></p>` : '';
+      const successMsg = success ? `<p><font color="green"><strong>${success}</strong></font></p><p><a href="/sign-in">${t('login', translations)}</a></p>` : '';
+      const isRTL = languagesData[selectedLanguage]?.rtl === true;
+      const dirAttr = isRTL ? 'rtl' : 'ltr';
+      const form = success ? '' : `<form method="POST">
+<table border="1" cellpadding="5">
+<tr><td>${t('username', translations)}:</td><td><input type="text" name="username" size="30" required></td></tr>
+<tr><td>${t('password', translations)}:</td><td><input type="password" name="password" size="30" required></td></tr>
+<tr><td>${t('confirm', translations)}:</td><td><input type="password" name="password2" size="30" required></td></tr>
+<tr><td colspan="2"><input type="submit" value="${t('create-account', translations)}"></td></tr>
+</table>
+</form>
+<p><a href="/sign-in">${t('already-account', translations)}</a></p>`;
+
+      const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html dir="${dirAttr}">
+<head>
+<title>${t('create-account', translations)} - Omi Server</title>
+</head>
+<body bgcolor="#f0f0f0" dir="${dirAttr}">
+<h1>Omi Server - ${t('create-account', translations)}</h1>
+<table border="0" cellpadding="5">
+<tr><td colspan="2"><a href="/">${t('home', translations)}</a></td></tr>
+</table>
+${errorMsg}
+${successMsg}
+${form}
+</body>
+</html>`;
+
+      sendHtml(res, html);
+      return;
+    }
+
+    const isRTL = languagesData[selectedLanguage]?.rtl === true;
+    const dirAttr = isRTL ? 'rtl' : 'ltr';
+
+    const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html dir="${dirAttr}">
+<head>
+<title>${t('create-account', translations)} - Omi Server</title>
+</head>
+<body bgcolor="#f0f0f0" dir="${dirAttr}">
+<h1>Omi Server - ${t('create-account', translations)}</h1>
+<table border="0" cellpadding="5">
+<tr><td colspan="2"><a href="/">${t('home', translations)}</a></td></tr>
+</table>
+<form method="POST">
+<table border="1" cellpadding="5">
+<tr><td>${t('username', translations)}:</td><td><input type="text" name="username" size="30" required></td></tr>
+<tr><td>${t('password', translations)}:</td><td><input type="password" name="password" size="30" required></td></tr>
+<tr><td>${t('confirm', translations)}:</td><td><input type="password" name="password2" size="30" required></td></tr>
+<tr><td colspan="2"><input type="submit" value="${t('create-account', translations)}"></td></tr>
+</table>
+</form>
+<p><a href="/sign-in">${t('already-account', translations)}</a></p>
+</body>
+</html>`;
+
+    sendHtml(res, html);
+    return;
+  }
+
+  // Handle language selection
+  if (pathname === '/language') {
+    username = getUsername(req);
+    if (!username) {
+      res.writeHead(302, { 'Location': '/sign-in' });
+      res.end();
+      return;
+    }
+
+    if (req.method === 'POST') {
+      const postData = await parseFormData(req);
+      if (!verifyAndConsumeActionToken(req, postData, getSessionId(req), 'language-save')) {
+        sendHtml(res, `${t('error', translations)}: ${t('invalid-action-token', translations)}`, 403);
+        return;
+      }
+      const selectedLanguage = postData.language || 'en';
+      
+      // Load users, update language, and save
+      let users = loadUsers();
+      if (users[username]) {
+        users[username].language = selectedLanguage;
+      }
+      
+      // Save updated users
+      const usersContent = Object.entries(users)
+        .map(([name, data]) => `${name}:${data.password}:${data.otp || ''}:${data.language || 'en'}`)
+        .join('\n');
+      fs.writeFileSync(USERS_FILE, usersContent, 'utf-8');
+      
+      res.writeHead(302, { 'Location': '/language?success=1' });
+      res.end();
+      return;
+    }
+
+    const users = loadUsers();
+    const userLanguage = users[username]?.language || 'en';
+    
+    // Check if current language is RTL
+    const isRTL = languagesData[userLanguage]?.rtl === true;
+    const dirAttr = isRTL ? 'rtl' : 'ltr';
+
+    // Build form with radio buttons for all languages
+    let form = `<form method="POST">${buildAuthHiddenFields(req, 'language-save')}<table border="1" cellpadding="5">\n`;
+    form += `<tr><td colspan="2"><b>${t('language', translations)}:</b></td></tr>\n`;
+    for (const [langCode, langInfo] of Object.entries(languagesData)) {
+      const isSelected = langCode === userLanguage ? 'checked' : '';
+      const rtlIndicator = (langInfo.rtl === true) ? ' (RTL)' : '';
+      const langName = `${langInfo.name || langCode} (${langCode})${rtlIndicator}`;
+      form += `<tr><td><input type="radio" name="language" value="${langCode}" ${isSelected}></td><td>${langName}</td></tr>\n`;
+    }
+    form += `<tr><td colspan="2"><input type="submit" value="${t('save', translations)}"></td></tr>\n`;
+    form += '</table></form>\n';
+
+    const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html dir="${dirAttr}">
+<head>
+<title>${t('language', translations)} - Omi Server</title>
+</head>
+<body bgcolor="#f0f0f0" dir="${dirAttr}">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>Omi Server - ${t('language', translations)}</h1></td><td align="right"><small></small></td></tr>
+</table>
+${buildPrimaryNav(req, translations, username)}
+${form}
+</body>
+</html>`;
+
+    sendHtml(res, html);
+    return;
+  }
+
+  // Handle settings
+  if (pathname === '/settings' && !pathname.includes('/sign')) {
+    if (!isLoggedIn(req)) {
+      res.writeHead(302, { 'Location': '/sign-in' });
+      res.end();
+      return;
+    }
+
+    if (req.method === 'POST') {
+      const postData = await parseFormData(req);
+      if (!verifyAndConsumeActionToken(req, postData, getSessionId(req), 'settings-save')) {
+        sendHtml(res, 'Invalid settings action token', 403);
+        return;
+      }
+      let content = '';
+      for (const key of ['SQLITE', 'USERNAME', 'PASSWORD', 'REPOS', 'CURL']) {
+        if (key in postData) {
+          content += `${key}=${postData[key]}\n`;
+        }
+      }
+
+      try {
+        fs.writeFileSync(SETTINGS_FILE, content);
+      } catch {
+      }
+    }
+
+    const settings = loadSettings();
+    username = getUsername(req);
+
+    const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>${t('settings', translations)} - Omi Server</title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>${t('settings', translations)}</h1></td><td align="right"><small></small></td></tr>
+</table>
+${buildPrimaryNav(req, translations, username)}
+<hr>
+<form method="POST">
+${buildAuthHiddenFields(req, 'settings-save')}
+<table border="1" cellpadding="5">
+<tr><td>SQLITE executable:</td><td><input type="text" name="SQLITE" size="50" value="${(settings.SQLITE || 'sqlite3').replace(/"/g, '&quot;')}"></td></tr>
+<tr><td>USERNAME:</td><td><input type="text" name="USERNAME" size="50" value="${(settings.USERNAME || '').replace(/"/g, '&quot;')}"></td></tr>
+<tr><td>PASSWORD:</td><td><input type="password" name="PASSWORD" size="50" value="${(settings.PASSWORD || '').replace(/"/g, '&quot;')}"></td></tr>
+<tr><td>REPOS (server URL):</td><td><input type="text" name="REPOS" size="50" value="${(settings.REPOS || '').replace(/"/g, '&quot;')}"></td></tr>
+<tr><td>CURL executable:</td><td><input type="text" name="CURL" size="50" value="${(settings.CURL || 'curl').replace(/"/g, '&quot;')}"></td></tr>
+<tr><td colspan="2"><input type="submit" value="${t('save', translations)}"></td></tr>
+</table>
+</form>
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>`;
+
+    sendHtml(res, html);
+    return;
+  }
+
+  let repoMessage = null;
+  let repoMessageIsError = false;
+  let pendingDeleteRepo = '';
+
+  if (pathname === '/' && req.method === 'POST') {
+    if (!isLoggedIn(req)) {
+      res.writeHead(302, { 'Location': '/sign-in' });
+      res.end();
+      return;
+    }
+
+    const contentType = req.headers['content-type'] || '';
+    let fields = {};
+    let files = {};
+    if (contentType.includes('multipart/form-data')) {
+      const form = await parseMultipartForm(req);
+      fields = form.fields || {};
+      files = form.files || {};
+    } else {
+      fields = await parseFormData(req);
+    }
+
+    if (fields.nav_target) {
+      const sessionId = getSessionId(req) || String(fields.sessionId || '');
+      if (!verifyAndConsumeActionToken(req, fields, sessionId, 'nav-go')) {
+        sendHtml(res, 'Invalid navigation action token', 403);
+        return;
+      }
+      const target = isAllowedNavTarget(fields.nav_target) ? String(fields.nav_target) : '/';
+      const location = appendSessionIdToTarget(target, sessionId);
+      res.writeHead(302, { Location: location });
+      res.end();
+      return;
+    }
+
+    let homeRequiredAction = '';
+    if (fields.action === 'create_repo') {
+      homeRequiredAction = 'home-create-repo';
+    } else if (fields.action === 'Upload') {
+      homeRequiredAction = 'home-upload-repo';
+    } else if (fields.action === 'open_repo') {
+      const targetRepo = normalizeRepoName(fields.repo_name || '');
+      if (targetRepo) {
+        homeRequiredAction = `home-open-repo-${targetRepo.replace(/\.omi$/, '')}`;
+      }
+    } else if (fields.action === 'delete_repo_request') {
+      const targetRepo = normalizeRepoName(fields.repo_name || '');
+      if (targetRepo) {
+        homeRequiredAction = `home-delete-repo-${targetRepo.replace(/\.omi$/, '')}`;
+      }
+    } else if (fields.action === 'delete_repo_confirm') {
+      const targetRepo = normalizeRepoName(fields.repo_name || '');
+      if (targetRepo) {
+        homeRequiredAction = `home-delete-repo-confirm-${targetRepo.replace(/\.omi$/, '')}`;
+      }
+    }
+    if (!homeRequiredAction || !verifyAndConsumeActionToken(req, fields, getSessionId(req), homeRequiredAction)) {
+      sendHtml(res, 'Invalid home action token', 403);
+      return;
+    }
+
+    if (fields.action === 'create_repo') {
+      const result = await createEmptyRepository(fields.repo_name || '', getUsername(req));
+      repoMessage = result.message;
+      repoMessageIsError = !result.ok;
+    } else if (fields.action === 'open_repo') {
+      const targetRepo = normalizeRepoName(fields.repo_name || '');
+      if (!targetRepo) {
+        repoMessage = 'Invalid repository name';
+        repoMessageIsError = true;
+      } else {
+        const repoRoot = targetRepo.replace(/\.omi$/, '');
+        const sessionId = getSessionId(req) || String(fields.sessionId || '');
+        const location = sessionId
+          ? `/${repoRoot}?sessionId=${encodeURIComponent(sessionId)}`
+          : `/${repoRoot}`;
+        res.writeHead(302, { Location: location });
+        res.end();
+        return;
+      }
+    } else if (fields.action === 'Upload') {
+      const uploadFile = files.repo_file;
+      const repoName = normalizeRepoName(fields.repo_name || (uploadFile ? uploadFile.filename : ''));
+
+      if (!repoName) {
+        repoMessage = 'Repository name is required';
+        repoMessageIsError = true;
+      } else if (!/^[a-zA-Z0-9._-]+\.omi$/.test(repoName)) {
+        repoMessage = 'Invalid repository name. Use letters, numbers, dot, dash, or underscore.';
+        repoMessageIsError = true;
+      } else if (!uploadFile || !uploadFile.data) {
+        repoMessage = 'No repository file selected';
+        repoMessageIsError = true;
+      } else {
+        const repoPath = path.join(REPOS_DIR, repoName);
+        if (!isPathSafe(repoPath)) {
+          repoMessage = 'Invalid repository path';
+          repoMessageIsError = true;
+        } else {
+          try {
+            fs.writeFileSync(repoPath, uploadFile.data);
+            repoMessage = `Repository ${repoName} uploaded successfully`;
+          } catch {
+            repoMessage = 'Failed to save repository';
+            repoMessageIsError = true;
+          }
+        }
+      }
+    } else if (fields.action === 'delete_repo_request') {
+      const targetRepo = normalizeRepoName(fields.repo_name || '');
+      const targetPath = path.join(REPOS_DIR, targetRepo || '');
+      if (!targetRepo || !isPathSafe(targetPath) || !fs.existsSync(targetPath)) {
+        repoMessage = t('error', translations);
+        repoMessageIsError = true;
+      } else {
+        pendingDeleteRepo = targetRepo;
+      }
+    } else if (fields.action === 'delete_repo_confirm') {
+      const targetRepo = normalizeRepoName(fields.repo_name || '');
+      const targetPath = path.join(REPOS_DIR, targetRepo || '');
+      if (!targetRepo || !isPathSafe(targetPath) || !fs.existsSync(targetPath)) {
+        repoMessage = t('error', translations);
+        repoMessageIsError = true;
+      } else {
+        try {
+          fs.unlinkSync(targetPath);
+          repoMessage = t('delete', translations);
+          repoMessageIsError = false;
+        } catch {
+          repoMessage = t('error', translations);
+          repoMessageIsError = true;
+        }
+      }
+    }
+  }
+
+  if (pathname === '/' && query.download) {
+    const repoName = normalizeRepoName(query.download);
+    const repoPath = path.join(REPOS_DIR, repoName);
+
+    if (!repoName || !isPathSafe(repoPath) || !fs.existsSync(repoPath)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(t('error', translations));
+      return;
+    }
+
+    const stat = fs.statSync(repoPath);
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': `attachment; filename="${repoName}"`,
+      'Content-Length': stat.size
+    });
+    fs.createReadStream(repoPath).pipe(res);
+    return;
+  }
+
+  // Check if requesting JSON API for repos list
+  if (pathname === '/' && query.format === 'json') {
+    const repos = getReposList();
+    sendJson(res, { repos });
+    return;
+  }
+
+  if (pathname === '/' && query.log) {
+    const settings = loadSettings();
+    const sqliteCmd = settings.SQLITE || 'sqlite3';
+    const repoName = normalizeRepoName(query.log);
+    const dbPath = path.join(REPOS_DIR, repoName);
+    username = getUsername(req);
+
+    if (!repoName || !isPathSafe(dbPath) || !fs.existsSync(dbPath)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(t('error', translations));
+      return;
+    }
+
+    let commits = [];
+    try {
+      commits = await getCommitRows(dbPath, sqliteCmd);
+    } catch (error) {
+      sendHtml(res, `<html><body><h1>${t('error', translations)}</h1><p>${escapeHtml(error.message || 'SQLite error')}</p></body></html>`, 500);
+      return;
+    }
+
+    const repoRoot = repoName.replace(/\.omi$/, '');
+    const rowsHtml = commits.length
+      ? commits.map(c => `<tr><td><strong><a href="/${escapeHtml(repoRoot)}?commit=${c.id}">${c.id}</a></strong></td><td>${escapeHtml(c.message)}</td><td>${escapeHtml(c.user)}</td><td>${escapeHtml(c.datetime)}</td><td>${c.fileCount}</td><td><a href="/${escapeHtml(repoRoot)}?commit=${c.id}">View</a></td></tr>`).join('\n')
+      : `<tr><td colspan="6">${t('no-commits', translations)}</td></tr>`;
+
+    const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>${t('commit-history', translations)} - ${escapeHtml(repoName)}</title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>${t('commit-history', translations)} - ${escapeHtml(repoName)}</h1></td><td align="right"><small></small></td></tr>
+</table>
+${buildPrimaryNav(req, translations, username, [`<a href="/${escapeHtml(repoRoot)}">${t('repository-root', translations)}</a>`], { showRestrictedWhenLoggedOut: false })}
+<hr>
+<table border="1" width="100%" cellpadding="5" cellspacing="0">
+<tr bgcolor="#333333"><th><font color="white">${t('commit-id', translations)}</font></th><th><font color="white">${t('message', translations)}</font></th><th><font color="white">${t('author', translations)}</font></th><th><font color="white">${t('date', translations)}</font></th><th><font color="white">${t('files', translations)}</font></th><th><font color="white">${t('open', translations)}</font></th></tr>
+${rowsHtml}
+</table>
+<p><a href="/${escapeHtml(repoRoot)}">${t('latest', translations)}</a></p>
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>`;
+    sendHtml(res, html);
+    return;
+  }
+
+  const requestInfo = parseRequestPath(pathname);
+  if (requestInfo.type === 'error') {
+    sendHtml(res, `<html><body><h1>${t('error', translations)}</h1></body></html>`, 404);
+    return;
+  }
+
+  if (requestInfo.type === 'browse') {
+    const settings = loadSettings();
+    const sqliteCmd = settings.SQLITE || 'sqlite3';
+    const repoName = requestInfo.repo;
+    const repoPath = requestInfo.path;
+    const dbPath = requestInfo.db;
+    username = getUsername(req);
+    const repoRoot = repoName.replace(/\.omi$/, '');
+    const selectedCommitId = Number.parseInt(String(query.commit || '0'), 10);
+    const isHistoricView = Number.isInteger(selectedCommitId) && selectedCommitId > 0;
+    const commitSuffix = isHistoricView ? `?commit=${selectedCommitId}` : '';
+    const appendCommit = (target) => {
+      if (!isHistoricView) return target;
+      return target.includes('?') ? `${target}&commit=${selectedCommitId}` : `${target}?commit=${selectedCommitId}`;
+    };
+
+    let actionMessage = null;
+    let actionMessageIsError = false;
+    let pendingDeleteTarget = '';
+
+    let files = [];
+    try {
+      files = isHistoricView
+        ? await getFilesForCommit(dbPath, repoPath, selectedCommitId, sqliteCmd)
+        : await getLatestFiles(dbPath, repoPath, sqliteCmd);
+    } catch (error) {
+      sendHtml(res, `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>SQLite Error - ${escapeHtml(repoName)}</title>
+</head>
+<body bgcolor="#f0f0f0">
+<h1>SQLite Error</h1>
+<p>${escapeHtml(error.message || 'SQLite error')}</p>
+<p>Set SQLITE in settings.ini to the sqlite3 binary, or install sqlite3.</p>
+</body>
+</html>`, 500);
+      return;
+    }
+    let isFile = files.length === 1 && files[0].filename === repoPath && !/(^|\/)\.omidir$/.test(files[0].filename);
+
+    if (req.method === 'POST' && username && !isHistoricView) {
+      const contentType = req.headers['content-type'] || '';
+      let fields = {};
+      let requestFiles = {};
+      if (contentType.includes('multipart/form-data')) {
+        const form = await parseMultipartForm(req);
+        fields = form.fields || {};
+        requestFiles = form.files || {};
+      } else {
+        fields = await parseFormData(req);
+      }
+
+      const action = fields.action || '';
+      let repoRequiredAction = '';
+      if (isFile) {
+        if (action === 'delete_file') repoRequiredAction = 'repo-delete-file';
+        else if (action === 'rename_file') repoRequiredAction = 'repo-rename-file';
+        else if (action === 'save_file') repoRequiredAction = 'repo-save-file';
+      } else {
+        if (action === 'delete_file_request') repoRequiredAction = 'repo-delete-dir-file-request';
+        else if (action === 'delete_file_confirm') repoRequiredAction = 'repo-delete-dir-file-confirm';
+        else if (action === 'rename_file') repoRequiredAction = 'repo-rename-dir-file';
+        else if (action === 'create_dir') repoRequiredAction = 'repo-create-dir';
+        else if (action === 'create_file') repoRequiredAction = 'repo-create-file';
+        else if (requestFiles.upload_file) repoRequiredAction = 'repo-upload-dir-file';
+      }
+
+      if (!repoRequiredAction || !verifyAndConsumeActionToken(req, fields, getSessionId(req), repoRequiredAction)) {
+        sendHtml(res, 'Invalid repository action token', 403);
+        return;
+      }
+
+      
+      // File-specific operations
+      if (isFile) {
+        const fileEntry = files[0];
+        
+        if (action === 'delete_file') {
+          try {
+            await deleteFileFromRepo(dbPath, fileEntry.filename, username, `Deleted: ${path.basename(fileEntry.filename)}`, sqliteCmd);
+            const parentPath = repoPath.includes('/') ? repoPath.slice(0, repoPath.lastIndexOf('/')) : '';
+            const redirectPath = parentPath ? `/${repoRoot}/${parentPath}` : `/${repoRoot}`;
+            res.writeHead(302, { Location: redirectPath });
+            res.end();
+            return;
+          } catch {
+            actionMessage = 'Failed to delete file';
+            actionMessageIsError = true;
+          }
+        } else if (action === 'rename_file') {
+          const newName = sanitizePathSegment(fields.new_name || '');
+          if (!newName) {
+            actionMessage = 'New file name is required';
+            actionMessageIsError = true;
+          } else {
+            const parentPath = repoPath.includes('/') ? repoPath.slice(0, repoPath.lastIndexOf('/')) : '';
+            const newPath = parentPath ? `${parentPath}/${newName}` : newName;
+            try {
+              const fileContent = await getFileContent(dbPath, fileEntry.hash, sqliteCmd);
+              await commitFileToRepo(dbPath, newPath, fileContent || Buffer.alloc(0), username, `Renamed: ${path.basename(fileEntry.filename)} -> ${newName}`, sqliteCmd);
+              await deleteFileFromRepo(dbPath, fileEntry.filename, username, `Deleted: ${path.basename(fileEntry.filename)}`, sqliteCmd);
+              const redirectPath = `/${repoRoot}/${newPath}`;
+              res.writeHead(302, { Location: redirectPath });
+              res.end();
+              return;
+            } catch {
+              actionMessage = 'Failed to rename file';
+              actionMessageIsError = true;
+            }
+          }
+        } else if (action === 'save_file') {
+          const newContent = fields.file_content || '';
+          try {
+            await commitFileToRepo(dbPath, fileEntry.filename, newContent, username, `Updated: ${path.basename(fileEntry.filename)}`, sqliteCmd);
+            actionMessage = 'File saved successfully';
+            actionMessageIsError = false;
+          } catch {
+            actionMessage = 'Failed to save file';
+            actionMessageIsError = true;
+          }
+          
+          files = await getLatestFiles(dbPath, repoPath, sqliteCmd);
+          isFile = files.length === 1 && files[0].filename === repoPath && !/(^|\/)\.omidir$/.test(files[0].filename);
+        }
+      } else {
+        // Directory-specific operations
+        if (action === 'delete_file_request') {
+          const targetName = sanitizePathSegment(fields.target || '');
+          if (!targetName) {
+            actionMessage = 'File name is required';
+            actionMessageIsError = true;
+          } else {
+            pendingDeleteTarget = targetName;
+          }
+        } else if (action === 'delete_file_confirm') {
+          const targetName = sanitizePathSegment(fields.target || '');
+          if (!targetName) {
+            actionMessage = 'File name is required';
+            actionMessageIsError = true;
+          } else {
+            const targetPath = repoPath ? `${repoPath}/${targetName}` : targetName;
+            try {
+              const latestFiles = await getLatestFiles(dbPath, repoPath, sqliteCmd);
+              const targetEntry = latestFiles.find(file => file.filename === targetPath && !/(^|\/)\.omidir$/.test(file.filename));
+              if (!targetEntry) {
+                actionMessage = 'File not found';
+                actionMessageIsError = true;
+              } else {
+                await deleteFileFromRepo(dbPath, targetEntry.filename, username, `Deleted: ${path.basename(targetEntry.filename)}`, sqliteCmd);
+                actionMessage = `File '${targetName}' deleted`;
+              }
+            } catch {
+              actionMessage = 'Failed to delete file';
+              actionMessageIsError = true;
+            }
+          }
+        } else if (action === 'rename_file') {
+          const targetName = sanitizePathSegment(fields.target || '');
+          const newName = sanitizePathSegment(fields.new_name || '');
+          if (!targetName || !newName) {
+            actionMessage = 'File name and new name are required';
+            actionMessageIsError = true;
+          } else {
+            const targetPath = repoPath ? `${repoPath}/${targetName}` : targetName;
+            const newPath = repoPath ? `${repoPath}/${newName}` : newName;
+            try {
+              const latestFiles = await getLatestFiles(dbPath, repoPath, sqliteCmd);
+              const targetEntry = latestFiles.find(file => file.filename === targetPath && !/(^|\/)\.omidir$/.test(file.filename));
+              if (!targetEntry) {
+                actionMessage = 'File not found';
+                actionMessageIsError = true;
+              } else {
+                const fileContent = await getFileContent(dbPath, targetEntry.hash, sqliteCmd);
+                await commitFileToRepo(dbPath, newPath, fileContent || Buffer.alloc(0), username, `Renamed: ${path.basename(targetEntry.filename)} -> ${newName}`, sqliteCmd);
+                await deleteFileFromRepo(dbPath, targetEntry.filename, username, `Deleted: ${path.basename(targetEntry.filename)}`, sqliteCmd);
+                actionMessage = `File '${targetName}' renamed to '${newName}'`;
+              }
+            } catch {
+              actionMessage = 'Failed to rename file';
+              actionMessageIsError = true;
+            }
+          }
+        } else if (action === 'create_dir') {
+          const dirName = sanitizePathSegment(fields.dir_name || '');
+          if (!dirName) {
+            actionMessage = 'Directory name is required';
+            actionMessageIsError = true;
+          } else {
+            const dirPath = repoPath ? `${repoPath}/${dirName}` : dirName;
+            const markerPath = `${dirPath}/.omidir`;
+            try {
+              await commitFileToRepo(dbPath, markerPath, '', username, `Create directory: ${dirName}`, sqliteCmd);
+              actionMessage = `Directory '${dirName}' created`;
+            } catch {
+              actionMessage = 'Failed to create directory';
+              actionMessageIsError = true;
+            }
+          }
+        } else if (action === 'create_file') {
+          const fileName = sanitizePathSegment(fields.file_name || '');
+          const content = fields.file_content || '';
+          if (!fileName) {
+            actionMessage = 'File name is required';
+            actionMessageIsError = true;
+          } else {
+            const fullPath = repoPath ? `${repoPath}/${fileName}` : fileName;
+            try {
+              await commitFileToRepo(dbPath, fullPath, content, username, `Created file: ${fileName}`, sqliteCmd);
+              actionMessage = `File '${fileName}' created`;
+            } catch {
+              actionMessage = 'Failed to create file';
+              actionMessageIsError = true;
+            }
+          }
+        } else if (requestFiles.upload_file) {
+          const uploadFile = requestFiles.upload_file;
+          const fileName = sanitizePathSegment(uploadFile.filename || '');
+          if (!fileName || !uploadFile.data) {
+            actionMessage = 'No file selected';
+            actionMessageIsError = true;
+          } else {
+            const fullPath = repoPath ? `${repoPath}/${fileName}` : fileName;
+            try {
+              await commitFileToRepo(dbPath, fullPath, uploadFile.data, username, `Uploaded: ${fileName}`, sqliteCmd);
+              actionMessage = `File '${fileName}' uploaded successfully`;
+            } catch {
+              actionMessage = 'Failed to upload file';
+              actionMessageIsError = true;
+            }
+          }
+        }
+      }
+    }
+
+    if (isFile) {
+      const fileEntry = files[0];
+      const fileContent = await getFileContent(dbPath, fileEntry.hash, sqliteCmd);
+      const fileName = path.basename(fileEntry.filename);
+
+      if (query.download === '1') {
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Disposition': `attachment; filename="${fileName}"`,
+          'Content-Length': fileContent ? fileContent.length : 0
+        });
+        res.end(fileContent || Buffer.alloc(0));
+        return;
+      }
+
+      const isText = fileContent && isTextFile(fileContent);
+      const displayContent = isText ? fileContent.toString('utf8') : '';
+      const inEditMode = query.edit === '1' && isText && !isHistoricView;
+      const showDeleteConfirm = query.delete === '1' && username && !isHistoricView;
+      const actionMessageHtml = actionMessage
+        ? `<p><font color="${actionMessageIsError ? 'red' : 'green'}"><strong>${escapeHtml(actionMessage)}</strong></font></p>`
+        : '';
+      const fileActions = (username && !isHistoricView) ? `
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+      <div>
+        <form method="GET" style="display:inline">
+        <input type="submit" formaction="${appendCommit('?download=1')}" value="${t('download', translations)}">
+        </form>
+        ${isText ? `<form method="GET" style="display:inline">
+        <input type="hidden" name="edit" value="1">
+        ${isHistoricView ? `<input type="hidden" name="commit" value="${selectedCommitId}">` : ''}
+        <input type="submit" value="${t('edit', translations)}">
+        </form>` : ''}
+        <form method="POST" style="display:inline">
+        ${buildAuthHiddenFields(req, 'repo-rename-file')}
+        <input type="hidden" name="action" value="rename_file">
+        <input type="text" name="new_name" size="20" placeholder="${t('new-name', translations)}">
+        <input type="submit" value="${t('rename', translations)}">
+        </form>
+      </div>
+      <div>
+        <form method="GET" style="display:inline">
+        <input type="hidden" name="delete" value="1">
+        ${isHistoricView ? `<input type="hidden" name="commit" value="${selectedCommitId}">` : ''}
+        <input type="submit" value="${t('delete', translations)}">
+        </form>
+      </div>
+    </div>
+    ` : '';
+      
+      // Determine content display based on file type and edit mode
+      let contentHtml = '';
+      if (inEditMode) {
+        // Edit mode - show textarea with markdown reference
+        const markdownRef = `<p><b>Markdown Syntax Reference:</b></p>
+<table border="1" cellpadding="5" style="font-size: 12px; margin-bottom: 20px;">
+<tr><th>Syntax</th><th>Result</th></tr>
+<tr><td># Heading 1</td><td>Large heading</td></tr>
+<tr><td>## Heading 2</td><td>Medium heading</td></tr>
+<tr><td>### Heading 3</td><td>Small heading</td></tr>
+<tr><td>**bold text**</td><td><b>bold text</b></td></tr>
+<tr><td>*italic text*</td><td><i>italic text</i></td></tr>
+<tr><td>\`code\`</td><td><code>code</code></td></tr>
+<tr><td>\`\`\`<br>code block<br>\`\`\`</td><td>Multi-line code</td></tr>
+<tr><td>[link text](url)</td><td>Clickable link</td></tr>
+<tr><td>![alt text](image.jpg)</td><td>Image from repo or URL</td></tr>
+<tr><td>![alt](https://example.com/img.jpg)</td><td>Image from URL</td></tr>
+</table>`;
+        contentHtml = `${markdownRef}<form method="POST">
+      ${buildAuthHiddenFields(req, 'repo-save-file')}
+<textarea name="file_content" rows="20" cols="80" style="width: 100%; max-width: 800px; font-family: monospace; box-sizing: border-box;">${escapeHtml(displayContent)}</textarea><br><br>
+<input type="hidden" name="action" value="save_file">
+<input type="submit" value="Save">
+<input type="submit" formaction="?" formmethod="GET" value="Cancel">
+</form>`;
+      } else if (!isText) {
+        // Check if it's an image file
+        if (isImageFile(fileEntry.filename)) {
+          // Display image file
+          const base64Data = fileContent.toString('base64');
+          const ext = path.extname(fileEntry.filename).toLowerCase().slice(1);
+          const mimeTypes = {
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'png': 'image/png',
+            'gif': 'image/gif',
+            'bmp': 'image/bmp',
+            'webp': 'image/webp',
+            'ico': 'image/x-icon',
+            'tiff': 'image/tiff',
+            'tif': 'image/tiff'
+          };
+          const mimeType = mimeTypes[ext] || 'image/jpeg';
+          contentHtml = `<p><strong>${t('file', translations)} (${fileContent.length} bytes)</strong></p>
+<p>Hash: ${escapeHtml(fileEntry.hash)}</p>
+<hr>
+<p><b>Image File</b></p>
+<div style="border: 1px solid #ccc; padding: 10px; background-color: white; display: inline-block;">
+<img src="data:${mimeType};base64,${base64Data}" alt="${escapeHtml(path.basename(fileEntry.filename))}" style="max-width: 100%; height: auto; max-height: 500px;">
+</div>
+<p><small>Image file size: ${Number(fileContent.length).toLocaleString()} bytes</small></p>`;
+        } else {
+          contentHtml = `<p><strong>${t('file', translations)} (${fileContent ? fileContent.length : 0} bytes)</strong></p>
+<p>Hash: ${escapeHtml(fileEntry.hash)}</p>`;
+        }
+      } else if (isMarkdownFile(fileEntry.filename)) {
+        // Extract image paths from markdown and load them from database
+        const imageMap = {};
+        const imagePattern = /!\[.*?\]\((.*?)\)/g;
+        let match;
+        
+        // Get all files in the repo to find images
+        let allRepoFiles = [];
+        try {
+          allRepoFiles = isHistoricView
+            ? await getFilesForCommit(dbPath, '', selectedCommitId, sqliteCmd)
+            : await getLatestFiles(dbPath, '', sqliteCmd);
+        } catch (e) {
+          // Fallback to current files list if error
+          allRepoFiles = files;
+        }
+        
+        while ((match = imagePattern.exec(displayContent)) !== null) {
+          const imgPath = match[1];
+          // Skip external URLs
+          if (imgPath.startsWith('http://') || imgPath.startsWith('https://') || imgPath.startsWith('/')) {
+            continue;
+          }
+          
+          // Resolve relative path
+          const fileDir = fileEntry.filename.includes('/') ? fileEntry.filename.slice(0, fileEntry.filename.lastIndexOf('/')) : '';
+          const resolvedPath = fileDir ? `${fileDir}/${imgPath}` : imgPath;
+          
+          // Find image in all repo files and load its content
+          const imgEntry = allRepoFiles.find(f => f.filename === resolvedPath);
+          if (imgEntry) {
+            try {
+              const imgContent = await getFileContent(dbPath, imgEntry.hash, sqliteCmd);
+              if (imgContent) {
+                const ext = path.extname(resolvedPath).toLowerCase().slice(1);
+                const mimeTypes = {
+                  'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+                  'gif': 'image/gif', 'bmp': 'image/bmp', 'webp': 'image/webp',
+                  'ico': 'image/x-icon', 'tiff': 'image/tiff', 'tif': 'image/tiff'
+                };
+                const mimeType = mimeTypes[ext] || 'image/jpeg';
+                const base64Data = imgContent.toString('base64');
+                imageMap[imgPath] = `data:${mimeType};base64,${base64Data}`;
+              }
+            } catch (e) {
+              // Image not found, keep original path
+            }
+          }
+        }
+        
+        // Render markdown with embedded images
+        contentHtml = `<div style="font-family: Arial, sans-serif; line-height: 1.6;">
+${markdownToHtml(displayContent, fileEntry.filename, repoRoot, imageMap)}
+</div>`;
+      } else {
+        // Show raw text in pre tag
+        contentHtml = `<pre>${escapeHtml(displayContent)}</pre>`;
+      }
+      
+      const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>${escapeHtml(fileEntry.filename)} - ${escapeHtml(repoName)}</title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small></small></td></tr>
+</table>
+${buildPrimaryNav(req, translations, username, [`<a href="${escapeHtml(appendCommit('/' + repoRoot))}">${t('repository-root', translations)}</a>`, `<a href="${escapeHtml(appendCommit('/?log=' + encodeURIComponent(repoName)))}">${t('log', translations)}</a>`, `${isHistoricView ? `<a href="/${escapeHtml(repoRoot)}">${t('latest', translations)}</a>` : ''}`], { showRestrictedWhenLoggedOut: false })}
+${isHistoricView ? `<p><font color="blue"><strong>${t('viewing-commit', translations)} ${selectedCommitId}</strong></font></p>` : ''}
+<h2>${t('file', translations)}: ${escapeHtml(fileEntry.filename)}</h2>
+<p><a href="${appendCommit('?download=1')}">${t('download', translations)}</a></p>
+${showDeleteConfirm ? `<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;">
+<p><font color="red"><strong>⚠️ ${t('confirm-delete', translations)}</strong></font></p>
+<p>${t('delete-file-question', translations)} <strong>${escapeHtml(fileEntry.filename)}</strong>?</p>
+<p>${t('delete-file-warning', translations)}</p>
+<form method="POST" style="display:inline">
+${buildAuthHiddenFields(req, 'repo-delete-file')}
+<input type="hidden" name="action" value="delete_file">
+<input type="submit" value="${t('confirm-delete', translations)}">
+</form>
+<form method="GET" style="display:inline"><input type="submit" value="${t('cancel', translations)}"></form>
+</div>` : ''}
+${fileActions}
+<hr>
+${actionMessageHtml}
+${contentHtml}
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>`;
+      sendHtml(res, html);
+      return;
+    }
+
+    const organized = organizeFiles(files, repoPath);
+    const directoryTitle = repoPath ? escapeHtml(repoPath) : '';
+    const dirRows = organized.dirs.map(dir => `<tr>
+  <td><a href="${escapeHtml(appendCommit('/' + repoRoot + '/' + dir.path))}">${escapeHtml(dir.name)}/</a></td>
+  <td>-</td>
+  <td>${escapeHtml(dir.datetime)}</td>
+  <td>-</td>
+  </tr>`).join('\n');
+    const fileRows = organized.files.map(file => {
+      const isText = isTextFile(Buffer.from(file.data || '', 'base64'));
+      const fileSize = Number(file.size).toLocaleString();
+      const fileDateTime = escapeHtml(file.datetime);
+      const fileBasename = escapeHtml(path.basename(file.filename));
+      const filePathEscaped = escapeHtml(file.filename);
+      const fileLinkPath = appendCommit(`/${repoRoot}/${file.filename}`);
+      const fileTypeLabel = getFileTypeLabel(file.filename);
+      
+      let actionsHtml = '-';
+      if (username && !isHistoricView) {
+        let editLink = '';
+        if (isText) {
+          editLink = `<form method="GET" action="${fileLinkPath}" style="display:inline"><input type="hidden" name="edit" value="1"><input type="submit" value="${t('edit', translations)}"></form>`;
+        }
+        const deleteForm = `<form method="POST" style="display:inline">${buildAuthHiddenFields(req, 'repo-delete-dir-file-request')}<input type="hidden" name="action" value="delete_file_request"><input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}"><input type="submit" value="${t('delete', translations)}"></form>`;
+        const renameForm = `<form method="POST" style="display:inline">${buildAuthHiddenFields(req, 'repo-rename-dir-file')}<input type="hidden" name="action" value="rename_file"><input type="hidden" name="target" value="${escapeHtml(path.basename(file.filename))}"><input type="text" name="new_name" size="12" placeholder="${t('new-name', translations)}"><input type="submit" value="${t('rename', translations)}"></form>`;
+        actionsHtml = `<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;"><div>${editLink}${renameForm}</div><div>${deleteForm}</div></div>`;
+      }
+      
+      return `<tr>
+  <td><a href="${fileLinkPath}">[${escapeHtml(fileTypeLabel)}] ${fileBasename}</a></td>
+  <td>${fileSize}</td>
+  <td>${fileDateTime}</td>
+  <td>${actionsHtml}</td>
+  </tr>`;
+    }).join('\n');
+    const emptyRow = (!organized.dirs.length && !organized.files.length) ? `<tr><td colspan="4">${t('no-files-directory', translations)}</td></tr>` : '';
+
+    const actionMessageHtml = actionMessage
+      ? `<p><font color="${actionMessageIsError ? 'red' : 'green'}"><strong>${escapeHtml(actionMessage)}</strong></font></p>`
+      : '';
+    const deleteConfirmHtml = pendingDeleteTarget
+      ? `<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;">
+<p><font color="red"><strong>⚠️ ${t('confirm-delete', translations)}</strong></font></p>
+<p>${t('delete-file-question', translations)} <strong>${escapeHtml(pendingDeleteTarget)}</strong>?</p>
+<p>${t('delete-file-warning', translations)}</p>
+<form method="POST" style="display:inline">
+${buildAuthHiddenFields(req, 'repo-delete-dir-file-confirm')}
+<input type="hidden" name="action" value="delete_file_confirm">
+<input type="hidden" name="target" value="${escapeHtml(pendingDeleteTarget)}">
+<input type="submit" value="${t('confirm-delete', translations)}">
+</form>
+<form method="GET" style="display:inline"><input type="submit" value="${t('cancel', translations)}"></form>
+</div>`
+      : '';
+
+    const actionForms = (username && !isHistoricView) ? `
+<p><b>${t('create-directory', translations)}</b></p>
+<form method="POST">
+${buildAuthHiddenFields(req, 'repo-create-dir')}
+<input type="text" name="dir_name" size="30" placeholder="new-folder">
+<input type="hidden" name="action" value="create_dir">
+<input type="submit" value="${t('create-directory', translations)}">
+</form>
+<p><b>${t('create-text-file', translations)}</b></p>
+<form method="POST">
+${buildAuthHiddenFields(req, 'repo-create-file')}
+<input type="text" name="file_name" size="30" placeholder="notes.txt">
+<br>
+<textarea name="file_content" rows="6" cols="60" placeholder="${t('write-file-contents', translations)}"></textarea>
+<br>
+<input type="hidden" name="action" value="create_file">
+<input type="submit" value="${t('create-file', translations)}">
+</form>
+<p><b>${t('upload-file-directory', translations)}</b></p>
+<form method="POST" enctype="multipart/form-data">
+${buildAuthHiddenFields(req, 'repo-upload-dir-file')}
+<input type="file" name="upload_file" required>
+<input type="submit" value="${t('upload', translations)}">
+</form>
+` : `<p><small><a href="/sign-in">${t('login', translations)}</a> ${t('login-to-upload-files', translations)}</small></p>`;
+
+    const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>${directoryTitle || t('root', translations)} - ${escapeHtml(repoName)}</title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>${escapeHtml(repoName)}</h1></td><td align="right"><small></small></td></tr>
+</table>
+${buildPrimaryNav(req, translations, username, [`<a href="${escapeHtml(appendCommit('/?log=' + encodeURIComponent(repoName)))}">${t('log', translations)}</a>`, `${isHistoricView ? `<a href="/${escapeHtml(repoRoot)}">${t('latest', translations)}</a>` : ''}`], { showRestrictedWhenLoggedOut: false })}
+${isHistoricView ? `<p><font color="blue"><strong>${t('viewing-commit', translations)} ${selectedCommitId}</strong></font></p>` : ''}
+<h2>${t('directory', translations)}: /${directoryTitle}</h2>
+<hr>
+<table border="1" width="100%" cellpadding="5" cellspacing="0">
+<tr bgcolor="#333333">
+<th><font color="white">${t('name', translations)}</font></th>
+<th><font color="white">${t('size', translations)}</font></th>
+<th><font color="white">${t('last-modified', translations)}</font></th>
+<th><font color="white">${t('actions', translations)}</font></th>
+</tr>
+${repoPath ? `<tr>
+  <td><a href="${escapeHtml(appendCommit('/' + repoRoot + (repoPath.includes('/') ? '/' + repoPath.split('/').slice(0, -1).join('/') : '')))}">..</a></td>
+  <td>-</td>
+  <td>-</td>
+  <td>-</td>
+  </tr>` : ''}
+${dirRows}
+${fileRows}
+${emptyRow}
+</table>
+<hr>
+${actionMessageHtml}
+${deleteConfirmHtml}
+${actionForms}
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>`;
+    sendHtml(res, html);
+    return;
+  }
+
+  // Default: Show repository list
+  const repos = getReposList();
+  username = getUsername(req);
+
+  const reposTable = repos.length > 0
+    ? repos.map(repo => `<tr>
+<td><form method="POST" style="display:inline">
+${buildAuthHiddenFields(req, `home-open-repo-${repo.name.replace(/\.omi$/, '')}`)}
+<input type="hidden" name="action" value="open_repo">
+<input type="hidden" name="repo_name" value="${escapeHtml(repo.name)}">
+<input type="submit" value="${escapeHtml(repo.name)}">
+</form></td>
+<td>${repo.size.toLocaleString()}</td>
+<td>${new Date(repo.modified * 1000).toISOString().replace('T', ' ').slice(0, 19)}</td>
+<td><a href="?download=${encodeURIComponent(repo.name)}">${t('download', translations)}</a> <a href="/?log=${encodeURIComponent(repo.name)}">${t('log', translations)}</a>${username ? ` <form method="POST" style="display:inline">${buildAuthHiddenFields(req, `home-delete-repo-${repo.name.replace(/\.omi$/, '')}`)}<input type="hidden" name="action" value="delete_repo_request"><input type="hidden" name="repo_name" value="${escapeHtml(repo.name)}"><input type="submit" value="${t('delete', translations)}"></form>` : ''}</td>
+</tr>`).join('\n')
+    : `<tr><td colspan="4">${t('no-repositories', translations)}</td></tr>`;
+
+  const pendingDeleteHtml = pendingDeleteRepo
+    ? `<div style="border: 2px solid #ff0000; padding: 10px; background-color: #ffcccc; margin-bottom: 10px;"><p><font color="red"><strong>⚠️ ${t('confirm-delete', translations)}</strong></font></p><p>${t('delete-repository-question', translations)} <strong>${escapeHtml(pendingDeleteRepo)}</strong>?</p><form method="POST" style="display:inline">${buildAuthHiddenFields(req, `home-delete-repo-confirm-${pendingDeleteRepo.replace(/\.omi$/, '')}`)}<input type="hidden" name="action" value="delete_repo_confirm"><input type="hidden" name="repo_name" value="${escapeHtml(pendingDeleteRepo)}"><input type="submit" value="${t('confirm-delete', translations)}"></form> <form method="GET" style="display:inline"><input type="submit" value="${t('cancel', translations)}"></form></div>`
+    : '';
+
+  const html = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>Omi Server - ${t('repositories', translations)}</title>
+</head>
+<body bgcolor="#f0f0f0">
+<table width="100%" border="0" cellpadding="5">
+<tr><td><h1>Omi Server - ${t('repositories', translations)}</h1></td><td align="right"><small></small></td></tr>
+</table>
+${username ? buildPrimaryNav(req, translations, username) : ''}
+<table border="1" width="100%" cellpadding="5" cellspacing="0">
+<tr bgcolor="#e8f4f8">
+<td colspan="4">
+<strong>${t('repositories', translations)}:</strong> ${repos.length}
+</td>
+</tr>
+</table>
+${repoMessage ? `<p><font color="${repoMessageIsError ? 'red' : 'green'}"><strong>${repoMessage.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong></font></p>` : ''}
+${pendingDeleteHtml}
+<h2>${t('available-repositories', translations)}</h2>
+<table border="1" width="100%" cellpadding="5" cellspacing="0">
+<tr bgcolor="#333333">
+<th><font color="white">${t('repository', translations)}</font></th>
+<th><font color="white">${t('size-bytes', translations)}</font></th>
+<th><font color="white">${t('last-modified', translations)}</font></th>
+<th><font color="white">${t('actions', translations)}</font></th>
+</tr>
+${reposTable}
+</table>
+${username ? `<h2>${t('create-repository', translations)}</h2>
+<form method="POST">
+${buildAuthHiddenFields(req, 'home-create-repo')}
+<table border="0" cellpadding="5">
+<tr><td>${t('repository-name', translations)}:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
+<tr><td colspan="2"><input type="hidden" name="action" value="create_repo"><input type="submit" value="${t('create-repository', translations)}"></td></tr>
+</table>
+</form>
+<h2>${t('upload-repository', translations)}</h2>
+<form method="POST" enctype="multipart/form-data">
+${buildAuthHiddenFields(req, 'home-upload-repo')}
+<table border="0" cellpadding="5">
+<tr><td>${t('repository-name', translations)}:</td><td><input type="text" name="repo_name" size="30"> (e.g., wekan.omi)</td></tr>
+<tr><td>${t('file', translations)}:</td><td><input type="file" name="repo_file"></td></tr>
+<tr><td colspan="2"><input type="submit" name="action" value="${t('upload', translations)}"></td></tr>
+</table>
+</form>` : `<p><a href="/sign-in">${t('sign-in-to-upload', translations)}</a></p>`}
+<h2>${t('api-endpoints', translations)}</h2>
+<table border="1" width="100%" cellpadding="5" cellspacing="0">
+<tr><td><strong>${t('list-repos-json', translations)}:</strong></td><td>GET /?format=json</td></tr>
+<tr><td><strong>${t('download-repo', translations)}:</strong></td><td>GET /?download=wekan.omi</td></tr>
+</table>
+<hr>
+<p><small>Omi Server</small></p>
+</body>
+</html>`;
+
+  sendHtml(res, html);
+}
+
+// Create HTTP server
+const PORT = process.env.PORT || 8080;
+const server = createServer(handleRequest);
+
+server.listen(PORT, () => {
+  console.log(`Omi Server running on http://localhost:${PORT}/`);
+  console.log(`Compatible with Node.js, Bun, and Deno`);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\nShutting down gracefully...');
+  server.close(() => {
+    process.exit(0);
+  });
+});
