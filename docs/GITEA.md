@@ -548,8 +548,8 @@ folder on its disk, with no Gitea, no Go, no Python and no git:
 ### Building it
 
 ```
-OMI_BUILD_ONLY=1 ./freepascalserver.sh     # caches and checks build/sqlite3.c
-./releases/amiga/build.sh                  # build/amiga/omi68k
+./build.sh build                          # caches and checks build/sqlite3.c
+./build.sh build-amiga                    # build/amiga/omi68k
 python3 -I tests/amiga_test.py             # runs it in vamos beside the Linux build
 ```
 

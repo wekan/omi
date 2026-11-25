@@ -132,7 +132,8 @@ omi push
 ```
 
 ### Web Interface
-1. Build and start the maintained server with `./freepascalserver.sh`
+1. Build the maintained server with `./build.sh build`, and start it with `./build.sh run`
+   (`./build.sh` alone shows a menu of every step)
 2. Configure `settings.ini` and `users.ini`
 3. Visit the port printed by the server (normally `http://localhost:3001/`)
 

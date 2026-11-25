@@ -86,7 +86,7 @@ def main():
     if os.environ.get("OMI_AMIGA_BUILD") != "0":
         subprocess.run([os.path.join(REPO, "releases", "amiga", "build.sh")], check=True)
     if os.environ.get("OMI_SKIP_BUILD") != "1":
-        subprocess.run(["./freepascalserver.sh"], cwd=REPO, env=dict(os.environ, OMI_BUILD_ONLY="1"), check=True)
+        subprocess.run(["./build.sh", "build"], cwd=REPO, check=True)
     r = subprocess.run(["file", BINARY], capture_output=True, text=True)
     check("AmigaOS" in r.stdout, f"build/amiga/omi68k is an AmigaOS executable {r.stdout.strip()}")
     work = tempfile.mkdtemp(prefix="omi-amiga-test.", dir=os.environ.get("TMPDIR") or tempfile.gettempdir())

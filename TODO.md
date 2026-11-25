@@ -26,6 +26,15 @@ file and describe it in the docs and the commit.
   AmigaOS or AROS) the web server, an import over `http://`, Gitea's real WAL
   database, files near 2 GiB, `-dOMI_THREADS`, and amiga-git or am-git with
   `GIT_FETCH=program` are still to be tried.
+- Two checks of the live import in `tests/gitea_test.py` fail, and failed
+  already before 2026-11-25 (the same with the code before that day's change):
+  "the pull requests are read from their list, not one request each" (with
+  `OMI_GITHUB_PULLS_ONE_BY_ONE_MAX=0`, `/pulls/2` is still asked) and "git's
+  smart HTTP: info/refs, then upload-pack" (git is fetched twice in that
+  import). Both are in the import that waits out a secondary rate limit, so it
+  may be that the wait starts the repository over. The live import had not
+  run here before, because the test Gitea was missing; `./build.sh test-gitea`
+  makes it now.
 
 ## Not done
 

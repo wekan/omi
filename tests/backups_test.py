@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end test of Omi's Backups pages (public/server.pas, public/omibackup.pas).
 
-  python3 -I tests/backups_test.py            builds with ./freepascalserver.sh first
+  python3 -I tests/backups_test.py            builds with ./build.sh build first
   OMI_SKIP_BUILD=1 python3 -I tests/backups_test.py   uses the public/server already built
 
 It makes a scratch Omi (public/server, i18n, settings/settings.ini with BACKUPS_DIR,
@@ -127,8 +127,7 @@ def sha(data):
 def main():
     tmp_root = os.environ.get("TMPDIR") or tempfile.gettempdir()
     if os.environ.get("OMI_SKIP_BUILD") != "1":
-        env = dict(os.environ, OMI_BUILD_ONLY="1")
-        subprocess.run(["./freepascalserver.sh"], cwd=REPO, env=env, check=True)
+        subprocess.run(["./build.sh", "build"], cwd=REPO, check=True)
     work = tempfile.mkdtemp(prefix="omi-backups-test.", dir=tmp_root)
     server = None
     try:

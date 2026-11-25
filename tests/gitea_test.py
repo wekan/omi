@@ -3,7 +3,7 @@
 the sizes, mismatches and orphans (public/omigitea.pas, `server gitea ...`), the
 Gitea pages (public/server.pas) and their refusals.
 
-  python3 -I tests/gitea_test.py              builds with ./freepascalserver.sh first
+  python3 -I tests/gitea_test.py              builds with ./build.sh build first
   OMI_SKIP_BUILD=1 python3 -I tests/gitea_test.py
 
 It writes a small Gitea folder with tests/make_gitea_fixture.py (Gitea's schema
@@ -2026,7 +2026,7 @@ def test_delete_repo_live(work):
 def main():
     tmp_root = os.environ.get("TMPDIR") or tempfile.gettempdir()
     if os.environ.get("OMI_SKIP_BUILD") != "1":
-        subprocess.run(["./freepascalserver.sh"], cwd=REPO, env=dict(os.environ, OMI_BUILD_ONLY="1"), check=True)
+        subprocess.run(["./build.sh", "build"], cwd=REPO, check=True)
     work = tempfile.mkdtemp(prefix="omi-gitea-test.", dir=tmp_root)
     try:
         test_translations()

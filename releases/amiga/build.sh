@@ -13,7 +13,7 @@
 #                       bebbo's m68k-amigaos GCC with libnix, for SQLite
 #   sqlite-port/source/ gfopensqlite (its AmigaDOS patches and compat/)
 #
-# and build/sqlite3.c, the SQLite amalgamation ./freepascalserver.sh caches
+# and build/sqlite3.c, the SQLite amalgamation ./build.sh build caches
 # and checks.
 #
 # libnix numbers its files from 0, so SQLite must not keep descriptors 0-2
@@ -76,7 +76,7 @@ if [ ! -f "$out/sqlite3.o" ] || [ "$repo/build/sqlite3.c" -nt "$out/sqlite3.o" ]
 	"$cc" $cflags -I"$out" -c "$out/sqlite3.c" -o "$out/sqlite3.o"
 fi
 # sqlite3.h, for gfopensqlite's compat/sqlite_amiga.c, from the archive
-# ./freepascalserver.sh checked.
+# ./build.sh build checked.
 unzip -p "$repo/build/sqlite-amalgamation-3530400.zip" sqlite-amalgamation-3530400/sqlite3.h > "$out/sqlite3.h"
 # shellcheck disable=SC2086
 "$cc" $cflags -I"$out" -c "$gfo/compat/sqlite_amiga.c" -o "$out/sqlite_amiga.o"

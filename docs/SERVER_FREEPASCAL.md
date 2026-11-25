@@ -89,26 +89,36 @@ fpc -h | head     # Show help
 ### Compile FreePascal Server
 
 ```bash
-./freepascalserver.sh
+./build.sh build      # build public/server
+./build.sh run        # start it (building it first only when it is missing)
+./build.sh            # a menu of every step: build, run, the Amiga build, tests, ...
 ```
 
-On the first run, the script downloads the official SQLite amalgamation into
-`build/sqlite3.c`, verifies it, compiles SQLite and Omi under `build/`, copies
-the final executable to `public/server`, and starts it. Later builds reuse the
+Building and running are separate steps: building never starts the server, and
+running never rebuilds it. On the first build, `build.sh` downloads the official
+SQLite amalgamation into `build/sqlite3.c`, verifies it, compiles SQLite and Omi
+under `build/`, and copies the final executable to `public/server`. Later builds reuse the
 cached amalgamation. They also reuse `build/sqlite3.o` when it is newer than
 `sqlite3.c`, so SQLite is only linked into Omi instead of being compiled again.
 
-Without `fpc` on `PATH`, the script also finds an fpcupdeluxe compiler at
+Without `fpc` on `PATH`, `build.sh` also finds an fpcupdeluxe compiler at
 `../../bin/fpcupdeluxe/fpc` (that is `.tools/bin/fpcupdeluxe` beside a WeKan
 checkout) and passes its unit directories itself.
 
-To build without starting the server:
-
-```bash
-OMI_BUILD_ONLY=1 ./freepascalserver.sh
-```
+The other servers and steps are in the same menu: `./build.sh run-node` (the
+Node.js server), `./build.sh run-php` (PHP's development server on
+`localhost:8000`, `OMI_PHP_LISTEN` to change it), `./build.sh build-amiga`, and
+`./build.sh translations-pull` / `translations-push`.
 
 ### Tests
+
+```bash
+./build.sh test                 # build once, then every test below
+./build.sh test gitea backups   # or only some of them
+./build.sh test-gitea           # create the disposable test Gitea the live tests copy
+```
+
+Each test can also be run on its own:
 
 ```bash
 TMPDIR=/some/scratch python3 -I tests/backups_test.py
@@ -124,7 +134,11 @@ TMPDIR=/some/scratch python3 -I tests/gitea_test.py
 
 This tests reading a Gitea folder: app.ini, the sizes, mismatches and orphans of
 a fixture folder, the Gitea pages and their refusals, and the real database
-read-only when it is there. See [GITEA.md](GITEA.md).
+read-only when it is there. See [GITEA.md](GITEA.md). Its live part - an import
+from a fake GitHub into a copy of a real Gitea - runs when the test Gitea is
+there: `./build.sh test-gitea` makes it in WeKan's `.tools/tmp/gitea-backup-test`
+with the Gitea program at `.tools/w/gitea/gitea` (`OMI_TEST_GITEA_BINARY`,
+`OMI_TEST_GITEA_DIR`). The tests only ever copy it.
 
 ### Build Output
 
