@@ -6494,6 +6494,7 @@ begin
     Exit;
   end;
   GwStopFile := ChangeFileExt(LogPath, '.stop');
+  GwReleaseAssetsKeep := SettingText('RELEASE_ASSETS_KEEP');
   try
     try
       if Kind = 'delete' then
@@ -6763,6 +6764,7 @@ begin
   AppPath := SettingPath('GITEA_BINARY', '');
   GitProgram := GetGitSetting;
   FetchMode := SettingText('GIT_FETCH');
+  GwReleaseAssetsKeep := SettingText('RELEASE_ASSETS_KEEP');
   Repos := '';
   I := 3;
   while I <= ParamCount do
@@ -6782,6 +6784,7 @@ begin
     else if Opt('--doer') then Doer := Value
     else if Opt('--gitea-binary') then AppPath := Value
     else if Opt('--git-fetch') then FetchMode := Value
+    else if Opt('--release-assets-keep') then GwReleaseAssetsKeep := Value
     else if Opt('--git') then GitProgram := Value
     else if Opt('--confirm') then Confirm := Value
     else if Opt('--pid-file') then PidFile := Value

@@ -1084,6 +1084,10 @@ type
     // already in it that Omi did not write are adopted (AdoptedIssue,
     // AdoptedComment, AdoptedAsset) - kept as Gitea has them, not copied again.
     AdoptRepoId: string;
+    // The tags of the releases whose files are kept (RELEASE_ASSETS_KEEP);
+    // nil keeps every release's files.
+    KeptTags: TStringList;
+    procedure DecideKeptTags(Releases: TJSONArray);
     function AdoptedIssue(Db: TGwDb; Number: Int64): string;
     function AdoptedComment(Db: TGwDb; Number: Int64; const CreatedAt: string): string;
     function AdoptedAsset(Db: TGwDb; const Tag, Name: string): string;
@@ -1124,6 +1128,7 @@ end;
 
 destructor TGwImporter.Destroy;
 begin
+  KeptTags.Free;
   Stats.Free;
   inherited Destroy;
 end;
@@ -1581,6 +1586,9 @@ begin
         // Already in this Gitea under its release and name: not fetched again.
         if (Have = '') and (AdoptedAsset(Db, JStr(Rel, 'tag_name'), JStr(A, 'name')) <> '') then
           Continue;
+        // An older release than RELEASE_ASSETS_KEEP keeps: no files.
+        if (KeptTags <> nil) and (KeptTags.IndexOf(JStr(Rel, 'tag_name')) < 0) then
+          Continue;
         F := Default(TGwFile);
         if not Fetch_(JStr(A, 'url'), 'application/octet-stream', ifthen_(JStr(A, 'name') <> '', JStr(A, 'name'),
           'file'), F) then
@@ -1844,6 +1852,37 @@ end;
 // at the first page whose oldest release was made before it: ten years of
 // releases are not read again on every import. A release older than Since is
 // in Gitea already (imported, or adopted by its tag).
+// RELEASE_ASSETS_KEEP, as gitea-patches' mirrors read release_assets_keep:
+// 'newest' or empty is the newest release, a number that many of the newest,
+// 'all' every one. WeKan's releases are dozens of 300 MB bundles each, ten
+// years of them: an import that fetched the files of every release missing
+// them in Gitea - which keeps only the newest - would have filled the disk.
+procedure TGwImporter.DecideKeptTags(Releases: TJSONArray);
+var
+  V: string;
+  N, I: Integer;
+begin
+  FreeAndNil(KeptTags);
+  V := LowerCase(Trim(GwReleaseAssetsKeep));
+  if V = 'all' then
+    Exit;
+  N := StrToIntDef(V, 1);
+  if N < 1 then
+    N := 1;
+  KeptTags := TStringList.Create;
+  KeptTags.CaseSensitive := True;
+  // GitHub lists the newest first; a draft is not a release yet.
+  for I := 0 to Releases.Count - 1 do
+  begin
+    if KeptTags.Count >= N then
+      Break;
+    if not JBool(Releases.Items[I], 'draft') then
+      KeptTags.Add(JStr(Releases.Items[I], 'tag_name'));
+  end;
+  if Assigned(Say) then
+    Say('  release files kept: ' + ifthen_(KeptTags.Count = 1, KeptTags[0], IntToStr(KeptTags.Count) + ' newest releases'));
+end;
+
 function TGwImporter.FetchReleases(const Full, Since: string): TJSONArray;
 var
   Page, K, N: Integer;
@@ -1999,6 +2038,7 @@ var
   Number: Int64;
   IssueIdx, ReleaseIdx, LinkI, LinkR, LinkC: string;
   Lines, Parts: TStringArray;
+  Rows: TGtRows;
   Repo: TGitRepo;
   CTime64: Int64;
   Subject: string;
@@ -2233,6 +2273,22 @@ begin
         ifthen_(JStr(O, 'updated_at') <> '', JStr(O, 'updated_at'), JStr(O, 'published_at')));
       ReleaseIds.Values[JStr(O, 'id')] := Rid;
     end;
+    // The files of the releases RELEASE_ASSETS_KEEP does not keep go, in this
+    // transaction: their rows now, their files by the journal once nothing
+    // refers to them. Only this repository's releases, only with a kept set.
+    if (KeptTags <> nil) and (KeptTags.Count > 0) then
+    begin
+      Rows := Db.Query('SELECT a.id, a.uuid, r.tag_name FROM attachment a JOIN `release` r ON a.release_id = r.id ' +
+        'WHERE r.repo_id = ?1', [RepoId]);
+      for K := 0 to High(Rows) do
+        if KeptTags.IndexOf(Rows[K][2]) < 0 then
+        begin
+          Db.Exec('DELETE FROM attachment WHERE id = ?1', [Rows[K][0]]);
+          if Rows[K][1] <> '' then
+            AddEntry(OldFiles, GtPath([P.Attachments, Rows[K][1][1], Rows[K][1][2], Rows[K][1]]), 'attachment', Rows[K][1]);
+          Count('release files removed');
+        end;
+    end;
     // Files: release assets and the files linked from bodies.
     for I := 0 to High(Files) do
     begin
@@ -2431,6 +2487,7 @@ begin
   try
     FetchPulls(Full, Issues, Pulls);
     Releases := FetchReleases(Full, Since);
+    DecideKeptTags(Releases);
     try
       Src := PrepareGit(GitDir, Gh.GitUrl(Full, False), False, IsNew);
       // Stop is asked before every GitHub request, and here too: after the

@@ -1479,6 +1479,46 @@ def test_import_live(work):
             check(s == 200 and len(rel.get("assets", [])) == 1, f"the release file once, not twice {len(rel.get('assets', []))}")
         finally:
             g.stop()
+        # --- RELEASE_ASSETS_KEEP: only the newest release's files ---
+        # WeKan's releases are dozens of 300 MB bundles each, ten years of them;
+        # an import fetched the files of every release missing them in Gitea.
+        # 'newest' (the default) keeps the newest release's files and removes
+        # the older ones' from Gitea; 'all' keeps every release's.
+        fake_git = fake_github.git
+        fake_git("tag", "-a", "v1.1", "-m", "Version 1.1", cwd=fake.src)
+        fake_git("push", "-q", fake.bare, "v1.1", cwd=fake.src)
+        fake.files["/api/repos/omigh/proj/releases/assets/902"] = b"v1.1 binary " * 200
+        fake.releases.insert(0, {"id": 952, "tag_name": "v1.1", "name": "Version 1.1", "body": "The second release",
+                                 "draft": False, "prerelease": False, "target_commitish": "main",
+                                 "created_at": "2099-01-03T00:00:00Z", "published_at": "2099-01-03T00:00:00Z",
+                                 "updated_at": "2099-01-03T00:00:00Z", "author": fake.user("octocat", 583231),
+                                 "assets": [{"id": 902, "name": "app-linux-1.1.bin", "size": 2400, "download_count": 1,
+                                             "created_at": "2099-01-03T00:00:00Z", "updated_at": "2099-01-03T00:00:00Z",
+                                             "url": f"{fake.api}/repos/omigh/proj/releases/assets/902",
+                                             "browser_download_url": f"{fake.base}/omigh/proj/releases/download/v1.1/app-linux-1.1.bin"}]})
+        fake.log.clear()
+        rc, out, err = imp()
+        st = _json.loads(out).get("stats", {}) if rc == 0 else {}
+        check(rc == 0 and st.get("releases") == 1 and st.get("release files removed") == 1 and st.get("files downloaded") == 1,
+              f"RELEASE_ASSETS_KEEP=newest: the new release and its file, the older release's file removed {st} {err[-300:]}")
+        check(fake.hits("/api/repos/omigh/proj/releases/assets/902") and not fake.hits("/api/repos/omigh/proj/releases/assets/901"),
+              "only the newest release's file is fetched")
+        check("release files kept: v1.1" in out + err, "and the log says which")
+        rc, after_keep, _ = g.doctor()
+        new = [x for x in after_keep if x not in before]
+        check(rc == 0 and not new, f"gitea doctor check --all after removing the older release's file {new}")
+        g.start()
+        try:
+            s, r10 = g.api("GET", "/api/v1/repos/omigh/proj/releases/tags/v1.0")
+            s2, r11 = g.api("GET", "/api/v1/repos/omigh/proj/releases/tags/v1.1")
+            check(s == 200 and s2 == 200 and len(r10.get("assets", [])) == 0 and len(r11.get("assets", [])) == 1,
+                  f"v1.0 is there without its file, v1.1 with its own {len(r10.get('assets', []))} {len(r11.get('assets', []))}")
+        finally:
+            g.stop()
+        rc, out, err = imp("--release-assets-keep", "all")
+        st = _json.loads(out).get("stats", {}) if rc == 0 else {}
+        check(rc == 0 and st.get("files downloaded") == 1 and not st.get("release files removed"),
+              f"RELEASE_ASSETS_KEEP=all: the older release's file again, nothing removed {st}")
         # --- and deleting what was imported ---
         rc, out, err = omigitea("delete", "--config", g.ini, "--owner", "omigh", "--confirm", "omigh")
         rc2, after3, _ = g.doctor()

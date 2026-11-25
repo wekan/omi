@@ -273,6 +273,10 @@ function GwImportFull(const P: TGtPaths; const Owner, Repos, TokenFile, Api, Web
 // Per thread: each job sets its own. '' is never stopped.
 threadvar
   GwStopFile: string;
+  // RELEASE_ASSETS_KEEP: the files of how many of the newest releases an
+  // import keeps - 'newest' (the default, 1), a number, or 'all'. Older
+  // releases are imported without files, and their files in Gitea removed.
+  GwReleaseAssetsKeep: string;
 
 // "Test the token" (server.pas): GitHub's answer to GET /user with the token
 // read from TokenFile. Result is 'none' (no token), 'ok', 'rejected' (401),

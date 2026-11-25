@@ -445,6 +445,7 @@ has no Stop: it is one short write. From a terminal, `gitea import
 | `SYNC_EXCLUDE_FILE` | `<GITHUB_TO_GITEA_DIR>/github-to-gitea/github-to-gitea.exclude.txt` | the repositories no longer synced, shared with github-to-gitea |
 | `GITEA_DOER`, `GITEA_BINARY` | the first administrator; found from an existing repository's hooks | for importing |
 | `GIT_FETCH` | `pascal` | `pascal`: git is fetched and read by Omi itself. `program`: the `git` program runs for the clone and the fetch, and only for them |
+| `RELEASE_ASSETS_KEEP` | `newest` | the files of how many of the newest releases are kept: `newest` (1), a number, or `all`. Older releases are imported without files, and their files already in Gitea are removed in the same transaction (the journal deletes them once nothing refers to them). As gitea-patches' `release_assets_keep`. The command line takes `--release-assets-keep` |
 | `GIT` | found | the `git` program: on the Amiga the first of `C:git`, `C:amiga-git` and `C:am-git` (Aminet's `dev/misc/amiga-git` and `dev/misc/am-git`), elsewhere `git` on the `PATH`. Its `--version` is printed when the server starts and shown on the Settings page beside the field |
 
 From a terminal:
