@@ -40,6 +40,8 @@ class FakeGitHub:
         # More repositories of the organization, listed after proj; nothing of
         # theirs is served, so a request for one shows it was not left out.
         self.extra_repos = []
+        # Called once after the answer to a path is sent: path -> function.
+        self.after_get = {}
         outer = self
 
         class H(http.server.BaseHTTPRequestHandler):
@@ -79,6 +81,9 @@ class FakeGitHub:
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+                after = outer.after_get.pop(u.path, None)
+                if after:
+                    after()
 
             def log_message(self, *a):
                 pass

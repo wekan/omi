@@ -1092,6 +1092,10 @@ type
     // fetched (KeptIncomplete false), so there is always one release's files.
     KeepUntilDone: TStringList;
     KeptIncomplete: Boolean;
+    // The files Download has created so far, also in the journal: a file is
+    // in the attachments folder before it has a row, so a stop, an error or a
+    // killed process in the middle would leave it there for good.
+    Fetched: TJSONArray;
     procedure DecideKeptTags(Releases: TJSONArray);
     procedure FreeReleaseSpace(const RepoId, Full: string; Releases: TJSONArray);
     function AdoptedIssue(Db: TGwDb; Number: Int64): string;
@@ -1136,6 +1140,7 @@ destructor TGwImporter.Destroy;
 begin
   KeptTags.Free;
   KeepUntilDone.Free;
+  Fetched.Free;
   Stats.Free;
   inherited Destroy;
 end;
@@ -1644,6 +1649,11 @@ var
     U := LowerCase(Copy(GUIDToString(G), 2, 36));
     Path := GtPath([P.Attachments, U[1], U[2], U]);
     GtForceDirs(ExtractFileDir(Path));
+    // In the journal BEFORE the file exists: whatever stops the import from
+    // here on, the file is removed - at once on a stop or an error (ImportRepo),
+    // and by the next write's journal when the process was killed.
+    AddEntry(Fetched, Path, 'attachment', U);
+    W.WriteJournal('download', Fetched);
     Fs := TFileStream.Create(Path, fmCreate);
     try
       if not Gh.Fetch(Url, Accept, Fs, S, Bd, Ct, Cd) or (S <> 200) or (Pos('text/html', Ct) = 1) then
@@ -1676,6 +1686,8 @@ begin
   FetchedBytes := 0;
   Wanted := TStringList.Create;
   Wanted.CaseSensitive := True;
+  FreeAndNil(Fetched);
+  Fetched := TJSONArray.Create;
   Db := OpenDb;
   try
     for I := 0 to Releases.Count - 1 do
@@ -2703,7 +2715,7 @@ var
   IsNew, WikiNew, Committed: Boolean;
   Files: TGwFiles;
   RepoId: string;
-  N: Int64;
+  N, Removed: Int64;
 begin
   Committed := True;
   Files := nil;
@@ -2793,8 +2805,20 @@ begin
       // migration made - are adopted, not copied again (Adopt* below).
       AdoptRepoId := Existing;
       GwStatus(Say, 'phase', 'attachments');
-      Files := Download(Releases, Issues, Comments);
-      GwCheckStop;
+      try
+        Files := Download(Releases, Issues, Comments);
+        GwCheckStop;
+      except
+        // The files fetched so far have no rows yet: they go now, not left in
+        // the attachments folder (Fetched, in Download's journal).
+        if Assigned(Fetched) and (Fetched.Count > 0) then
+        begin
+          Removed := W.FinishJournal;
+          if Assigned(Say) then
+            Say('  removed ' + IntToStr(Removed) + ' files fetched before the import stopped');
+        end;
+        raise;
+      end;
       for I := 0 to High(Files) do
         AddEntry(NewFiles, GtPath([P.Attachments, Files[I].Uuid[1], Files[I].Uuid[2], Files[I].Uuid]),
           'attachment', Files[I].Uuid);

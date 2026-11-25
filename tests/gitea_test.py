@@ -1360,6 +1360,41 @@ def test_import_live(work):
               f"a refused GitHub request ends the import with its own error, not a crash (exit {rc}) {err[-300:]}")
         rc, after, _ = g.doctor()
         check(after == before, "and leaves Gitea as it was")
+        # Stopped while fetching the release files: a file is in the
+        # attachments folder before it has a row, and a stop, an error or a
+        # killed Omi there left it for good - 460 files, 89 GB of WeKan's
+        # release files in one Gitea. Now each is in the journal first.
+        import re as _re
+        uuid_files = lambda: sorted(os.path.relpath(os.path.join(d, n), g.work) for d, _, ns in os.walk(os.path.join(g.work, "data"))
+                                    for n in ns if _re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", n))
+        files_before = uuid_files()
+        fake.after_get["/api/repos/omigh/proj/releases/assets/901"] = lambda: open(stopf, "w").close()
+        rc, out, err = imp("--stop-file", stopf)
+        fake.after_get.clear()
+        if os.path.exists(stopf):
+            os.remove(stopf)
+        check(rc != 0 and "stopped" in out and fake.hits("/api/repos/omigh/proj/releases/assets/901"),
+              f"an import stopped while fetching the release files {out[-300:]}")
+        check(uuid_files() == files_before and "files fetched before the import stopped" in out + err,
+              f"and the files it fetched are gone, not left without a row {sorted(set(uuid_files()) - set(files_before))}")
+        rc, after, _ = g.doctor()
+        check(after == before, "and Gitea is as it was")
+        # Omi killed in the middle: the journal it left is finished by the next
+        # write, so the file goes then.
+        att_dir = os.path.join(g.work, "data", "attachments", "d", "e")
+        os.makedirs(att_dir, exist_ok=True)
+        dead = os.path.join(att_dir, "de000000-0000-4000-8000-000000000001")
+        with open(dead, "wb") as f:
+            f.write(b"a file a killed import fetched")
+        with open(os.path.join(g.work, "data", ".omi-gitea.journal"), "w") as f:
+            _json.dump({"op": "download", "time": "2026-11-25T03:13:00Z",
+                        "entries": [{"path": dead, "kind": "attachment", "key": os.path.basename(dead)}]}, f)
+        fake.not_found.add("/api/repos/omigh/proj/labels")  # the next write starts, then ends
+        rc, out, err = imp()
+        fake.not_found.clear()
+        check(not os.path.exists(dead) and "Finished a write that was interrupted: 1 files removed" in out + err,
+              f"a killed import's fetched file goes with the next write {(out + err)[-300:]}")
+        check(not os.path.exists(os.path.join(g.work, "data", ".omi-gitea.journal")), "and its journal")
         # Rate limits on the way: a secondary limit on the labels (403, its
         # message and Retry-After, no X-RateLimit-Remaining: 0 - the answer that
         # once ended an import with "pulls/885: 403"), and every answer near the
