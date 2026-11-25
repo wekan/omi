@@ -900,6 +900,21 @@ def test_no_wide_pascal_sets():
           "negative: Status in [403, 429] is one")
 
 
+def test_stop_reaches_the_write():
+    """Stop was read only before a GitHub API request: pressed during the git
+    fetch or the file downloads, the import went on to write Gitea's database.
+    It is read after git, in every file fetch and right before the write."""
+    src = open(os.path.join(REPO, "public", "omigiteai.inc"), encoding="utf-8").read()
+    at = lambda s, start=0: src.index(s, start)
+    git = at("Src := PrepareGit(GitDir")
+    dl = at("Files := Download(Releases, Issues, Comments);", git)
+    write = at("Db.Exec('BEGIN IMMEDIATE', []);", dl)
+    check(git < at("GwCheckStop;", git) < dl < at("GwCheckStop;", dl) < write, "Stop after git and after the files, before the write")
+    fetch = at("function Fetch_(const Url, Accept, Name: string; out Fl: TGwFile): Boolean;")
+    check(at("GwCheckStop;", fetch) < at("Gh.Fetch(Url, Accept, Fs", fetch), "and before every file fetched")
+    check("if not Committed then" in src, "and the files of rows never written are removed")
+
+
 def test_portable_source():
     """The Gitea units build their paths with GtPath and keep what only Unix has
     behind {$IFDEF UNIX}: they compile for the Amiga, where only Omi runs."""
@@ -1417,6 +1432,43 @@ def test_import_live(work):
             check(s == 200 and commits and commits[0]["commit"]["message"].strip() == "Second commit", "the new commit")
         finally:
             g.stop()
+        # --- a repository Omi did not write: adopted, nothing copied twice ---
+        # Gitea's own GitHub migration (github-to-gitea --migrate) leaves the
+        # issues, comments and release files in Gitea but nothing in Omi's map;
+        # an import then added every comment and file a second time. Forgetting
+        # the map makes this repository look like that.
+        os.remove(os.path.join(g.work, "data", "omi", "github-map.db"))
+        fake.log.clear()
+        rc, out, err = imp()
+        st = _json.loads(out).get("stats", {}) if rc == 0 else {}
+        check(rc == 0 and st.get("comments adopted") == 2 and st.get("issues adopted") == 3 and not st.get("comments")
+              and not st.get("issues") and not st.get("attachments") and not st.get("files downloaded"),
+              f"an import into a repository Omi did not write adopts its issues and comments {st} {err[-300:]}")
+        check(not fake.hits("/api/repos/omigh/proj/releases/assets/901")
+              and not fake.hits("/user-attachments/assets/0f1e2d3c-1111-2222-3333-444455556666"),
+              "and fetches none of the files Gitea already has")
+        fake.issues[0]["title"] = "Fake issue, renamed again"
+        fake.issues[0]["updated_at"] = "2099-01-02T00:00:00Z"
+        rc, out, err = imp()
+        st2 = _json.loads(out).get("stats", {}) if rc == 0 else {}
+        check(rc == 0 and not st2.get("comments") and not st2.get("issues"), f"and once adopted, stays adopted {st2}")
+        rc, after_adopt, _ = g.doctor()
+        new = [x for x in after_adopt if x not in before]
+        check(rc == 0 and not new, f"gitea doctor check --all after adopting {new}")
+        g.start()
+        try:
+            counts = {}
+            for n in (1, 3):
+                s, comments = g.api("GET", f"/api/v1/repos/omigh/proj/issues/{n}/comments")
+                counts[n] = len(comments) if s == 200 else None
+            check(counts == {1: 1, 3: 1}, f"still one comment each, not two {counts}")
+            s, issue = g.api("GET", "/api/v1/repos/omigh/proj/issues/1")
+            check(s == 200 and issue.get("title") == "Fake issue, renamed again" and "It breaks." in issue.get("body", ""),
+                  "an adopted issue takes GitHub's new title and keeps its text")
+            s, rel = g.api("GET", "/api/v1/repos/omigh/proj/releases/tags/v1.0")
+            check(s == 200 and len(rel.get("assets", [])) == 1, f"the release file once, not twice {len(rel.get('assets', []))}")
+        finally:
+            g.stop()
         # --- and deleting what was imported ---
         rc, out, err = omigitea("delete", "--config", g.ini, "--owner", "omigh", "--confirm", "omigh")
         rc2, after3, _ = g.doctor()
@@ -1631,6 +1683,7 @@ def main():
         test_no_python_or_gitea_at_runtime()
         test_portable_source()
         test_no_wide_pascal_sets()
+        test_stop_reaches_the_write()
         test_delete_coverage()
         test_delete_fixture(work)
         test_delete_live(work)

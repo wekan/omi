@@ -1080,6 +1080,13 @@ type
     DoerName, AppPath, ExcludeFile, FetchMode: string;
     DoerId: string;
     Stats: TJSONObject;
+    // The Gitea repository being imported into, when it already exists: rows
+    // already in it that Omi did not write are adopted (AdoptedIssue,
+    // AdoptedComment, AdoptedAsset) - kept as Gitea has them, not copied again.
+    AdoptRepoId: string;
+    function AdoptedIssue(Db: TGwDb; Number: Int64): string;
+    function AdoptedComment(Db: TGwDb; Number: Int64; const CreatedAt: string): string;
+    function AdoptedAsset(Db: TGwDb; const Tag, Name: string): string;
     constructor Create(const AP: TGtPaths; AGh: TGhClient; AW: TGwWriter; ASay: TGwSay);
     destructor Destroy; override;
     procedure Count(const What: string; N: Int64 = 1);
@@ -1472,6 +1479,40 @@ end;
 
 // Release assets and the files linked from bodies, new or changed, written to
 // new attachment files before anything is committed.
+// A repository Gitea's own GitHub migration made has the issues, comments and
+// release files already, keyed by number, by GitHub's creation time and by
+// name - but not in Omi's map, so an import added every comment and file a
+// second time. These find them; the import keeps them as they are and maps them.
+function TGwImporter.AdoptedIssue(Db: TGwDb; Number: Int64): string;
+begin
+  Result := '';
+  if AdoptRepoId <> '' then
+    Result := Db.Scalar('SELECT id FROM issue WHERE repo_id = ?1 AND `index` = ?2', [AdoptRepoId, IntToStr(Number)]);
+end;
+
+function TGwImporter.AdoptedComment(Db: TGwDb; Number: Int64; const CreatedAt: string): string;
+var
+  Iid: string;
+begin
+  Result := '';
+  Iid := AdoptedIssue(Db, Number);
+  if Iid = '' then
+    Exit;
+  // The first plain comment of that issue made in that second that no other
+  // GitHub comment is mapped to.
+  Result := Db.Scalar('SELECT id FROM comment WHERE issue_id = ?1 AND type = 0 AND created_unix = ?2 ' +
+    'AND id NOT IN (SELECT gitea_id FROM omimap.item_map WHERE kind = ''comment'') ORDER BY id LIMIT 1',
+    [Iid, IntToStr(IsoToUnix(CreatedAt, 0))]);
+end;
+
+function TGwImporter.AdoptedAsset(Db: TGwDb; const Tag, Name: string): string;
+begin
+  Result := '';
+  if AdoptRepoId <> '' then
+    Result := Db.Scalar('SELECT a.id FROM attachment a JOIN `release` r ON a.release_id = r.id ' +
+      'WHERE r.repo_id = ?1 AND r.tag_name = ?2 AND a.name = ?3 LIMIT 1', [AdoptRepoId, Tag, Name]);
+end;
+
 function TGwImporter.Download(Releases, Issues, Comments: TJSONArray): TGwFiles;
 var
   Db: TGwDb;
@@ -1491,6 +1532,7 @@ var
     S: Integer;
   begin
     Result := False;
+    GwCheckStop;
     CreateGUID(G);
     U := LowerCase(Copy(GUIDToString(G), 2, 36));
     Path := GtPath([P.Attachments, U[1], U[2], U]);
@@ -1535,6 +1577,9 @@ begin
         Key := JStr(A, 'size') + '|' + JStr(A, 'updated_at');
         if (Have <> '') and (Upd = Key) and Db.Has('SELECT id FROM attachment WHERE id = ?1', [Have]) then
           Continue;
+        // Already in this Gitea under its release and name: not fetched again.
+        if (Have = '') and (AdoptedAsset(Db, JStr(Rel, 'tag_name'), JStr(A, 'name')) <> '') then
+          Continue;
         F := Default(TGwFile);
         if not Fetch_(JStr(A, 'url'), 'application/octet-stream', ifthen_(JStr(A, 'name') <> '', JStr(A, 'name'),
           'file'), F) then
@@ -1564,6 +1609,13 @@ begin
         Body := JStr(It, 'issue_url');
         Number := StrToInt64Def(Copy(Body, LastDelimiter('/', Body) + 1, MaxInt), 0);
       end;
+      // An adopted issue or comment keeps Gitea's own text, whose files Gitea
+      // already has: its GitHub links are not fetched again.
+      Have := Mapped(Db, ParentKind, StrToInt64Def(JStr(It, 'id'), 0), Upd);
+      if ((Have <> '') and (Copy(Upd, 1, 8) = 'adopted:')) or ((Have = '') and
+        (((ParentKind = 'issue') and (AdoptedIssue(Db, Number) <> '')) or
+         ((ParentKind = 'comment') and (AdoptedComment(Db, Number, JStr(It, 'created_at')) <> '')))) then
+        Continue;
       Body := JStr(It, 'body');
       Links := Gh.FileLinks(Body);
       try
@@ -1900,7 +1952,7 @@ var
   I, K: Integer;
   O, Pr, Ms: TJSONObject;
   Arr: TJSONArray;
-  Closed, Draft: Boolean;
+  Closed, Draft, Adopted: Boolean;
   Number: Int64;
   IssueIdx, ReleaseIdx, LinkI, LinkR, LinkC: string;
   Lines, Parts: TStringArray;
@@ -1982,8 +2034,13 @@ begin
       O := TJSONObject(Issues.Items[I]);
       Number := StrToInt64Def(JStr(O, 'number'), 0);
       Iid := Mapped(Db, 'issue', StrToInt64Def(JStr(O, 'id'), 0), Upd);
+      // Adopted once, adopted for good: the map says so ("adopted:<time>").
+      Adopted := (Iid <> '') and (Copy(Upd, 1, 8) = 'adopted:');
       if (Iid = '') or not Db.Has('SELECT id FROM issue WHERE id = ?1 AND repo_id = ?2', [Iid, RepoId]) then
+      begin
         Iid := Db.Scalar('SELECT id FROM issue WHERE repo_id = ?1 AND `index` = ?2', [RepoId, IntToStr(Number)]);
+        Adopted := Iid <> '';
+      end;
       Pr := nil;
       if (Pulls <> nil) and (Pulls.Find(IntToStr(Number)) is TJSONObject) then
         Pr := TJSONObject(Pulls.Find(IntToStr(Number)));
@@ -1997,7 +2054,16 @@ begin
       Mid := '0';
       if (Ms <> nil) and (MsIds.Values[JStr(Ms, 'id')] <> '') then
         Mid := MsIds.Values[JStr(Ms, 'id')];
-      if Iid <> '' then
+      if Adopted then
+      begin
+        // Gitea has it from elsewhere (its own GitHub migration): its text and
+        // files stay as Gitea has them; what GitHub says about its state is taken.
+        Update(Db, 'issue', Iid, ['name', Copy(Title, 1, 255), 'is_closed', B01(Closed),
+          'is_locked', B01(JBool(O, 'locked')), 'milestone_id', Mid,
+          'closed_unix', IntToStr(ifthen_i(Closed, IsoToUnix(JStr(O, 'closed_at'), 0), 0))]);
+        Count('issues adopted');
+      end
+      else if Iid <> '' then
       begin
         Update(Db, 'issue', Iid, ['name', Copy(Title, 1, 255), 'content', JStr(O, 'body'), 'is_closed', B01(Closed),
           'is_locked', B01(JBool(O, 'locked')), 'milestone_id', Mid, 'created_unix', Created,
@@ -2019,7 +2085,8 @@ begin
         else
           Count('issues');
       end;
-      Remember(Db, 'issue', StrToInt64Def(JStr(O, 'id'), 0), RepoId, Iid, JStr(O, 'updated_at'));
+      Remember(Db, 'issue', StrToInt64Def(JStr(O, 'id'), 0), RepoId, Iid,
+        ifthen_(Adopted, 'adopted:', '') + JStr(O, 'updated_at'));
       IssueIds.Values[IntToStr(Number)] := Iid;
       Db.Exec('DELETE FROM issue_label WHERE issue_id = ?1', [Iid]);
       Arr := JArr(O, 'labels');
@@ -2044,7 +2111,23 @@ begin
       Cid := Mapped(Db, 'comment', StrToInt64Def(JStr(O, 'id'), 0), Upd);
       if (Cid <> '') and not Db.Has('SELECT id FROM comment WHERE id = ?1', [Cid]) then
         Cid := '';
+      // Adopted before: Gitea's text stays.
+      if (Cid <> '') and (Copy(Upd, 1, 8) = 'adopted:') then
+        Continue;
       Created := IntToStr(IsoToUnix(JStr(O, 'created_at'), UnixNow));
+      if Cid = '' then
+      begin
+        // Already in Gitea from elsewhere: kept as it is, and mapped.
+        Cid := Db.Scalar('SELECT id FROM comment WHERE issue_id = ?1 AND type = 0 AND created_unix = ?2 ' +
+          'AND id NOT IN (SELECT gitea_id FROM omimap.item_map WHERE kind = ''comment'') ORDER BY id LIMIT 1',
+          [Iid, Created]);
+        if Cid <> '' then
+        begin
+          Count('comments adopted');
+          Remember(Db, 'comment', StrToInt64Def(JStr(O, 'id'), 0), RepoId, Cid, 'adopted:' + JStr(O, 'updated_at'));
+          Continue;
+        end;
+      end;
       if Cid <> '' then
         Update(Db, 'comment', Cid, ['content', JStr(O, 'body'),
           'updated_unix', IntToStr(IsoToUnix(JStr(O, 'updated_at'), StrToInt64(Created)))])
@@ -2233,11 +2316,13 @@ var
   Labels, Milestones, Issues, Comments, Releases, NewFiles, OldFiles, Both: TJSONArray;
   Pulls: TJSONObject;
   I, K: Integer;
-  IsNew, WikiNew: Boolean;
+  IsNew, WikiNew, Committed: Boolean;
   Files: TGwFiles;
   RepoId: string;
   N: Int64;
 begin
+  Committed := True;
+  Files := nil;
   Full := JStr(Gr, 'full_name');
   Name := JStr(Gr, 'name');
   if not GtNameIsSafe(Name) then
@@ -2288,13 +2373,23 @@ begin
     Releases := Gh.All('repos/' + Full + '/releases', '');
     try
       Src := PrepareGit(GitDir, Gh.GitUrl(Full, False), False, IsNew);
+      // Stop is asked before every GitHub request, and here too: after the
+      // API, git and the files are fetched with no request of its own, and a
+      // Stop pressed then used to go on to write Gitea's database.
+      GwCheckStop;
       WikiNew := False;
       if JBool(Gr, 'has_wiki') then
         WikiSrc := PrepareGit(WikiDir, Gh.GitUrl(Full, True), True, WikiNew);
+      GwCheckStop;
+      // Rows that are already in this Gitea - a repository Gitea's own GitHub
+      // migration made - are adopted, not copied again (Adopt* below).
+      AdoptRepoId := Existing;
       Files := Download(Releases, Issues, Comments);
+      GwCheckStop;
       for I := 0 to High(Files) do
         AddEntry(NewFiles, GtPath([P.Attachments, Files[I].Uuid[1], Files[I].Uuid[2], Files[I].Uuid]),
           'attachment', Files[I].Uuid);
+      Committed := False;
       Db := OpenDb;
       try
         Db.Exec('BEGIN IMMEDIATE', []);
@@ -2326,6 +2421,7 @@ begin
             end;
           end;
           Db.Exec('COMMIT', []);
+          Committed := True;
         except
           // A new folder renamed into place has no row now: the journal removes it.
           Db.Exec('ROLLBACK', []);
@@ -2335,6 +2431,11 @@ begin
         Db.Free;
       end;
     finally
+      // Files fetched for rows that were never written: not left behind.
+      if not Committed then
+        for I := 0 to High(Files) do
+          if Files[I].Uuid <> '' then
+            DeleteFile(GtPath([P.Attachments, Files[I].Uuid[1], Files[I].Uuid[2], Files[I].Uuid]));
       N := 0;
       if (Src <> '') and (Pos('/.omi-new-', Src) > 0) and DirectoryExists(Src) then
         RemoveTree(Src, N);
