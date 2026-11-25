@@ -878,6 +878,28 @@ def unix_guarded_lines(text):
     return out
 
 
+def test_no_wide_pascal_sets():
+    """A Pascal set holds 0..255, and Free Pascal takes `Status in [403, 429]` as
+    403 mod 256 without a warning: no rate limit was ever recognised and no
+    redirect ever followed. Negative: no `in [...]` anywhere in Omi's Pascal has
+    a constant above 255."""
+    import re
+    found = []
+    for d in ("public", "cli"):
+        for name in sorted(os.listdir(os.path.join(REPO, d))):
+            if not name.endswith((".pas", ".inc", ".pp")):
+                continue
+            for n, line in enumerate(open(os.path.join(REPO, d, name), encoding="utf-8", errors="replace"), 1):
+                code = line.split("//", 1)[0]
+                for m in re.finditer(r"\bin\s*\[([^\]]*)\]", code, re.I):
+                    if any(int(x) > 255 for x in re.findall(r"\b\d+\b", m.group(1))):
+                        found.append(f"{d}/{name}:{n}: {line.strip()}")
+    check(not found, f"no Pascal set with a member above 255 {found}")
+    # The check itself sees one.
+    check(any(int(x) > 255 for x in re.findall(r"\b\d+\b", "Status in [403, 429]".split("[", 1)[1])),
+          "negative: Status in [403, 429] is one")
+
+
 def test_portable_source():
     """The Gitea units build their paths with GtPath and keep what only Unix has
     behind {$IFDEF UNIX}: they compile for the Amiga, where only Omi runs."""
@@ -1268,9 +1290,39 @@ def test_import_live(work):
         rc, after, _ = g.doctor()
         check(after == before, "and leaves Gitea as it was")
         os.remove(stopf)
+        # GitHub refuses something: the import ends with that, exit 1 - it
+        # ended in "EBusError: Bus error" (exit 217), freeing its answer twice.
+        fake.not_found.add("/api/repos/omigh/proj/labels")
         rc, out, err = imp()
+        fake.not_found.clear()
+        check(rc == 1 and '"error"' in out and "labels: 404" in out and "EBusError" not in err
+              and "unhandled exception" not in err.lower(),
+              f"a refused GitHub request ends the import with its own error, not a crash (exit {rc}) {err[-300:]}")
+        rc, after, _ = g.doctor()
+        check(after == before, "and leaves Gitea as it was")
+        # Rate limits on the way: a secondary limit on the labels (403, its
+        # message and Retry-After, no X-RateLimit-Remaining: 0 - the answer that
+        # once ended an import with "pulls/885: 403"), and every answer near the
+        # end of the hour. And the pull requests read from their list.
+        labels_before = len(fake.hits("/api/repos/omigh/proj/labels"))
+        fake.secondary_limit[f"/api/repos/omigh/proj/labels"] = 1
+        fake.low_remaining = True
+        env["OMI_GITHUB_PULLS_ONE_BY_ONE_MAX"] = "0"
+        rc, out, err = imp()
+        fake.low_remaining = False
+        del env["OMI_GITHUB_PULLS_ONE_BY_ONE_MAX"]
         res = _json.loads(out) if rc == 0 else {}
         check(rc == 0 and res.get("repositories") == ["proj"], f"the import {err.strip()[-500:]}")
+        said = out + err
+        check(said.count("GitHub rate limit reached; waiting until") == 1 and len(fake.hits("/api/repos/omigh/proj/labels")) - labels_before == 2,
+              f"a secondary rate limit is waited out (Retry-After), and the import goes on {said[-600:]}")
+        check(said.count("requests left until") == 1 and "12 of 60 requests left until" in said,
+              f"few requests left: said once, with the numbers, not on every answer {said.count('requests left')}")
+        check("few requests left this hour" not in said, "negative: not the old line on every answer")
+        check(fake.hits("/api/repos/omigh/proj/pulls") and not fake.hits("/api/repos/omigh/proj/pulls/2"),
+              "the pull requests are read from their list, not one request each")
+        check("GitHub: 1 pull requests" in said and "labels, milestones, issues and comments" in said,
+              "the log says what it is reading")
         check("fake-secret-token" not in out + err, "the token is not printed")
         check(not os.path.exists(calls), "GIT_FETCH=pascal (the default): no git program ran")
         check([x["query"] for x in fake.git_log if x["method"] == "GET"] == ["service=git-upload-pack"]
@@ -1578,6 +1630,7 @@ def main():
         test_real(work)
         test_no_python_or_gitea_at_runtime()
         test_portable_source()
+        test_no_wide_pascal_sets()
         test_delete_coverage()
         test_delete_fixture(work)
         test_delete_live(work)

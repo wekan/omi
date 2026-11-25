@@ -576,8 +576,17 @@ type
     LoginCache: string;
     HaveLogin: Boolean;
     Say: TGwSay;
-    // The rate limit of the newest answer (X-RateLimit-Remaining / -Limit).
-    LastRemaining, LastLimit: string;
+    // The rate limit of the newest answer (X-RateLimit-Remaining / -Limit /
+    // -Reset, Retry-After).
+    LastRemaining, LastLimit, LastReset, LastRetryAfter: string;
+    // The status GitHub really answered: Fetch reports a rate limit as 429.
+    LastHttpStatus: Integer;
+    // "Few requests left" is said once per hour's window, not on every answer.
+    RateWarned: Boolean;
+    // Seconds to wait before asking again, after a rate-limit answer.
+    function RateWaitSeconds: Integer;
+    // Local HH:MM of a Unix time.
+    function ClockOf(UnixTime: Int64): string;
     constructor Create(const AToken, AApi, AWeb, AGitRoot, AHosts: string; ASay: TGwSay);
     destructor Destroy; override;
     function Headers(const Url, Accept: string): TStringList;
@@ -693,7 +702,10 @@ begin
         Dest.Size := Start;
         Dest.Position := Start;
       end;
-      if (Status in [301, 302, 303, 307, 308]) then
+      // Not `Status in [301, ...]`: a Pascal set holds 0..255, and Free Pascal
+      // takes 301 as 301 mod 256 without a word - so no redirect was ever
+      // followed here (a release asset is a 302 to GitHub's file host).
+      if (Status = 301) or (Status = 302) or (Status = 303) or (Status = 307) or (Status = 308) then
       begin
         Loc := C.GetHeader(C.ResponseHeaders, 'Location');
         if Loc = '' then
@@ -707,14 +719,32 @@ begin
       Disposition := C.GetHeader(C.ResponseHeaders, 'Content-Disposition');
       LastRemaining := C.GetHeader(C.ResponseHeaders, 'X-RateLimit-Remaining');
       LastLimit := C.GetHeader(C.ResponseHeaders, 'X-RateLimit-Limit');
+      LastReset := C.GetHeader(C.ResponseHeaders, 'X-RateLimit-Reset');
+      LastRetryAfter := C.GetHeader(C.ResponseHeaders, 'Retry-After');
       if (Dest = nil) or (Status <> 200) then
         Body := Mem.DataString;
-      // Rate limits: wait them out, as github_backup does.
-      if (Status = 200) and (StrToIntDef(C.GetHeader(C.ResponseHeaders, 'X-RateLimit-Remaining'), 1000) < 50) and
-        Assigned(Say) then
-        Say('  GitHub: few requests left this hour.');
-      if (Status in [403, 429]) and ((C.GetHeader(C.ResponseHeaders, 'Retry-After') <> '') or
-        (C.GetHeader(C.ResponseHeaders, 'X-RateLimit-Remaining') = '0')) then
+      // Rate limits: wait them out, as github_backup does. Said ONCE per hour's
+      // window, with the numbers: it used to be a line on every answer, fifty
+      // lines that said nothing new.
+      if (Status = 200) and (LastRemaining <> '') then
+      begin
+        if (StrToIntDef(LastRemaining, 1000) < 50) and not RateWarned then
+        begin
+          RateWarned := True;
+          if Assigned(Say) then
+            Say('  GitHub: ' + LastRemaining + ' of ' + LastLimit + ' requests left until ' +
+              ClockOf(StrToInt64Def(LastReset, 0)) + '; then the import waits for the limit to reset.');
+        end
+        else if StrToIntDef(LastRemaining, 0) >= 100 then
+          RateWarned := False;
+      end;
+      // A used-up hour is 403 with X-RateLimit-Remaining: 0; a secondary limit
+      // is 403 or 429 with Retry-After, or only its message. This was
+      // `Status in [403, 429]`, which a 403 never matched (see the redirect
+      // above), so every rate limit ended the import ("pulls/885: 403").
+      LastHttpStatus := Status;
+      if ((Status = 403) or (Status = 429)) and ((LastRetryAfter <> '') or (LastRemaining = '0') or
+        (Pos('rate limit', LowerCase(Body)) > 0)) then
         Status := 429;
       Result := True;
       Exit;
@@ -736,18 +766,47 @@ begin
     raise EGw.Create('stopped');
 end;
 
+function TGhClient.ClockOf(UnixTime: Int64): string;
+begin
+  if UnixTime <= 0 then
+    Exit('the next hour');
+  Result := FormatDateTime('hh:nn', UniversalTimeToLocal(UnixToDateTime(UnixTime)));
+end;
+
+function TGhClient.RateWaitSeconds: Integer;
+var
+  Reset, NowUnix: Int64;
+begin
+  // Retry-After first (a secondary limit), then the hour's reset time, else a
+  // minute. A few seconds past the reset, for clocks that disagree.
+  Result := StrToIntDef(Trim(LastRetryAfter), 0);
+  if Result <= 0 then
+  begin
+    Reset := StrToInt64Def(LastReset, 0);
+    NowUnix := DateTimeToUnix(LocalTimeToUniversal(Now));
+    if (LastRemaining = '0') and (Reset > NowUnix) then
+      Result := Reset - NowUnix + 5;
+  end;
+  if Result <= 0 then
+    Result := 60;
+  if Result > 3700 then
+    Result := 3700;
+end;
+
 function TGhClient.Get(const Path, Params: string; out Status: Integer): TJSONData;
 var
   Url, Body, Ct, Cd: string;
-  Attempt, Second: Integer;
+  Attempt, Second, Wait: Integer;
 begin
   Result := nil;
   Url := Api + '/' + Path;
   if Params <> '' then
     Url := Url + '?' + Params;
-  for Attempt := 0 to 20 do
+  Attempt := 0;
+  while Attempt <= 20 do
   begin
     GwCheckStop;
+    Inc(Attempt);
     if not Fetch(Url, 'application/vnd.github+json', nil, Status, Body, Ct, Cd) then
     begin
       if Attempt < 4 then
@@ -760,14 +819,20 @@ begin
     end;
     if Status = 429 then
     begin
+      // Waited out however long it takes - until the hour's limit resets, as
+      // GitHub says - and not counted as a failed attempt: an import of a big
+      // repository without a token waits many times, and gave up after 21.
+      Wait := RateWaitSeconds;
       if Assigned(Say) then
-        Say('  GitHub rate limit reached, waiting 60 s...');
-      // A second at a time, so Stop does not wait for the minute.
-      for Second := 1 to 60 do
+        Say('  GitHub rate limit reached; waiting until ' +
+          ClockOf(DateTimeToUnix(LocalTimeToUniversal(Now)) + Wait) + ' (' + IntToStr((Wait + 59) div 60) + ' min).');
+      // A second at a time, so Stop does not wait for the hour.
+      for Second := 1 to Wait do
       begin
         GwCheckStop;
         Sleep(1000);
       end;
+      Dec(Attempt);
       Continue;
     end;
     if (Status >= 500) and (Attempt < 4) then
@@ -780,7 +845,8 @@ begin
       // A token that is wrong or expired: public repositories are read without it.
       Anonymous := True;
       if Assigned(Say) then
-        Say('  GitHub: the token is not accepted; reading without it.');
+        Say('  GitHub: the token is not accepted; reading without it, 60 requests an hour. ' +
+          'Check it with Settings / Test GitHub token.');
       Continue;
     end;
     try
@@ -830,8 +896,14 @@ begin
     finally
       D.Free;
     end;
+    // A big repository is hundreds of pages (wekan/wekan's comments): say how
+    // far it is, every ten pages, or the job page shows nothing for an hour.
+    if (N = 100) and (Page mod 10 = 0) and Assigned(Say) then
+      Say('  GitHub: ' + Path + ': ' + IntToStr(Result.Count) + ' so far (page ' + IntToStr(Page) + ')');
     Inc(Page);
   until N < 100;
+  if (Page > 2) and Assigned(Say) then
+    Say('  GitHub: ' + Path + ': ' + IntToStr(Result.Count));
 end;
 
 function TGhClient.Login: string;
@@ -1027,6 +1099,7 @@ type
       Existing: string): string;
     procedure ContentRows(Db: TGwDb; const RepoId, GitDir: string; Labels, Milestones, Issues, Comments: TJSONArray;
       Pulls: TJSONObject; Releases: TJSONArray; const Files: TGwFiles; OldFiles: TJSONArray);
+    procedure FetchPulls(const Full: string; Issues: TJSONArray; Pulls: TJSONObject);
     procedure PullRow(Db: TGwDb; const RepoId, IssueId: string; Number: Int64; Pr: TJSONObject; const GitDir: string);
     procedure Counters(Db: TGwDb; const RepoId, OwnerId: string);
   end;
@@ -1708,6 +1781,71 @@ begin
   end;
 end;
 
+// The pull requests among Issues, into Pulls by number. One request each was
+// about 1800 requests for wekan/wekan - the whole hour of a token, and 30 hours
+// without one. The list (100 a page, newest change first) has every field
+// PullRow reads (draft, head, base, merged_at, merge_commit_sha), so a sync of
+// many is read from it, stopping once all are found; a few, or any the list did
+// not reach, one by one.
+procedure TGwImporter.FetchPulls(const Full: string; Issues: TJSONArray; Pulls: TJSONObject);
+var
+  Wanted: TStringList;
+  I, K, Page, N, Done: Integer;
+  D: TJSONData;
+  Num: string;
+begin
+  Wanted := TStringList.Create;
+  try
+    Wanted.Sorted := True;
+    Wanted.Duplicates := dupIgnore;
+    for I := 0 to Issues.Count - 1 do
+      if JObj(Issues.Items[I], 'pull_request') <> nil then
+        Wanted.Add(JStr(Issues.Items[I], 'number'));
+    if Wanted.Count = 0 then
+      Exit;
+    if Assigned(Say) then
+      Say('  GitHub: ' + IntToStr(Wanted.Count) + ' pull requests');
+    // OMI_GITHUB_PULLS_ONE_BY_ONE_MAX: how many are still read one by one
+    // (default 20; 0 always reads the list - the tests use it).
+    if Wanted.Count > StrToIntDef(GetEnvironmentVariable('OMI_GITHUB_PULLS_ONE_BY_ONE_MAX'), 20) then
+    begin
+      Page := 1;
+      repeat
+        D := Gh.One('repos/' + Full + '/pulls', 'state=all&sort=updated&direction=desc&per_page=100&page=' + IntToStr(Page));
+        N := 0;
+        try
+          if D is TJSONArray then
+          begin
+            N := TJSONArray(D).Count;
+            for K := 0 to N - 1 do
+            begin
+              Num := JStr(TJSONArray(D).Items[K], 'number');
+              if (Wanted.IndexOf(Num) >= 0) and (Pulls.Find(Num) = nil) then
+                Pulls.Add(Num, TJSONArray(D).Items[K].Clone);
+            end;
+          end;
+        finally
+          D.Free;
+        end;
+        if (Page mod 10 = 0) and Assigned(Say) then
+          Say('  GitHub: pull requests: ' + IntToStr(Pulls.Count) + ' of ' + IntToStr(Wanted.Count));
+        Inc(Page);
+      until (N < 100) or (Pulls.Count >= Wanted.Count);
+    end;
+    Done := 0;
+    for I := 0 to Wanted.Count - 1 do
+      if Pulls.Find(Wanted[I]) = nil then
+      begin
+        Pulls.Add(Wanted[I], Gh.One('repos/' + Full + '/pulls/' + Wanted[I], ''));
+        Inc(Done);
+        if (Done mod 50 = 0) and Assigned(Say) then
+          Say('  GitHub: pull requests: ' + IntToStr(Pulls.Count) + ' of ' + IntToStr(Wanted.Count));
+      end;
+  finally
+    Wanted.Free;
+  end;
+end;
+
 procedure TGwImporter.PullRow(Db: TGwDb; const RepoId, IssueId: string; Number: Int64; Pr: TJSONObject;
   const GitDir: string);
 var
@@ -2126,6 +2264,8 @@ begin
   // Ten minutes before this import began: an item changed while it is read is read again.
   Started := FormatDateTime('yyyy-mm-dd"T"hh:nn:ss"Z"', LocalTimeToUniversal(Now) - 10 / (24 * 60));
   // GitHub first, outside the transaction: nothing of Gitea is changed yet.
+  if Assigned(Say) then
+    Say('  GitHub: labels, milestones, issues and comments');
   Labels := Gh.All('repos/' + Full + '/labels', '');
   Milestones := Gh.All('repos/' + Full + '/milestones', 'state=all');
   Params := 'state=all&sort=updated&direction=asc';
@@ -2144,9 +2284,7 @@ begin
   Src := '';
   WikiSrc := '';
   try
-    for I := 0 to Issues.Count - 1 do
-      if JObj(Issues.Items[I], 'pull_request') <> nil then
-        Pulls.Add(JStr(Issues.Items[I], 'number'), Gh.One('repos/' + Full + '/pulls/' + JStr(Issues.Items[I], 'number'), ''));
+    FetchPulls(Full, Issues, Pulls);
     Releases := Gh.All('repos/' + Full + '/releases', '');
     try
       Src := PrepareGit(GitDir, Gh.GitUrl(Full, False), False, IsNew);
@@ -2414,7 +2552,8 @@ begin
       end;
       // 403 / 429: the hour's requests used up, or a blocked token. GitHub's
       // own message says which; it never carries the token.
-      Detail := IntToStr(Status);
+      // What GitHub answered (403 for a used-up hour), not Fetch's 429.
+      Detail := IntToStr(Gh.LastHttpStatus);
       if (D is TJSONObject) and (JStr(D, 'message') <> '') then
         Detail := Detail + ' ' + Copy(JStr(D, 'message'), 1, 300);
       Result := 'refused';
@@ -2441,6 +2580,10 @@ begin
     raise EGw.Create('GIT_FETCH=program, and no git program: set GIT, or install git.');
   if (TokenFile <> '') and FileExists(TokenFile) then
     Token := Trim(ReadSmallFile(TokenFile));
+  // Without a token GitHub answers 60 requests an hour: a big repository is
+  // then many hours of waiting, and the log should say why from the start.
+  if (Token = '') and Assigned(Say) then
+    Say('GitHub: no token - 60 requests an hour, so a big repository takes hours. Set GITHUB_TOKEN in Settings.');
   Gh := TGhClient.Create(Token, Api, Web, GitRoot, FileHosts, Say);
   try
     W := TGwWriter.Enter(P, PidFile, Say);

@@ -29,6 +29,14 @@ class FakeGitHub:
         self.log = []
         self.git_log = []
         self.files = {}  # path -> bytes
+        # Rate limits, as GitHub answers them: path -> how many more times it
+        # is a secondary limit (403, its message and Retry-After, no
+        # X-RateLimit-Remaining: 0); low_remaining puts every answer near the
+        # end of the hour's requests.
+        self.secondary_limit = {}
+        self.low_remaining = False
+        # Paths answered 404, as GitHub answers a repository it does not show.
+        self.not_found = set()
         outer = self
 
         class H(http.server.BaseHTTPRequestHandler):
@@ -48,8 +56,22 @@ class FakeGitHub:
                     return
                 q = dict(urllib.parse.parse_qsl(u.query))
                 outer.log.append((u.path, q, self.headers.get("Authorization") is not None))
+                if outer.secondary_limit.get(u.path, 0) > 0:
+                    outer.secondary_limit[u.path] -= 1
+                    body = b'{"message": "You have exceeded a secondary rate limit. Please wait a few minutes."}'
+                    self.send_response(403)
+                    self.send_header("Retry-After", "1")
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 status, ctype, body = outer.answer(u.path, q)
                 self.send_response(status)
+                if outer.low_remaining and u.path.startswith("/api/"):
+                    self.send_header("X-RateLimit-Remaining", "12")
+                    self.send_header("X-RateLimit-Limit", "60")
+                    self.send_header("X-RateLimit-Reset", str(int(__import__("time").time()) + 1800))
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -157,6 +179,8 @@ class FakeGitHub:
 
     def answer(self, path, q):
         full = f"{self.org}/{self.repo_name}"
+        if path in self.not_found:
+            return 404, "application/json", b'{"message": "Not Found"}'
         if path in self.files:
             return 200, "application/octet-stream", self.files[path]
         if int(q.get("page", "1")) > 1:
@@ -170,6 +194,8 @@ class FakeGitHub:
             f"/api/repos/{full}/issues": self.since(self.issues, q),
             f"/api/repos/{full}/issues/comments": self.since(self.comments, q),
             f"/api/repos/{full}/releases": self.releases,
+            # The list of pull requests, as GET /repos/{full}/pulls?state=all.
+            f"/api/repos/{full}/pulls": list(self.pulls.values()),
         }.get(path)
         if data is None and path.startswith(f"/api/repos/{full}/pulls/"):
             data = self.pulls.get(int(path.rsplit("/", 1)[1]))

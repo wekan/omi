@@ -6653,14 +6653,19 @@ var
     WriteLn(StdErr, 'omi: ', Msg);
     if AsJson then
     begin
+      // FreeAndNil, not Free: the caller's `finally J.Free` runs after this,
+      // and a freed J there was a second free - every failed import ended in
+      // "EBusError: Bus error" (exit 217) instead of its own message.
+      FreeAndNil(J);
       J := TJSONObject.Create(['error', Msg]);
       WriteLn(J.FormatJSON);
-      J.Free;
+      FreeAndNil(J);
     end;
   end;
 
 begin
   Result := 1;
+  J := nil;
   Cmd := ParamStr(2);
   if (Cmd = 'git-fetch') or (Cmd = 'git-index-pack') or (Cmd = 'git-refs') then
   begin
