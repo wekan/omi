@@ -1519,6 +1519,48 @@ def test_import_live(work):
         st = _json.loads(out).get("stats", {}) if rc == 0 else {}
         check(rc == 0 and st.get("files downloaded") == 1 and not st.get("release files removed"),
               f"RELEASE_ASSETS_KEEP=all: the older release's file again, nothing removed {st}")
+        # Room first: the files of every release but the newest one Gitea has
+        # files of go BEFORE anything is fetched; that one goes only once the
+        # newest release's files are all fetched. Gitea has v1.0's and v1.1's
+        # files now; v1.2's file cannot be fetched at first.
+        fake_git("tag", "-a", "v1.2", "-m", "Version 1.2", cwd=fake.src)
+        fake_git("push", "-q", fake.bare, "v1.2", cwd=fake.src)
+        fake.releases.insert(0, dict(fake.releases[0], id=953, tag_name="v1.2", name="Version 1.2",
+                                     created_at="2099-01-04T00:00:00Z", published_at="2099-01-04T00:00:00Z",
+                                     updated_at="2099-01-04T00:00:00Z",
+                                     assets=[dict(fake.releases[0]["assets"][0], id=903, name="app-linux-1.2.bin",
+                                                  url=f"{fake.api}/repos/omigh/proj/releases/assets/903")]))
+        fake.not_found.add("/api/repos/omigh/proj/releases/assets/903")
+        rc, out, err = imp()
+        st = _json.loads(out).get("stats", {}) if rc == 0 else {}
+        said = out + err
+        check(rc == 0 and st.get("release files removed") == 1 and "removed first" in said
+              and said.index("removed first") < said.index("git: "),
+              f"the older releases' files are removed first, before git and the files {st} {said[-500:]}")
+        check("v1.1's kept" in said, "the newest release not fetched whole: the one before it keeps its files")
+        g.start()
+        try:
+            n = {t: len(g.api("GET", f"/api/v1/repos/omigh/proj/releases/tags/{t}")[1].get("assets", []))
+                 for t in ("v1.0", "v1.1", "v1.2")}
+            check(n == {"v1.0": 0, "v1.1": 1, "v1.2": 0}, f"v1.0 removed, v1.1 kept, v1.2 not fetched {n}")
+        finally:
+            g.stop()
+        fake.not_found.discard("/api/repos/omigh/proj/releases/assets/903")
+        fake.files["/api/repos/omigh/proj/releases/assets/903"] = b"v1.2 binary " * 100
+        rc, out, err = imp()
+        st = _json.loads(out).get("stats", {}) if rc == 0 else {}
+        check(rc == 0 and st.get("files downloaded") == 1 and st.get("release files removed") == 1,
+              f"fetched whole at last: v1.2's file in, v1.1's out {st}")
+        g.start()
+        try:
+            n = {t: len(g.api("GET", f"/api/v1/repos/omigh/proj/releases/tags/{t}")[1].get("assets", []))
+                 for t in ("v1.0", "v1.1", "v1.2")}
+            check(n == {"v1.0": 0, "v1.1": 0, "v1.2": 1}, f"only the newest release's files {n}")
+        finally:
+            g.stop()
+        rc, after_room, _ = g.doctor()
+        new = [x for x in after_room if x not in before]
+        check(rc == 0 and not new, f"gitea doctor check --all after making room {new}")
         # --- and deleting what was imported ---
         rc, out, err = omigitea("delete", "--config", g.ini, "--owner", "omigh", "--confirm", "omigh")
         rc2, after3, _ = g.doctor()

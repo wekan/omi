@@ -1087,7 +1087,13 @@ type
     // The tags of the releases whose files are kept (RELEASE_ASSETS_KEEP);
     // nil keeps every release's files.
     KeptTags: TStringList;
+    // The newest release whose files Gitea had when the import began, when it
+    // is not a kept one: its files stay until the kept releases' files are all
+    // fetched (KeptIncomplete false), so there is always one release's files.
+    KeepUntilDone: TStringList;
+    KeptIncomplete: Boolean;
     procedure DecideKeptTags(Releases: TJSONArray);
+    procedure FreeReleaseSpace(const RepoId, Full: string);
     function AdoptedIssue(Db: TGwDb; Number: Int64): string;
     function AdoptedComment(Db: TGwDb; Number: Int64; const CreatedAt: string): string;
     function AdoptedAsset(Db: TGwDb; const Tag, Name: string): string;
@@ -1129,6 +1135,7 @@ end;
 destructor TGwImporter.Destroy;
 begin
   KeptTags.Free;
+  KeepUntilDone.Free;
   Stats.Free;
   inherited Destroy;
 end;
@@ -1592,7 +1599,12 @@ begin
         F := Default(TGwFile);
         if not Fetch_(JStr(A, 'url'), 'application/octet-stream', ifthen_(JStr(A, 'name') <> '', JStr(A, 'name'),
           'file'), F) then
+        begin
+          // A kept release not fetched whole: the older release's files stay.
+          if (KeptTags <> nil) and (KeptTags.IndexOf(JStr(Rel, 'tag_name')) >= 0) then
+            KeptIncomplete := True;
           Continue;
+        end;
         F.Kind := 'asset';
         F.GithubId := Gid;
         F.Release := StrToInt64Def(JStr(Rel, 'id'), 0);
@@ -1857,6 +1869,17 @@ end;
 // 'all' every one. WeKan's releases are dozens of 300 MB bundles each, ten
 // years of them: an import that fetched the files of every release missing
 // them in Gitea - which keeps only the newest - would have filled the disk.
+// The tag of the release with GitHub id Id among Releases.
+function ReleaseTag(Releases: TJSONArray; Id: Int64): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to Releases.Count - 1 do
+    if StrToInt64Def(JStr(Releases.Items[I], 'id'), -1) = Id then
+      Exit(JStr(Releases.Items[I], 'tag_name'));
+end;
+
 procedure TGwImporter.DecideKeptTags(Releases: TJSONArray);
 var
   V: string;
@@ -1881,6 +1904,71 @@ begin
   end;
   if Assigned(Say) then
     Say('  release files kept: ' + ifthen_(KeptTags.Count = 1, KeptTags[0], IntToStr(KeptTags.Count) + ' newest releases'));
+end;
+
+// FIRST, before git and before a single file is fetched: the disk is made
+// room on. Every release's files go except the kept releases' and the newest
+// release that has files in Gitea now - committed on their own, the files
+// deleted by the journal at once. That newest one goes only later, in the
+// import's own transaction, once the kept releases' files are all fetched.
+procedure TGwImporter.FreeReleaseSpace(const RepoId, Full: string);
+var
+  Db: TGwDb;
+  Rows: TGtRows;
+  Entries: TJSONArray;
+  Newest: string;
+  I: Integer;
+  Freed: Int64;
+begin
+  FreeAndNil(KeepUntilDone);
+  KeptIncomplete := False;
+  if (KeptTags = nil) or (RepoId = '') then
+    Exit;
+  Entries := TJSONArray.Create;
+  try
+    Db := OpenDb;
+    try
+      Db.Exec('BEGIN IMMEDIATE', []);
+      try
+        Newest := Db.Scalar('SELECT r.tag_name FROM `release` r WHERE r.repo_id = ?1 AND EXISTS ' +
+          '(SELECT 1 FROM attachment a WHERE a.release_id = r.id) ORDER BY r.created_unix DESC, r.id DESC LIMIT 1',
+          [RepoId]);
+        if (Newest <> '') and (KeptTags.IndexOf(Newest) < 0) then
+        begin
+          KeepUntilDone := TStringList.Create;
+          KeepUntilDone.CaseSensitive := True;
+          KeepUntilDone.Add(Newest);
+        end;
+        Rows := Db.Query('SELECT a.id, a.uuid, r.tag_name FROM attachment a JOIN `release` r ON a.release_id = r.id ' +
+          'WHERE r.repo_id = ?1', [RepoId]);
+        for I := 0 to High(Rows) do
+          if (KeptTags.IndexOf(Rows[I][2]) < 0) and (Rows[I][2] <> Newest) then
+          begin
+            Db.Exec('DELETE FROM attachment WHERE id = ?1', [Rows[I][0]]);
+            if Rows[I][1] <> '' then
+              AddEntry(Entries, GtPath([P.Attachments, Rows[I][1][1], Rows[I][1][2], Rows[I][1]]), 'attachment', Rows[I][1]);
+            Count('release files removed');
+          end;
+        if Entries.Count > 0 then
+          W.WriteJournal('older release files ' + Full, Entries);
+        Db.Exec('COMMIT', []);
+      except
+        Db.Exec('ROLLBACK', []);
+        raise;
+      end;
+    finally
+      Db.Free;
+    end;
+    if Entries.Count > 0 then
+    begin
+      Freed := W.FinishJournal;
+      if Assigned(Say) then
+        Say('  release files: ' + IntToStr(Entries.Count) + ' of older releases removed first (' + IntToStr(Freed) +
+          ' files freed)' + ifthen_(Newest <> '', '; ' + Newest + '''s stay until the newer ones are fetched', ''));
+    end;
+  finally
+    Entries.Free;
+  end;
 end;
 
 function TGwImporter.FetchReleases(const Full, Since: string): TJSONArray;
@@ -2039,6 +2127,7 @@ var
   IssueIdx, ReleaseIdx, LinkI, LinkR, LinkC: string;
   Lines, Parts: TStringArray;
   Rows: TGtRows;
+  Whole: Boolean;
   Repo: TGitRepo;
   CTime64: Int64;
   Subject: string;
@@ -2278,10 +2367,26 @@ begin
     // refers to them. Only this repository's releases, only with a kept set.
     if (KeptTags <> nil) and (KeptTags.Count > 0) then
     begin
+      // The release kept until now (KeepUntilDone) goes only when every kept
+      // release was fetched whole and has files - in Gitea or fetched now. A
+      // release GitHub is still attaching files to has none yet.
+      Whole := not KeptIncomplete;
+      for K := 0 to KeptTags.Count - 1 do
+        if Whole and not Db.Has('SELECT 1 FROM attachment a JOIN `release` r ON a.release_id = r.id ' +
+          'WHERE r.repo_id = ?1 AND r.tag_name = ?2', [RepoId, KeptTags[K]]) then
+        begin
+          Whole := False;
+          for I := 0 to High(Files) do
+            if (Files[I].Kind = 'asset') and (ReleaseTag(Releases, Files[I].Release) = KeptTags[K]) then
+              Whole := True;
+        end;
+      if not Whole and (KeepUntilDone <> nil) and Assigned(Say) then
+        Say('  release files: ' + KeepUntilDone[0] + '''s kept - the newest release''s files are not all here yet');
       Rows := Db.Query('SELECT a.id, a.uuid, r.tag_name FROM attachment a JOIN `release` r ON a.release_id = r.id ' +
         'WHERE r.repo_id = ?1', [RepoId]);
       for K := 0 to High(Rows) do
-        if KeptTags.IndexOf(Rows[K][2]) < 0 then
+        if (KeptTags.IndexOf(Rows[K][2]) < 0) and
+          (Whole or (KeepUntilDone = nil) or (KeepUntilDone.IndexOf(Rows[K][2]) < 0)) then
         begin
           Db.Exec('DELETE FROM attachment WHERE id = ?1', [Rows[K][0]]);
           if Rows[K][1] <> '' then
@@ -2488,6 +2593,7 @@ begin
     FetchPulls(Full, Issues, Pulls);
     Releases := FetchReleases(Full, Since);
     DecideKeptTags(Releases);
+    FreeReleaseSpace(Existing, Full);
     try
       Src := PrepareGit(GitDir, Gh.GitUrl(Full, False), False, IsNew);
       // Stop is asked before every GitHub request, and here too: after the
