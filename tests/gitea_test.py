@@ -1561,6 +1561,60 @@ def test_import_live(work):
         rc, after_room, _ = g.doctor()
         new = [x for x in after_room if x not in before]
         check(rc == 0 and not new, f"gitea doctor check --all after making room {new}")
+        # The newest version inside a release, as github-to-gitea decides it -
+        # its own newest_version_files is the reference: a kept release holding
+        # the same files in several versions keeps only the newest version's,
+        # and the files without a version; the older versions' go from Gitea.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "github_to_gitea", os.path.join(mirror, "github-to-gitea", "github-to-gitea.py"))
+        g2g = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(g2g)
+
+        def release(rid, tag, day, names):
+            fake_git("tag", "-a", tag, "-m", tag, cwd=fake.src)
+            fake_git("push", "-q", fake.bare, tag, cwd=fake.src)
+            assets = []
+            for k, name in enumerate(names):
+                aid = rid * 100 + k
+                fake.files[f"/api/repos/omigh/proj/releases/assets/{aid}"] = name.encode() * 20
+                assets.append({"id": aid, "name": name, "size": len(name) * 20, "download_count": 0,
+                               "created_at": f"2099-01-{day}T00:00:00Z", "updated_at": f"2099-01-{day}T00:00:00Z",
+                               "url": f"{fake.api}/repos/omigh/proj/releases/assets/{aid}",
+                               "browser_download_url": f"{fake.base}/omigh/proj/releases/download/{tag}/{name}"})
+            return {"id": rid, "tag_name": tag, "name": tag, "body": "", "draft": False, "prerelease": False,
+                    "target_commitish": "main", "created_at": f"2099-01-{day}T00:00:00Z",
+                    "published_at": f"2099-01-{day}T00:00:00Z", "updated_at": f"2099-01-{day}T00:00:00Z",
+                    "author": fake.user("octocat", 583231), "assets": assets}
+
+        def gitea_files(tag):
+            g.start()
+            try:
+                s, r = g.api("GET", f"/api/v1/repos/omigh/proj/releases/tags/{tag}")
+                return sorted(a["name"] for a in r.get("assets", [])) if s == 200 else None
+            finally:
+                g.stop()
+
+        names = ["app-1.2.0-x86_64.deb", "app-1.3.0-x86_64.deb", "app-1.3.0-arm64.deb", "b-1.2.zip", "notes.txt"]
+        fake.releases.insert(0, release(960, "v1.3", "05", names))
+        rc, out, err = imp()
+        want, newest = g2g.newest_version_files(names)
+        check(rc == 0 and newest == "1.3.0" and gitea_files("v1.3") == sorted(want),
+              f"several versions in the newest release: only the newest version's files, as github-to-gitea's "
+              f"newest_version_files {gitea_files('v1.3')} {sorted(want)} {err[-300:]}")
+        check("only version 1.3.0's" in out + err, "and the log says so")
+        check(gitea_files("v1.2") == [], "the release before it: no files")
+        names2 = names + ["app-1.4.0-x86_64.deb"]
+        fake.releases[0]["assets"] = release(961, "v1.3b", "06", names2)["assets"]
+        rc, out, err = imp()
+        want2, newest2 = g2g.newest_version_files(names2)
+        check(rc == 0 and newest2 == "1.4.0" and gitea_files("v1.3") == sorted(want2),
+              f"a newer version in the same release: the older version's files go from Gitea {gitea_files('v1.3')} {sorted(want2)}")
+        same = ["wekan-13.31-amd64.zip", "wekan-13.31-arm64.zip", "README.txt"]
+        check(g2g.newest_version_files(same) == (set(same), None), "negative: one version only - every file is kept")
+        rc, after_ver, _ = g.doctor()
+        new = [x for x in after_ver if x not in before]
+        check(rc == 0 and not new, f"gitea doctor check --all after the version files {new}")
         # --- and deleting what was imported ---
         rc, out, err = omigitea("delete", "--config", g.ini, "--owner", "omigh", "--confirm", "omigh")
         rc2, after3, _ = g.doctor()

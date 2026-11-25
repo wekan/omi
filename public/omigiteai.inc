@@ -1093,7 +1093,7 @@ type
     KeepUntilDone: TStringList;
     KeptIncomplete: Boolean;
     procedure DecideKeptTags(Releases: TJSONArray);
-    procedure FreeReleaseSpace(const RepoId, Full: string);
+    procedure FreeReleaseSpace(const RepoId, Full: string; Releases: TJSONArray);
     function AdoptedIssue(Db: TGwDb; Number: Int64): string;
     function AdoptedComment(Db: TGwDb; Number: Int64; const CreatedAt: string): string;
     function AdoptedAsset(Db: TGwDb; const Tag, Name: string): string;
@@ -1492,6 +1492,95 @@ end;
 
 // Release assets and the files linked from bodies, new or changed, written to
 // new attachment files before anything is committed.
+// The newest version's files of one release, as github-to-gitea's
+// newest_version_files: a release like a nightly holds the same files over and
+// over with different version numbers (app-1.2.0-x86_64.deb ... app-1.4.3-
+// x86_64.deb). When a name, its version number (the first \d+(\.\d+)+ in it)
+// taken out, appears with more than one version, only the files of the newest
+// version are kept, and the files without a version number. Any other release
+// keeps every file: the result is then False and Wanted holds every name.
+// Versions compare as numbers, part by part, a shorter one first when equal.
+type
+  TGwVersion = array of Int64;
+
+function GwCompareVersion(const A, B: TGwVersion): Integer;
+var
+  I: Integer;
+begin
+  for I := 0 to Min(High(A), High(B)) do
+    if A[I] <> B[I] then
+      Exit(ifthen(A[I] < B[I], -1, 1));
+  Result := ifthen(Length(A) < Length(B), -1, ifthen(Length(A) > Length(B), 1, 0));
+end;
+
+function GwNewestVersionFiles(Assets: TJSONArray; Wanted: TStringList; out Newest: string): Boolean;
+var
+  R: TRegExpr;
+  I, K, Count_: Integer;
+  Names, Stems: TStringList;
+  Vers: array of TGwVersion;
+  Has: array of Boolean;
+  Parts: TStringArray;
+  Best: TGwVersion;
+  Many: Boolean;
+begin
+  Result := False;
+  Newest := '';
+  Wanted.Clear;
+  Names := TStringList.Create;
+  Stems := TStringList.Create;
+  R := TRegExpr.Create('\d+(?:\.\d+)+');
+  try
+    for I := 0 to Assets.Count - 1 do
+      Names.Add(JStr(Assets.Items[I], 'name'));
+    Count_ := Names.Count;
+    SetLength(Vers, Count_);
+    SetLength(Has, Count_);
+    for I := 0 to Count_ - 1 do
+    begin
+      Stems.Add('');
+      Has[I] := R.Exec(Names[I]);
+      if Has[I] then
+      begin
+        Parts := R.Match[0].Split(['.']);
+        SetLength(Vers[I], Length(Parts));
+        for K := 0 to High(Parts) do
+          Vers[I][K] := StrToInt64Def(Parts[K], 0);
+        Stems[I] := Copy(Names[I], 1, R.MatchPos[0] - 1) + #0 + Copy(Names[I], R.MatchPos[0] + R.MatchLen[0], MaxInt);
+      end;
+    end;
+    // Is any name there with more than one version?
+    Many := False;
+    for I := 0 to Count_ - 1 do
+      if Has[I] and not Many then
+        for K := I + 1 to Count_ - 1 do
+          if Has[K] and (Stems[K] = Stems[I]) and (GwCompareVersion(Vers[I], Vers[K]) <> 0) then
+          begin
+            Many := True;
+            Break;
+          end;
+    if not Many then
+    begin
+      Wanted.AddStrings(Names);
+      Exit;
+    end;
+    Best := nil;
+    for I := 0 to Count_ - 1 do
+      if Has[I] and ((Best = nil) or (GwCompareVersion(Vers[I], Best) > 0)) then
+        Best := Vers[I];
+    for I := 0 to Count_ - 1 do
+      if not Has[I] or (GwCompareVersion(Vers[I], Best) = 0) then
+        Wanted.Add(Names[I]);
+    for K := 0 to High(Best) do
+      Newest := Newest + ifthen_(K > 0, '.', '') + IntToStr(Best[K]);
+    Result := True;
+  finally
+    R.Free;
+    Stems.Free;
+    Names.Free;
+  end;
+end;
+
 // A repository Gitea's own GitHub migration made has the issues, comments and
 // release files already, keyed by number, by GitHub's creation time and by
 // name - but not in Omi's map, so an import added every comment and file a
@@ -1536,6 +1625,9 @@ var
   Links: TStringList;
   Fid, Gid, Number: Int64;
   F: TGwFile;
+  Versioned: Boolean;
+  Wanted: TStringList;
+  Version: string;
 
   function Fetch_(const Url, Accept, Name: string; out Fl: TGwFile): Boolean;
   var
@@ -1574,6 +1666,8 @@ var
 
 begin
   Result := nil;
+  Wanted := TStringList.Create;
+  Wanted.CaseSensitive := True;
   Db := OpenDb;
   try
     for I := 0 to Releases.Count - 1 do
@@ -1582,9 +1676,18 @@ begin
       Assets := JArr(Rel, 'assets');
       if Assets = nil then
         Continue;
+      // A kept release of several versions of the same files: only the newest
+      // version's (GwNewestVersionFiles), unless every release is kept in full.
+      Versioned := (KeptTags <> nil) and (KeptTags.IndexOf(JStr(Rel, 'tag_name')) >= 0) and
+        GwNewestVersionFiles(Assets, Wanted, Version);
+      if Versioned and Assigned(Say) then
+        Say('  ' + JStr(Rel, 'tag_name') + ': ' + IntToStr(Assets.Count) + ' files of several versions; only version ' +
+          Version + '''s, ' + IntToStr(Wanted.Count) + ' files');
       for K := 0 to Assets.Count - 1 do
       begin
         A := TJSONObject(Assets.Items[K]);
+        if Versioned and (Wanted.IndexOf(JStr(A, 'name')) < 0) then
+          Continue;
         Gid := StrToInt64Def(JStr(A, 'id'), 0);
         Have := Mapped(Db, 'asset', Gid, Upd);
         Key := JStr(A, 'size') + '|' + JStr(A, 'updated_at');
@@ -1665,6 +1768,7 @@ begin
     end;
   finally
     Db.Free;
+    Wanted.Free;
   end;
   Count('files downloaded', Length(Result));
 end;
@@ -1911,14 +2015,16 @@ end;
 // release that has files in Gitea now - committed on their own, the files
 // deleted by the journal at once. That newest one goes only later, in the
 // import's own transaction, once the kept releases' files are all fetched.
-procedure TGwImporter.FreeReleaseSpace(const RepoId, Full: string);
+procedure TGwImporter.FreeReleaseSpace(const RepoId, Full: string; Releases: TJSONArray);
 var
   Db: TGwDb;
   Rows: TGtRows;
   Entries: TJSONArray;
-  Newest: string;
-  I: Integer;
+  Newest, Version: string;
+  I, K: Integer;
   Freed: Int64;
+  Wanted: TStringList;
+  Assets: TJSONArray;
 begin
   FreeAndNil(KeepUntilDone);
   KeptIncomplete := False;
@@ -1949,6 +2055,33 @@ begin
               AddEntry(Entries, GtPath([P.Attachments, Rows[I][1][1], Rows[I][1][2], Rows[I][1]]), 'attachment', Rows[I][1]);
             Count('release files removed');
           end;
+        // In a kept release, the files of its older versions go too
+        // (GwNewestVersionFiles), as github-to-gitea deletes them before it
+        // uploads the newest version's.
+        Wanted := TStringList.Create;
+        try
+          Wanted.CaseSensitive := True;
+          for K := 0 to Releases.Count - 1 do
+          begin
+            if KeptTags.IndexOf(JStr(Releases.Items[K], 'tag_name')) < 0 then
+              Continue;
+            Assets := JArr(Releases.Items[K], 'assets');
+            if (Assets = nil) or not GwNewestVersionFiles(Assets, Wanted, Version) then
+              Continue;
+            Rows := Db.Query('SELECT a.id, a.uuid, a.name FROM attachment a JOIN `release` r ON a.release_id = r.id ' +
+              'WHERE r.repo_id = ?1 AND r.tag_name = ?2', [RepoId, JStr(Releases.Items[K], 'tag_name')]);
+            for I := 0 to High(Rows) do
+              if Wanted.IndexOf(Rows[I][2]) < 0 then
+              begin
+                Db.Exec('DELETE FROM attachment WHERE id = ?1', [Rows[I][0]]);
+                if Rows[I][1] <> '' then
+                  AddEntry(Entries, GtPath([P.Attachments, Rows[I][1][1], Rows[I][1][2], Rows[I][1]]), 'attachment', Rows[I][1]);
+                Count('release files removed');
+              end;
+          end;
+        finally
+          Wanted.Free;
+        end;
         if Entries.Count > 0 then
           W.WriteJournal('older release files ' + Full, Entries);
         Db.Exec('COMMIT', []);
@@ -2593,7 +2726,7 @@ begin
     FetchPulls(Full, Issues, Pulls);
     Releases := FetchReleases(Full, Since);
     DecideKeptTags(Releases);
-    FreeReleaseSpace(Existing, Full);
+    FreeReleaseSpace(Existing, Full, Releases);
     try
       Src := PrepareGit(GitDir, Gh.GitUrl(Full, False), False, IsNew);
       // Stop is asked before every GitHub request, and here too: after the
