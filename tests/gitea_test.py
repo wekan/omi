@@ -1441,9 +1441,19 @@ def test_import_live(work):
         fake.log.clear()
         rc, out, err = imp()
         st = _json.loads(out).get("stats", {}) if rc == 0 else {}
-        check(rc == 0 and st.get("comments adopted") == 2 and st.get("issues adopted") == 3 and not st.get("comments")
+        # Not ten years of history either: it starts from the newest issue or
+        # comment Gitea has (2099-01-01 here), a day earlier, so only issues 1
+        # and 3 and the comment of 3 are read - and adopted.
+        check(rc == 0 and st.get("comments adopted") == 1 and st.get("issues adopted") == 2 and not st.get("comments")
               and not st.get("issues") and not st.get("attachments") and not st.get("files downloaded"),
               f"an import into a repository Omi did not write adopts its issues and comments {st} {err[-300:]}")
+        check("what changed on GitHub since 2098-12-31T00:00:00Z" in err + out
+              and all(q.get("since") == "2098-12-31T00:00:00Z" for q in fake.hits("/api/repos/omigh/proj/issues"))
+              and all(q.get("since") == "2098-12-31T00:00:00Z" for q in fake.hits("/api/repos/omigh/proj/issues/comments")),
+              f"and asks GitHub only for what changed since Gitea's newest, a day earlier "
+              f"{fake.hits('/api/repos/omigh/proj/issues')} {fake.hits('/api/repos/omigh/proj/issues/comments')}")
+        check([q.get("page") for q in fake.hits("/api/repos/omigh/proj/releases")] == ["1"],
+              f"releases: one page, newest first, stopped at the old ones {fake.hits('/api/repos/omigh/proj/releases')}")
         check(not fake.hits("/api/repos/omigh/proj/releases/assets/901")
               and not fake.hits("/user-attachments/assets/0f1e2d3c-1111-2222-3333-444455556666"),
               "and fetches none of the files Gitea already has")

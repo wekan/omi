@@ -1107,6 +1107,7 @@ type
     procedure ContentRows(Db: TGwDb; const RepoId, GitDir: string; Labels, Milestones, Issues, Comments: TJSONArray;
       Pulls: TJSONObject; Releases: TJSONArray; const Files: TGwFiles; OldFiles: TJSONArray);
     procedure FetchPulls(const Full: string; Issues: TJSONArray; Pulls: TJSONObject);
+    function FetchReleases(const Full, Since: string): TJSONArray;
     procedure PullRow(Db: TGwDb; const RepoId, IssueId: string; Number: Int64; Pr: TJSONObject; const GitDir: string);
     procedure Counters(Db: TGwDb; const RepoId, OwnerId: string);
   end;
@@ -1839,6 +1840,48 @@ end;
 // PullRow reads (draft, head, base, merged_at, merge_commit_sha), so a sync of
 // many is read from it, stopping once all are found; a few, or any the list did
 // not reach, one by one.
+// The releases, newest first (as GitHub lists them). With Since, paging stops
+// at the first page whose oldest release was made before it: ten years of
+// releases are not read again on every import. A release older than Since is
+// in Gitea already (imported, or adopted by its tag).
+function TGwImporter.FetchReleases(const Full, Since: string): TJSONArray;
+var
+  Page, K, N: Integer;
+  D: TJSONData;
+  Oldest: string;
+begin
+  if Since = '' then
+    Exit(Gh.All('repos/' + Full + '/releases', ''));
+  Result := TJSONArray.Create;
+  Page := 1;
+  try
+    repeat
+      D := Gh.One('repos/' + Full + '/releases', 'per_page=100&page=' + IntToStr(Page));
+      N := 0;
+      Oldest := '';
+      try
+        if D is TJSONArray then
+        begin
+          N := TJSONArray(D).Count;
+          for K := 0 to N - 1 do
+          begin
+            Result.Add(TJSONArray(D).Items[K].Clone);
+            Oldest := JStr(TJSONArray(D).Items[K], 'created_at');
+          end;
+        end;
+      finally
+        D.Free;
+      end;
+      Inc(Page);
+    until (N < 100) or ((Oldest <> '') and (Oldest < Since));
+  except
+    Result.Free;
+    raise;
+  end;
+  if Assigned(Say) then
+    Say('  GitHub: releases since ' + Since + ': ' + IntToStr(Result.Count) + ' read');
+end;
+
 procedure TGwImporter.FetchPulls(const Full: string; Issues: TJSONArray; Pulls: TJSONObject);
 var
   Wanted: TStringList;
@@ -2342,7 +2385,24 @@ begin
       Since := Rows[0][1];
     Existing := Db.Scalar('SELECT id FROM repository WHERE owner_id = ?1 AND lower_name = ?2', [OwnerId, LowerCase(Name)]);
     if Existing = '' then
-      Since := '';
+      Since := ''
+    else if Since = '' then
+    begin
+      // In Gitea already, from elsewhere (its own GitHub migration), and never
+      // imported by Omi: start from the newest issue or comment Gitea has, a
+      // day earlier for clocks and late edits - not from ten years of history.
+      // What overlaps is adopted (AdoptedIssue, AdoptedComment).
+      N := StrToInt64Def(Db.Scalar('SELECT MAX(m) FROM (' +
+        'SELECT MAX(updated_unix) AS m FROM issue WHERE repo_id = ?1 UNION ALL ' +
+        'SELECT MAX(c.updated_unix) FROM comment c JOIN issue i ON c.issue_id = i.id WHERE i.repo_id = ?1)',
+        [Existing]), 0);
+      if N > 86400 then
+      begin
+        Since := FormatDateTime('yyyy-mm-dd"T"hh:nn:ss"Z"', UnixToDateTime(N - 86400));
+        if Assigned(Say) then
+          Say('  Gitea has this repository already: what changed on GitHub since ' + Since);
+      end;
+    end;
   finally
     Db.Free;
   end;
@@ -2370,7 +2430,7 @@ begin
   WikiSrc := '';
   try
     FetchPulls(Full, Issues, Pulls);
-    Releases := Gh.All('repos/' + Full + '/releases', '');
+    Releases := FetchReleases(Full, Since);
     try
       Src := PrepareGit(GitDir, Gh.GitUrl(Full, False), False, IsNew);
       // Stop is asked before every GitHub request, and here too: after the
