@@ -1845,6 +1845,38 @@ def test_import_live(work):
               "the refs are the remote's and the remote was removed")
         rc, out, err = omigitea("delete", "--config", g.ini, "--owner", "omigh", "--confirm", "omigh")
         check(rc == 0, "and it is deleted again")
+        # --- issues turned off on GitHub (wekan/wekan-gantt-gpl) ---
+        # The repository-wide issues/comments is 404 there, and the import of
+        # the whole organization ended at it. The pull requests' comments are
+        # read one by one instead, and a 410 for an issue is no comments.
+        fake.issues_off = True
+        fake.comments.append({"id": 2003, "issue_url": f"{fake.api}/repos/omigh/proj/issues/2", "body": "A pull request comment",
+                              "user": fake.user("hubot", 3), "created_at": "2026-01-02T05:00:00Z",
+                              "updated_at": "2026-01-02T05:00:00Z"})
+        fake.log.clear()
+        try:
+            rc, out, err = imp()
+        finally:
+            fake.issues_off = False
+            fake.comments.pop()
+        c = sqlite3.connect(g.db)
+        bodies = [r[0] for r in c.execute(
+            "SELECT c.content FROM comment c JOIN issue i ON c.issue_id = i.id JOIN repository r ON i.repo_id = r.id "
+            "WHERE lower(r.owner_name) = 'omigh' AND i.\"index\" = 2 AND c.type = 0")]
+        c.close()
+        check(rc == 0 and bodies == ["A pull request comment"],
+              f"issues turned off: the import succeeds, with the pull request's comment (exit {rc}) {bodies} {out[-300:]}")
+        check(not fake.hits("/api/repos/omigh/proj/issues/comments") and fake.hits("/api/repos/omigh/proj/issues/2/comments"),
+              "and its comments were asked per pull request, not from the 404 list")
+        # Negative: with issues on, a 404 there is still an error, not "no comments".
+        fake.not_found.add("/api/repos/omigh/proj/issues/comments")
+        try:
+            rc2, out2, _ = imp()
+        finally:
+            fake.not_found.clear()
+        check(rc2 == 1 and "issues/comments: 404" in out2, f"negative: issues on, a 404 still ends the import (exit {rc2})")
+        rc, out, err = omigitea("delete", "--config", g.ini, "--owner", "omigh", "--confirm", "omigh")
+        check(rc == 0, "and it is deleted again")
         exf = os.path.join(work, "import-exclude.txt")
         with open(exf, "w") as f:
             f.write("# no longer synced\nomigh/proj\n")

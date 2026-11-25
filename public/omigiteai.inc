@@ -1121,6 +1121,7 @@ type
     procedure ContentRows(Db: TGwDb; const RepoId, GitDir: string; Labels, Milestones, Issues, Comments: TJSONArray;
       Pulls: TJSONObject; Releases: TJSONArray; const Files: TGwFiles; OldFiles: TJSONArray);
     procedure FetchPulls(const Full: string; Issues: TJSONArray; Pulls: TJSONObject);
+    function CommentsIssuesOff(const Full, Params: string; Issues: TJSONArray): TJSONArray;
     function FetchReleases(const Full, Since: string): TJSONArray;
     procedure PullRow(Db: TGwDb; const RepoId, IssueId: string; Number: Int64; Pr: TJSONObject; const GitDir: string);
     procedure Counters(Db: TGwDb; const RepoId, OwnerId: string);
@@ -2201,6 +2202,49 @@ begin
     Say('  GitHub: releases since ' + Since + ': ' + IntToStr(Result.Count) + ' read');
 end;
 
+// A repository whose issues are turned off on GitHub answers 404 to the
+// repository-wide issues/comments, though its pull requests can still have
+// conversation comments. They are read one item at a time, and a 404 or 410
+// there is an item with none - not a failed import (wekan/wekan-gantt-gpl).
+function TGwImporter.CommentsIssuesOff(const Full, Params: string; Issues: TJSONArray): TJSONArray;
+var
+  I, K, N, Page, S: Integer;
+  D: TJSONData;
+  Q: string;
+begin
+  Result := TJSONArray.Create;
+  if Assigned(Say) then
+    Say('  GitHub: issues are turned off for this repository; comments are read per pull request');
+  for I := 0 to Issues.Count - 1 do
+  begin
+    Page := 1;
+    repeat
+      GwCheckStop;
+      Q := Params;
+      if Q <> '' then
+        Q := Q + '&';
+      Q := Q + 'per_page=100&page=' + IntToStr(Page);
+      D := Gh.Get('repos/' + Full + '/issues/' + JStr(Issues.Items[I], 'number') + '/comments', Q, S);
+      N := 0;
+      try
+        if (S = 404) or (S = 410) then
+          Break;
+        if S <> 200 then
+          raise EGw.Create('GitHub repos/' + Full + '/issues/' + JStr(Issues.Items[I], 'number') + '/comments: ' + IntToStr(S));
+        if D is TJSONArray then
+        begin
+          N := TJSONArray(D).Count;
+          for K := 0 to N - 1 do
+            Result.Add(TJSONArray(D).Items[K].Clone);
+        end;
+      finally
+        D.Free;
+      end;
+      Inc(Page);
+    until N < 100;
+  end;
+end;
+
 procedure TGwImporter.FetchPulls(const Full: string; Issues: TJSONArray; Pulls: TJSONObject);
 var
   Wanted: TStringList;
@@ -2776,7 +2820,12 @@ begin
   end;
   Issues := Gh.All('repos/' + Full + '/issues', Params);
   GwStatus(Say, 'phase', 'comments');
-  Comments := Gh.All('repos/' + Full + '/issues/comments', CParams);
+  // Only an explicit has_issues: false; a repository object without the field
+  // is read as before.
+  if (Gr.Find('has_issues') <> nil) and not JBool(Gr, 'has_issues') then
+    Comments := CommentsIssuesOff(Full, CParams, Issues)
+  else
+    Comments := Gh.All('repos/' + Full + '/issues/comments', CParams);
   Pulls := TJSONObject.Create;
   NewFiles := TJSONArray.Create;
   OldFiles := TJSONArray.Create;

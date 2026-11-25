@@ -6,6 +6,7 @@ change between two imports, and it logs every request (path, query, whether a
 token came)."""
 import http.server
 import json
+import re
 import os
 import subprocess
 import threading
@@ -42,6 +43,10 @@ class FakeGitHub:
         self.extra_repos = []
         # Called once after the answer to a path is sent: path -> function.
         self.after_get = {}
+        # Issues turned off, as wekan/wekan-gantt-gpl: has_issues false, the
+        # repository-wide issues/comments is 404, the issue list holds only the
+        # pull requests, and a plain issue's comments are 410 Gone.
+        self.issues_off = False
         outer = self
 
         class H(http.server.BaseHTTPRequestHandler):
@@ -193,13 +198,24 @@ class FakeGitHub:
             return 200, "application/octet-stream", self.files[path]
         if int(q.get("page", "1")) > 1:
             return 200, "application/json", b"[]"
+        m = re.match(rf"^/api/repos/{re.escape(full)}/issues/(\d+)/comments$", path)
+        if m:
+            n = int(m.group(1))
+            if self.issues_off and n not in self.pulls:
+                return 410, "application/json", b'{"message": "Issues are disabled for this repo"}'
+            return 200, "application/json", json.dumps([c for c in self.since(self.comments, q)
+                                                        if c["issue_url"].endswith(f"/issues/{n}")]).encode()
+        if self.issues_off and path == f"/api/repos/{full}/issues/comments":
+            return 404, "application/json", b'{"message": "Not Found"}'
+        repo = dict(self.repo, has_issues=not self.issues_off) if self.issues_off else self.repo
+        issues = [i for i in self.issues if "pull_request" in i] if self.issues_off else self.issues
         data = {
             f"/api/users/{self.org}": self.owner,
             f"/api/orgs/{self.org}": self.owner,
-            f"/api/orgs/{self.org}/repos": [self.repo] + self.extra_repos,
+            f"/api/orgs/{self.org}/repos": [repo] + self.extra_repos,
             f"/api/repos/{full}/labels": self.labels,
             f"/api/repos/{full}/milestones": self.milestones,
-            f"/api/repos/{full}/issues": self.since(self.issues, q),
+            f"/api/repos/{full}/issues": self.since(issues, q),
             f"/api/repos/{full}/issues/comments": self.since(self.comments, q),
             f"/api/repos/{full}/releases": self.releases,
             # The list of pull requests, as GET /repos/{full}/pulls?state=all.
