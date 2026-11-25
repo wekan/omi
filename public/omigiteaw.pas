@@ -239,6 +239,13 @@ const
   GW_REF_COLUMNS = ' act_user_id actor_id assignee_id base_repo_id blockee_id blocker_id creator_id deleted_by_id doer_id follow_id fork_id head_repo_id inviter_id issue_id merger_id org_id owner_id poster_id publisher_id pusher_id recipient_id redirect_repo_id redirect_user_id ref_repo_id repo_id repository_id resolve_doer_id reviewer_id source_repo_id template_id trigger_user_id uid uploader_id user_id workflow_repo_id workflow_source_repo_id ';
 
 // Why Gitea (or something else using its database or port) runs; empty when stopped.
+// The port Omi itself listens on (set by the server before it starts). Omi
+// serves the same files Gitea did, and may serve them on Gitea's own
+// HTTP_PORT: what answers there is then Omi, not a running Gitea, and Omi's own
+// writes must not be refused because of it.
+var
+  GwOwnPort: Integer = 0;
+
 function GwRunning(const P: TGtPaths; const PidFile: string): TStringList;
 // What deleting Owner - or only its repository Repo, when Repo <> '' - removes:
 // rows per table, files and bytes. Read-only.
@@ -852,7 +859,7 @@ begin
     until FindNext(Sr) <> 0;
     FindClose(Sr);
   end;
-  if P.HttpPort > 0 then
+  if (P.HttpPort > 0) and (P.HttpPort <> GwOwnPort) then
   begin
     Sock := fpSocket(AF_INET, SOCK_STREAM, 0);
     if Sock >= 0 then

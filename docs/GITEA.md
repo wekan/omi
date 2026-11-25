@@ -194,7 +194,10 @@ write:
   (`GITEA_PID_FILE`, else `/run/gitea.pid`, `/var/run/gitea.pid`,
   `<work>/gitea.pid`), when a `gitea web` process uses this app.ini (or this
   work directory), when any process has the database open, or when anything
-  answers on Gitea's `HTTP_ADDR:HTTP_PORT`;
+  answers on Gitea's `HTTP_ADDR:HTTP_PORT` - unless that port is Omi's own:
+  Omi serves Gitea's files itself, with no Gitea server (none runs on the
+  Amiga), and may serve them on Gitea's port. Where no Gitea is installed,
+  none of these finds anything and nothing needs stopping;
 - **takes the exclusive lock** `<APP_DATA_PATH>/.omi-gitea.lock`, created with
   `O_CREAT|O_EXCL` and holding `<pid> <host> omigitea <UTC time>`. A lock of
   this host whose process is gone is stale and taken over; any other lock

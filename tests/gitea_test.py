@@ -397,6 +397,14 @@ def test_web(work, fixture_ids):
     with open(os.path.join(srv, "settings", "users.ini"), "w") as f:
         f.write("tester:secret::en\n")
     port = free_port()
+    # Omi serves Gitea's files in Gitea's place, here on Gitea's own HTTP_PORT:
+    # what answers there is Omi itself, and its writes must not be refused as
+    # "Gitea is running".
+    app_ini = os.path.join(work, "custom", "conf", "app.ini")
+    with open(app_ini) as f:
+        ini_before = f.read()
+    with open(app_ini, "w") as f:
+        f.write(re.sub(r"(?m)^HTTP_PORT = .*$", f"HTTP_PORT = {port}", ini_before))
     log = open(os.path.join(srv, "server.log"), "w")
     fake_git = make_fake_git(os.path.join(work, "web-fakegit"))
     user_api = FakeUserApi()
@@ -481,6 +489,7 @@ def test_web(work, fixture_ids):
         check("ghost/gone.git" in b.page and fx.ATT_ORPHAN in b.page, "orphans page")
         # Delete all orphans: the page says what goes, and a wrong number deletes nothing.
         b.click(action="/gitea/orphans/delete")
+        check("Gitea is running" not in b.page, "Omi on Gitea's HTTP_PORT is not a running Gitea")
         check('name="confirm"' in b.page and "attachment-file" in b.page and "git-directory" in b.page,
               "the delete-orphans page lists what goes, by type, and asks for the number")
         orphan_file = os.path.join(work, "data", "attachments", fx.ATT_ORPHAN[0], fx.ATT_ORPHAN[1], fx.ATT_ORPHAN)
@@ -721,6 +730,8 @@ def test_web(work, fixture_ids):
         check("not a valid owner" in b.page, "an import of a name that is not a name is refused")
         check(server.poll() is None, "the server is still running")
     finally:
+        with open(app_ini, "w") as f:
+            f.write(ini_before)
         user_api.close()
         server.terminate()
         try:

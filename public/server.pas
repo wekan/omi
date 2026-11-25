@@ -8766,6 +8766,8 @@ begin
   if Settings.Port <> PreferredPort then
     WriteLn('Port ', PreferredPort, ' is unavailable; using ', Settings.Port, '.');
   WriteLn('Port: ', Settings.Port);
+  // Omi on Gitea's HTTP_PORT is Omi, not a running Gitea (GwRunning).
+  GwOwnPort := Settings.Port;
   WriteLn('SQLite: embedded ', StrPas(sqlite3_libversion));
   WriteLn('Users file: ', DataPath(USERS_FILE));
   WriteLn('Repos dir: ', DataPath(REPOS_DIR));
