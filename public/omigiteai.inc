@@ -1628,6 +1628,7 @@ var
   Versioned: Boolean;
   Wanted: TStringList;
   Version: string;
+  BodyFiles: Integer;
 
   function Fetch_(const Url, Accept, Name: string; out Fl: TGwFile): Boolean;
   var
@@ -1666,6 +1667,7 @@ var
 
 begin
   Result := nil;
+  BodyFiles := 0;
   Wanted := TStringList.Create;
   Wanted.CaseSensitive := True;
   Db := OpenDb;
@@ -1700,6 +1702,11 @@ begin
         if (KeptTags <> nil) and (KeptTags.IndexOf(JStr(Rel, 'tag_name')) < 0) then
           Continue;
         F := Default(TGwFile);
+        // A release file can be hundreds of MB: each is said, or minutes pass
+        // with nothing in the log.
+        if Assigned(Say) then
+          Say('  fetching ' + JStr(Rel, 'tag_name') + '/' + JStr(A, 'name') + ' (' +
+            IntToStr(StrToInt64Def(JStr(A, 'size'), 0) div 1048576) + ' MB)');
         if not Fetch_(JStr(A, 'url'), 'application/octet-stream', ifthen_(JStr(A, 'name') <> '', JStr(A, 'name'),
           'file'), F) then
         begin
@@ -1753,6 +1760,9 @@ begin
           F := Default(TGwFile);
           if not Fetch_(Link, '*/*', '', F) then
             Continue;
+          Inc(BodyFiles);
+          if (BodyFiles mod 50 = 0) and Assigned(Say) then
+            Say('  files of issues and comments: ' + IntToStr(BodyFiles) + ' fetched');
           F.Kind := 'file';
           F.GithubId := Fid;
           F.ParentKind := ParentKind;
@@ -2030,6 +2040,8 @@ begin
   KeptIncomplete := False;
   if (KeptTags = nil) or (RepoId = '') then
     Exit;
+  if Assigned(Say) then
+    Say('  release files: looking for those of older releases and older versions in Gitea');
   Entries := TJSONArray.Create;
   try
     Db := OpenDb;
@@ -2094,7 +2106,16 @@ begin
     end;
     if Entries.Count > 0 then
     begin
-      Freed := W.FinishJournal;
+      if Assigned(Say) then
+        Say('  release files: removing ' + IntToStr(Entries.Count) + ' files of older releases first');
+      // The job page's bar follows these (progress N/M lines).
+      W.ProgressDone := 0;
+      W.ProgressTotal := Entries.Count;
+      try
+        Freed := W.FinishJournal;
+      finally
+        W.ProgressTotal := 0;
+      end;
       if Assigned(Say) then
         Say('  release files: ' + IntToStr(Entries.Count) + ' of older releases removed first (' + IntToStr(Freed) +
           ' files freed)' + ifthen_(Newest <> '', '; ' + Newest + '''s stay until the newer ones are fetched', ''));
@@ -2746,6 +2767,9 @@ begin
         AddEntry(NewFiles, GtPath([P.Attachments, Files[I].Uuid[1], Files[I].Uuid[2], Files[I].Uuid]),
           'attachment', Files[I].Uuid);
       Committed := False;
+      if Assigned(Say) then
+        Say('  writing to Gitea: ' + IntToStr(Issues.Count) + ' issues and pull requests, ' + IntToStr(Comments.Count) +
+          ' comments, ' + IntToStr(Releases.Count) + ' releases, ' + IntToStr(Length(Files)) + ' files');
       Db := OpenDb;
       try
         Db.Exec('BEGIN IMMEDIATE', []);
@@ -2778,6 +2802,8 @@ begin
           end;
           Db.Exec('COMMIT', []);
           Committed := True;
+          if Assigned(Say) then
+            Say('  written to Gitea');
         except
           // A new folder renamed into place has no row now: the journal removes it.
           Db.Exec('ROLLBACK', []);

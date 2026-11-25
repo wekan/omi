@@ -883,8 +883,11 @@ function Referenced(Db: TGwDb; const Kind, Key: string): Boolean;
 var
   Sql: string;
 begin
+  // Gitea writes a uuid in lower case; `lower(uuid) = ...` read the whole
+  // attachment table for every file, which on a Gitea with years of release
+  // files made removing them take hours. An equality uses the uuid index.
   if Kind = 'attachment' then
-    Sql := 'SELECT 1 FROM attachment WHERE lower(uuid) = lower(?1)'
+    Sql := 'SELECT 1 FROM attachment WHERE uuid = lower(?1) OR uuid = ?1'
   else if Kind = 'lfs' then
     Sql := 'SELECT 1 FROM lfs_meta_object WHERE oid = ?1'
   else if Kind = 'package' then
@@ -1041,7 +1044,11 @@ begin
           if ProgressTotal > 0 then
           begin
             Inc(ProgressDone);
-            GwProgress(Say, ProgressDone, ProgressTotal, 'files: ' + O.Get('kind', '') + ' ' + O.Get('path', ''));
+            // Every file of a few hundred; of tens of thousands about every
+            // per cent, or the log is a line per file.
+            if (ProgressTotal <= 200) or (ProgressDone = ProgressTotal) or
+              (ProgressDone mod Max(1, ProgressTotal div 100) = 0) then
+              GwProgress(Say, ProgressDone, ProgressTotal, 'files: ' + O.Get('kind', '') + ' ' + O.Get('path', ''));
           end;
         end;
     end;

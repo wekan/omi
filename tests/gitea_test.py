@@ -1338,6 +1338,9 @@ def test_import_live(work):
               "the pull requests are read from their list, not one request each")
         check("GitHub: 1 pull requests" in said and "labels, milestones, issues and comments" in said,
               "the log says what it is reading")
+        check("fetching v1.0/app-linux.bin" in said and "writing to Gitea:" in said and "written to Gitea" in said
+              and said.index("writing to Gitea:") < said.index("written to Gitea"),
+              "and every file it fetches, and when it writes Gitea")
         check("fake-secret-token" not in out + err, "the token is not printed")
         check(not os.path.exists(calls), "GIT_FETCH=pascal (the default): no git program ran")
         check([x["query"] for x in fake.git_log if x["method"] == "GET"] == ["service=git-upload-pack"]
@@ -1538,6 +1541,8 @@ def test_import_live(work):
               and said.index("removed first") < said.index("git: "),
               f"the older releases' files are removed first, before git and the files {st} {said[-500:]}")
         check("v1.1's kept" in said, "the newest release not fetched whole: the one before it keeps its files")
+        check("release files: removing 1 files of older releases first" in said and "progress 1/1 files: attachment" in said,
+              "making room shows its progress: how many, and the job page's bar")
         g.start()
         try:
             n = {t: len(g.api("GET", f"/api/v1/repos/omigh/proj/releases/tags/{t}")[1].get("assets", []))
@@ -1615,6 +1620,19 @@ def test_import_live(work):
         rc, after_ver, _ = g.doctor()
         new = [x for x in after_ver if x not in before]
         check(rc == 0 and not new, f"gitea doctor check --all after the version files {new}")
+        # Whether a removed file is still referred to is asked per file; with
+        # `lower(uuid) = lower(?)` that read the whole attachment table each time
+        # (hours for years of release files). It must use the uuid index.
+        import sqlite3
+        src = open(os.path.join(REPO, "public", "omigiteaw.pas"), encoding="utf-8").read()
+        q = re.search(r"Sql := '(SELECT 1 FROM attachment WHERE [^']*)'", src).group(1)
+        con = sqlite3.connect(f"file:{g.db}?mode=ro", uri=True)
+        try:
+            plan = " ".join(str(r[-1]) for r in con.execute("EXPLAIN QUERY PLAN " + q, ("ABC",)))
+        finally:
+            con.close()
+        check("lower(uuid)" not in q and "INDEX" in plan.upper() and "SCAN attachment" not in plan,
+              f"the per-file reference check uses the uuid index: {q} -> {plan}")
         # --- and deleting what was imported ---
         rc, out, err = omigitea("delete", "--config", g.ini, "--owner", "omigh", "--confirm", "omigh")
         rc2, after3, _ = g.doctor()
