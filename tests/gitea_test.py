@@ -575,6 +575,31 @@ def test_web(work, fixture_ids):
         b.click(action="/gitea/jobs/" + prog)
         check("Progress: <b>100 %</b>" in b.page and "Finished with exit code" in b.page,
               "a finished delete shows 100 %")
+        # --- the whole import at a glance, from its status lines ---
+        imp_log = "2026-01-01_00-00-04-import-wekan-wekan.log"
+        started = int(time.time()) - 3725
+        with open(os.path.join(jobs, imp_log), "w") as f:
+            f.write(f"status started {started}\nstatus repos 1/48\nstatus repo wekan/wekan\n"
+                    "status phase space-freed\nstatus toremove 5000 12884901888\n"
+                    "progress 1200/5000 files: attachment /data/attachments/a/b/ab\n"
+                    "status removed 1200 3221225472\nstatus fetched 3 943718400\n")
+        b.click(action="/gitea/jobs")
+        b.click(action="/gitea/jobs/" + imp_log)
+        page = b.page
+        check("Repositories</b></td><td>1 / 48" in page and "Repository</b></td><td>wekan/wekan" in page,
+              f"the job page shows which repository of how many {page[:3000]}")
+        check("Status</b></td><td>Space freed" in page, "and what it is doing")
+        check(re.search(r"Duration</b></td><td>1:0[12]:\d\d", page), "and for how long")
+        check(re.search(r"Space freed</b></td><td>1200 / 5000 Files, 3([.,]0)? GB / 12([.,]0)? GB", page),
+              f"and the files removed of how many, with their sizes {re.findall(r'Space freed</b></td><td>[^<]*', page)}")
+        check(re.search(r"Attachments</b></td><td>3 Files, ", page), "and the files fetched")
+        check("status repo" not in page.split("Newest log lines")[1].split("</pre>")[0],
+              "negative: the status lines are not among the newest lines")
+        with open(os.path.join(jobs, imp_log), "a") as f:
+            f.write("status phase save\nstatus repos 2/48\nstatus repo wekan/wekan-snap\n")
+        b.click(label="Refresh")
+        check("Repositories</b></td><td>2 / 48" in b.page and "wekan/wekan-snap" in b.page and "Status</b></td><td>Save" in b.page,
+              "Refresh shows the newest of each")
         # --- deleting from the pages ---
         b.click(action="/gitea")
         b.click(action="/gitea/owners")
@@ -1341,6 +1366,10 @@ def test_import_live(work):
         check("fetching v1.0/app-linux.bin" in said and "writing to Gitea:" in said and "written to Gitea" in said
               and said.index("writing to Gitea:") < said.index("written to Gitea"),
               "and every file it fetches, and when it writes Gitea")
+        check(all(x in said for x in ("status started ", "status repos 1/1", "status repo omigh/proj", "status phase issues",
+                                     "status phase comments", "status phase releases", "status phase git",
+                                     "status phase attachments", "status phase save", "status fetched ")),
+              "and status lines for the job page's table: repository of how many, phase, files fetched")
         check("fake-secret-token" not in out + err, "the token is not printed")
         check(not os.path.exists(calls), "GIT_FETCH=pascal (the default): no git program ran")
         check([x["query"] for x in fake.git_log if x["method"] == "GET"] == ["service=git-upload-pack"]

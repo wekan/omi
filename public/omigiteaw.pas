@@ -871,8 +871,9 @@ type
     LockPath, JournalPath, Content: string;
     Say: TGwSay;
     // Progress of a delete's file removal: "progress <done>/<total> <step>"
-    // lines in the job log (GwProgress), read by the job page's progress bar.
-    ProgressDone, ProgressTotal: Int64;
+    // lines in the job log (GwProgress), read by the job page's progress bar,
+    // and "status removed <files> <bytes>" for its table.
+    ProgressDone, ProgressTotal, ProgressBytes: Int64;
     constructor Enter(const AP: TGtPaths; const PidFile: string; ASay: TGwSay);
     destructor Destroy; override;
     procedure WriteJournal(const Op: string; Entries: TJSONArray);
@@ -1012,6 +1013,31 @@ end;
 
 // One progress line of a job's log: "progress <done>/<total> <step>". The job
 // page (server.pas ShowJob) shows the newest as a bar and a percentage.
+// The size of a file, 0 when it is not there (or is a folder).
+function GwFileSize(const Path: string): Int64;
+var
+  Sr: TSearchRec;
+begin
+  Result := 0;
+  if (Path <> '') and (FindFirst(Path, faAnyFile, Sr) = 0) then
+  begin
+    if (Sr.Attr and faDirectory) = 0 then
+      Result := Sr.Size;
+    FindClose(Sr);
+  end;
+end;
+
+// A line the job page keeps the newest of per key, for its table of the whole
+// job: "status <key> <value>". The keys: started (Unix time), repos
+// (<n>/<total>), repo, phase (a translation key: issues, comments,
+// pull-requests, releases, space-freed, attachments, save; or git), toremove,
+// removed and fetched (<files> <bytes>).
+procedure GwStatus(Say: TGwSay; const Key, Value: string);
+begin
+  if Assigned(Say) then
+    Say('status ' + Key + ' ' + Value);
+end;
+
 procedure GwProgress(Say: TGwSay; Done, Total: Int64; const Step: string);
 begin
   if Assigned(Say) and (Total > 0) then
@@ -1040,10 +1066,17 @@ begin
         begin
           O := TJSONObject(E.Items[I]);
           if not Referenced(Db, O.Get('kind', ''), O.Get('key', '')) then
+          begin
+            if ProgressTotal > 0 then
+              Inc(ProgressBytes, GwFileSize(O.Get('path', '')));
             Inc(Result, RemovePath(P, O.Get('path', '')));
+          end;
           if ProgressTotal > 0 then
           begin
             Inc(ProgressDone);
+            if (ProgressTotal <= 200) or (ProgressDone = ProgressTotal) or
+              (ProgressDone mod Max(1, ProgressTotal div 100) = 0) then
+              GwStatus(Say, 'removed', IntToStr(ProgressDone) + ' ' + IntToStr(ProgressBytes));
             // Every file of a few hundred; of tens of thousands about every
             // per cent, or the log is a line per file.
             if (ProgressTotal <= 200) or (ProgressDone = ProgressTotal) or

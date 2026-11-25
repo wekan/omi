@@ -1629,6 +1629,7 @@ var
   Wanted: TStringList;
   Version: string;
   BodyFiles: Integer;
+  FetchedFiles, FetchedBytes: Int64;
 
   function Fetch_(const Url, Accept, Name: string; out Fl: TGwFile): Boolean;
   var
@@ -1657,6 +1658,9 @@ var
     finally
       Fs.Free;
     end;
+    Inc(FetchedFiles);
+    Inc(FetchedBytes, Fl.Size);
+    GwStatus(Say, 'fetched', IntToStr(FetchedFiles) + ' ' + IntToStr(FetchedBytes));
     Fl.Uuid := U;
     if Name <> '' then
       Fl.Name := Name
@@ -1668,6 +1672,8 @@ var
 begin
   Result := nil;
   BodyFiles := 0;
+  FetchedFiles := 0;
+  FetchedBytes := 0;
   Wanted := TStringList.Create;
   Wanted.CaseSensitive := True;
   Db := OpenDb;
@@ -2035,13 +2041,16 @@ var
   Freed: Int64;
   Wanted: TStringList;
   Assets: TJSONArray;
+  Bytes: Int64;
 begin
+  Bytes := 0;
   FreeAndNil(KeepUntilDone);
   KeptIncomplete := False;
   if (KeptTags = nil) or (RepoId = '') then
     Exit;
   if Assigned(Say) then
     Say('  release files: looking for those of older releases and older versions in Gitea');
+  GwStatus(Say, 'phase', 'space-freed');
   Entries := TJSONArray.Create;
   try
     Db := OpenDb;
@@ -2057,11 +2066,12 @@ begin
           KeepUntilDone.CaseSensitive := True;
           KeepUntilDone.Add(Newest);
         end;
-        Rows := Db.Query('SELECT a.id, a.uuid, r.tag_name FROM attachment a JOIN `release` r ON a.release_id = r.id ' +
-          'WHERE r.repo_id = ?1', [RepoId]);
+        Rows := Db.Query('SELECT a.id, a.uuid, r.tag_name, COALESCE(a.size, 0) FROM attachment a ' +
+          'JOIN `release` r ON a.release_id = r.id WHERE r.repo_id = ?1', [RepoId]);
         for I := 0 to High(Rows) do
           if (KeptTags.IndexOf(Rows[I][2]) < 0) and (Rows[I][2] <> Newest) then
           begin
+            Inc(Bytes, StrToInt64Def(Rows[I][3], 0));
             Db.Exec('DELETE FROM attachment WHERE id = ?1', [Rows[I][0]]);
             if Rows[I][1] <> '' then
               AddEntry(Entries, GtPath([P.Attachments, Rows[I][1][1], Rows[I][1][2], Rows[I][1]]), 'attachment', Rows[I][1]);
@@ -2080,11 +2090,13 @@ begin
             Assets := JArr(Releases.Items[K], 'assets');
             if (Assets = nil) or not GwNewestVersionFiles(Assets, Wanted, Version) then
               Continue;
-            Rows := Db.Query('SELECT a.id, a.uuid, a.name FROM attachment a JOIN `release` r ON a.release_id = r.id ' +
-              'WHERE r.repo_id = ?1 AND r.tag_name = ?2', [RepoId, JStr(Releases.Items[K], 'tag_name')]);
+            Rows := Db.Query('SELECT a.id, a.uuid, a.name, COALESCE(a.size, 0) FROM attachment a ' +
+              'JOIN `release` r ON a.release_id = r.id WHERE r.repo_id = ?1 AND r.tag_name = ?2',
+              [RepoId, JStr(Releases.Items[K], 'tag_name')]);
             for I := 0 to High(Rows) do
               if Wanted.IndexOf(Rows[I][2]) < 0 then
               begin
+                Inc(Bytes, StrToInt64Def(Rows[I][3], 0));
                 Db.Exec('DELETE FROM attachment WHERE id = ?1', [Rows[I][0]]);
                 if Rows[I][1] <> '' then
                   AddEntry(Entries, GtPath([P.Attachments, Rows[I][1][1], Rows[I][1][2], Rows[I][1]]), 'attachment', Rows[I][1]);
@@ -2108,8 +2120,10 @@ begin
     begin
       if Assigned(Say) then
         Say('  release files: removing ' + IntToStr(Entries.Count) + ' files of older releases first');
+      GwStatus(Say, 'toremove', IntToStr(Entries.Count) + ' ' + IntToStr(Bytes));
       // The job page's bar follows these (progress N/M lines).
       W.ProgressDone := 0;
+      W.ProgressBytes := 0;
       W.ProgressTotal := Entries.Count;
       try
         Freed := W.FinishJournal;
@@ -2726,6 +2740,7 @@ begin
   // GitHub first, outside the transaction: nothing of Gitea is changed yet.
   if Assigned(Say) then
     Say('  GitHub: labels, milestones, issues and comments');
+  GwStatus(Say, 'phase', 'issues');
   Labels := Gh.All('repos/' + Full + '/labels', '');
   Milestones := Gh.All('repos/' + Full + '/milestones', 'state=all');
   Params := 'state=all&sort=updated&direction=asc';
@@ -2736,6 +2751,7 @@ begin
     CParams := CParams + '&since=' + UrlEncodeValue(Since);
   end;
   Issues := Gh.All('repos/' + Full + '/issues', Params);
+  GwStatus(Say, 'phase', 'comments');
   Comments := Gh.All('repos/' + Full + '/issues/comments', CParams);
   Pulls := TJSONObject.Create;
   NewFiles := TJSONArray.Create;
@@ -2744,11 +2760,14 @@ begin
   Src := '';
   WikiSrc := '';
   try
+    GwStatus(Say, 'phase', 'pull-requests');
     FetchPulls(Full, Issues, Pulls);
+    GwStatus(Say, 'phase', 'releases');
     Releases := FetchReleases(Full, Since);
     DecideKeptTags(Releases);
     FreeReleaseSpace(Existing, Full, Releases);
     try
+      GwStatus(Say, 'phase', 'git');
       Src := PrepareGit(GitDir, Gh.GitUrl(Full, False), False, IsNew);
       // Stop is asked before every GitHub request, and here too: after the
       // API, git and the files are fetched with no request of its own, and a
@@ -2761,12 +2780,14 @@ begin
       // Rows that are already in this Gitea - a repository Gitea's own GitHub
       // migration made - are adopted, not copied again (Adopt* below).
       AdoptRepoId := Existing;
+      GwStatus(Say, 'phase', 'attachments');
       Files := Download(Releases, Issues, Comments);
       GwCheckStop;
       for I := 0 to High(Files) do
         AddEntry(NewFiles, GtPath([P.Attachments, Files[I].Uuid[1], Files[I].Uuid[2], Files[I].Uuid]),
           'attachment', Files[I].Uuid);
       Committed := False;
+      GwStatus(Say, 'phase', 'save');
       if Assigned(Say) then
         Say('  writing to Gitea: ' + IntToStr(Issues.Count) + ' issues and pull requests, ' + IntToStr(Comments.Count) +
           ' comments, ' + IntToStr(Releases.Count) + ' releases, ' + IntToStr(Length(Files)) + ' files');
@@ -2963,6 +2984,8 @@ begin
     for I := 0 to Repos.Count - 1 do
     begin
       GwProgress(Say, I, Repos.Count, 'repository: ' + JStr(Repos.Items[I], 'full_name'));
+      GwStatus(Say, 'repos', IntToStr(I + 1) + '/' + IntToStr(Repos.Count));
+      GwStatus(Say, 'repo', JStr(Repos.Items[I], 'full_name'));
       ImportRepo(TJSONObject(Repos.Items[I]), OwnerId, OwnerType, OwnerName);
       Names.Add(JStr(Repos.Items[I], 'name'));
     end;
@@ -3065,6 +3088,7 @@ begin
     Token := Trim(ReadSmallFile(TokenFile));
   // Without a token GitHub answers 60 requests an hour: a big repository is
   // then many hours of waiting, and the log should say why from the start.
+  GwStatus(Say, 'started', IntToStr(DateTimeToUnix(LocalTimeToUniversal(Now))));
   if (Token = '') and Assigned(Say) then
     Say('GitHub: no token - 60 requests an hour, so a big repository takes hours. Set GITHUB_TOKEN in Settings.');
   Gh := TGhClient.Create(Token, Api, Web, GitRoot, FileHosts, Say);

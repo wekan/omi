@@ -7810,11 +7810,34 @@ var
   const
     NEWEST_LINES = 15;
   var
-    Body, Path, Text, LastLine, StopText, Line, Step, Bar, Newest, Errors, Log: string;
-    Lines: TStringList;
+    Body, Path, Text, LastLine, StopText, Line, Step, Bar, Newest, Errors, Log, Stats, Phase: string;
+    Lines, Status: TStringList;
     Running: Boolean;
     K, SlashAt, SpaceAt, Shown: Integer;
-    Done, Total, Pct: Int64;
+    Done, Total, Pct, Started, Ended, Secs: Int64;
+    Pair: TStringArray;
+
+    // "<files> <bytes>" of a status line.
+    function FilesBytes(const Value: string; out Files, Bytes: Int64): Boolean;
+    begin
+      Pair := Value.Split([' ']);
+      Result := Length(Pair) >= 2;
+      Files := 0;
+      Bytes := 0;
+      if Result then
+      begin
+        Files := StrToInt64Def(Pair[0], 0);
+        Bytes := StrToInt64Def(Pair[1], 0);
+      end;
+    end;
+
+    function Row(const Key, Html: string): string;
+    begin
+      Result := '<tr><td><b>' + TxE(Key) + '</b></td><td>' + Html + '</td></tr>';
+    end;
+
+  var
+    F1, B1, F2, B2: Int64;
   begin
     Path := IncludeTrailingPathDelimiter(GetGiteaJobsDir) + Name;
     if not GiteaJobNameIsSafe(Name) or not FileExists(Path) then
@@ -7831,6 +7854,8 @@ var
     Newest := '';
     Errors := '';
     Log := '';
+    Stats := '';
+    Status := TStringList.Create;
     Lines := TStringList.Create;
     try
       Lines.Text := Text;
@@ -7840,6 +7865,14 @@ var
       for K := 0 to Lines.Count - 1 do
       begin
         Line := Lines[K];
+        // status <key> <value>: the newest of each key, for the table.
+        if Copy(Line, 1, 7) = 'status ' then
+        begin
+          SpaceAt := Pos(' ', Copy(Line, 8, MaxInt));
+          if SpaceAt > 0 then
+            Status.Values[Copy(Line, 8, SpaceAt - 1)] := Copy(Line, 8 + SpaceAt, MaxInt);
+          Continue;
+        end;
         if Copy(Line, 1, 9) = 'progress ' then
         begin
           // progress <done>/<total> <step>
@@ -7864,7 +7897,7 @@ var
       begin
         if Shown >= NEWEST_LINES then
           Break;
-        if Copy(Lines[K], 1, 9) = 'progress ' then
+        if (Copy(Lines[K], 1, 9) = 'progress ') or (Copy(Lines[K], 1, 7) = 'status ') then
           Continue;
         Newest := Lines[K] + #10 + Newest;
         Inc(Shown);
@@ -7873,6 +7906,41 @@ var
       Lines.Free;
     end;
     Running := Copy(LastLine, 1, 5) <> 'exit ';
+    // The whole job at a glance: which repository of how many, what it is
+    // doing, for how long, what it has removed and fetched. From the job's
+    // own status lines - nothing is counted on the disk for it.
+    try
+      if Status.Values['repos'] <> '' then
+        Stats := Stats + Row('repositories', HtmlEncode(StringReplace(Status.Values['repos'], '/', ' / ', [])));
+      if Status.Values['repo'] <> '' then
+        Stats := Stats + Row('repository', HtmlEncode(Status.Values['repo']));
+      Phase := Status.Values['phase'];
+      if Running and (Phase <> '') then
+        Stats := Stats + Row('status', HtmlEncode(ifthen(Phase = 'git', 'Git', Tx(Phase))));
+      Started := StrToInt64Def(Status.Values['started'], 0);
+      if Started > 0 then
+      begin
+        if Running then
+          Ended := DateTimeToUnix(LocalTimeToUniversal(Now))
+        else
+          Ended := DateTimeToUnix(LocalTimeToUniversal(FileDateToDateTime(FileAge(Path))));
+        Secs := Max(0, Ended - Started);
+        Stats := Stats + Row('duration', Format('%d:%.2d:%.2d', [Secs div 3600, (Secs div 60) mod 60, Secs mod 60]));
+      end;
+      if FilesBytes(Status.Values['removed'], F1, B1) or FilesBytes(Status.Values['toremove'], F2, B2) then
+      begin
+        FilesBytes(Status.Values['removed'], F1, B1);
+        if FilesBytes(Status.Values['toremove'], F2, B2) then
+          Stats := Stats + Row('space-freed', IntToStr(F1) + ' / ' + IntToStr(F2) + ' ' + TxE('files') + ', ' +
+            Sz(B1) + ' / ' + Sz(B2))
+        else
+          Stats := Stats + Row('space-freed', IntToStr(F1) + ' ' + TxE('files') + ', ' + Sz(B1));
+      end;
+      if FilesBytes(Status.Values['fetched'], F1, B1) then
+        Stats := Stats + Row('attachments', IntToStr(F1) + ' ' + TxE('files') + ', ' + Sz(B1));
+    finally
+      Status.Free;
+    end;
     if (not Running) and (LastLine = 'exit 0') and (Total > 0) then
       Done := Total;
     StopText := '';
@@ -7899,7 +7967,8 @@ var
     Body := '<h2>' + HtmlEncode(Name) + '</h2><p>' +
       ifthen(Running, TxE('gitea-job-running') + ' ' + Nav('/gitea/jobs/' + BkUrlPart(Name), Tx('refresh'), '') +
         StopText,
-        TxE('gitea-job-done') + ' <b>' + HtmlEncode(Copy(LastLine, 6, MaxInt)) + '</b>') + '</p>' + Bar;
+        TxE('gitea-job-done') + ' <b>' + HtmlEncode(Copy(LastLine, 6, MaxInt)) + '</b>') + '</p>' +
+      ifthen(Stats <> '', '<table border="1" cellpadding="5" cellspacing="0">' + Stats + '</table>', '') + Bar;
     if Errors <> '' then
       Body := Body + '<h3><font color="red">' + TxE('gitea-job-errors') + '</font></h3>' +
         '<table border="1" width="100%" cellpadding="5" cellspacing="0"><tr><td><pre><font color="red">' +
