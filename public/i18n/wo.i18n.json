@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Yokkute",
   "gitea-job-newest-lines": "Rëdd yi gën a bees ci jaar-jaaru",
   "gitea-job-errors": "Njuumte yi",
+  "data-access-what": "Li ñu noox",
+  "database-migration-phase": "Faas",
   "gitea-bad-name": "Lii du tur bu baax bu boroom walla dencukaay.",
   "gitea-doer": "Jëfandikukatu Gitea bi ñuy indee ci turam",
   "list-sync-menu": "Sinkroniser",

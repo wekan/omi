@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "ความคืบหน้า",
   "gitea-job-newest-lines": "บรรทัดล่าสุดของบันทึก",
   "gitea-job-errors": "ข้อผิดพลาด",
+  "data-access-what": "สิ่งที่ดาวน์โหลด",
+  "database-migration-phase": "ระยะ",
   "gitea-bad-name": "นั่นไม่ใช่ชื่อเจ้าของหรือชื่อรีโพสิทอรีที่ถูกต้อง",
   "gitea-doer": "ผู้ใช้ Gitea ที่ใช้ดำเนินการนำเข้า",
   "list-sync-menu": "ซิงค์",

@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Fremskridt",
   "gitea-job-newest-lines": "Nyeste loglinjer",
   "gitea-job-errors": "Fejl",
+  "data-access-what": "Hentet",
+  "database-migration-phase": "Fase",
   "gitea-bad-name": "Det er ikke et gyldigt ejer- eller repository-navn.",
   "gitea-doer": "Gitea-bruger, som importen udføres som",
   "list-sync-menu": "Synkronisering",

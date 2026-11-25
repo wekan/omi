@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Ilọsiwaju",
   "gitea-job-newest-lines": "Awọn ila tuntun julọ ti àkọọlẹ",
   "gitea-job-errors": "Awọn aṣiṣe",
+  "data-access-what": "Ohun tí a gbà sílẹ̀",
+  "database-migration-phase": "Ipele",
   "gitea-bad-name": "Ìyẹn kì í ṣe orúkọ tó tọ́ fún ẹni tó ni tàbí ibi ìpamọ́.",
   "gitea-doer": "Olùmúlò Gitea tí a fi ń ṣe ìkówọlé",
   "list-sync-menu": "Muṣiṣẹ́pọ̀",

@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Progresso",
   "gitea-job-newest-lines": "Linhas mais recentes do registro",
   "gitea-job-errors": "Erros",
+  "data-access-what": "Baixado",
+  "database-migration-phase": "Fase",
   "gitea-bad-name": "Esse não é um nome de proprietário ou repositório válido.",
   "gitea-doer": "Usuário do Gitea com o qual a importação é feita",
   "list-sync-menu": "Sincronização",

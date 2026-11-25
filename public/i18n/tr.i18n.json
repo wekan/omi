@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "İlerleme",
   "gitea-job-newest-lines": "En yeni günlük satırları",
   "gitea-job-errors": "Hatalar",
+  "data-access-what": "İndirilen",
+  "database-migration-phase": "Aşama",
   "gitea-bad-name": "Bu geçerli bir sahip veya depo adı değil.",
   "gitea-doer": "İçe aktarmanın adına yapıldığı Gitea kullanıcısı",
   "list-sync-menu": "Senkronizasyon",

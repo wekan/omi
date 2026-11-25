@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "進度",
   "gitea-job-newest-lines": "最新嘅日誌行",
   "gitea-job-errors": "錯誤",
+  "data-access-what": "下載內容",
+  "database-migration-phase": "阶段",
   "gitea-bad-name": "呢個唔係有效嘅擁有者或者儲存庫名稱。",
   "gitea-doer": "用嚟做匯入嘅 Gitea 用戶",
   "list-sync-menu": "同步",

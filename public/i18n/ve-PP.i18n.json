@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Edenduz",
   "gitea-job-newest-lines": "Žurnalan udembad rivid",
   "gitea-job-errors": "Vigad",
+  "data-access-what": "Pandud muštho",
+  "database-migration-phase": "Faz",
   "gitea-bad-name": "Nece ei ole oiged ižandan vai repozitorijan nimi.",
   "gitea-doer": "Gitea-kävutai, kudaman nimel tuomine tehtas",
   "list-sync-menu": "Sinhronirui",

@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Folyamat",
   "gitea-job-newest-lines": "A napló legújabb sorai",
   "gitea-job-errors": "Hibák",
+  "data-access-what": "Letöltve",
+  "database-migration-phase": "Fázis",
   "gitea-bad-name": "Ez nem érvényes tulajdonos- vagy tárolónév.",
   "gitea-doer": "Gitea-felhasználó, akinek a nevében az import történik",
   "list-sync-menu": "Szinkronizálás",

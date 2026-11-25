@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Edistyminen",
   "gitea-job-newest-lines": "Lokin uusimmat rivit",
   "gitea-job-errors": "Virheet",
+  "data-access-what": "Ladattu",
+  "database-migration-phase": "Vaihe",
   "gitea-bad-name": "Tämä ei ole kelvollinen omistajan tai repositorion nimi.",
   "gitea-doer": "Gitea-käyttäjä, jona tuonti tehdään",
   "list-sync-menu": "Synkronointi",

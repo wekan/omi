@@ -7836,8 +7836,21 @@ var
       Result := '<tr><td><b>' + TxE(Key) + '</b></td><td>' + Html + '</td></tr>';
     end;
 
+    // "1 of 48", with WeKan's own word for "of" ("1 / 48" in Finnish).
+    function OfText(const A, B: string): string;
+    begin
+      Result := A + ' ' + Trim(TxE('of')) + ' ' + B;
+    end;
+
+    // "Deleted: 12 Files, 3 GB" - says what the numbers count.
+    function FilesText(const What, Files, Bytes: string): string;
+    begin
+      Result := TxE(What) + ': ' + Files + ' ' + TxE('files') + ', ' + Bytes;
+    end;
+
   var
     F1, B1, F2, B2: Int64;
+    Repos: string;
   begin
     Path := IncludeTrailingPathDelimiter(GetGiteaJobsDir) + Name;
     if not GiteaJobNameIsSafe(Name) or not FileExists(Path) then
@@ -7910,13 +7923,18 @@ var
     // doing, for how long, what it has removed and fetched. From the job's
     // own status lines - nothing is counted on the disk for it.
     try
-      if Status.Values['repos'] <> '' then
-        Stats := Stats + Row('repositories', HtmlEncode(StringReplace(Status.Values['repos'], '/', ' / ', [])));
+      // repos is "<number of this one>/<how many in the job>".
+      Repos := Status.Values['repos'];
+      if Pos('/', Repos) > 0 then
+        Stats := Stats + Row('repositories', TxE('billing-total') + ': ' +
+          HtmlEncode(Copy(Repos, Pos('/', Repos) + 1, MaxInt)));
       if Status.Values['repo'] <> '' then
-        Stats := Stats + Row('repository', HtmlEncode(Status.Values['repo']));
+        Stats := Stats + Row('repository', HtmlEncode(Status.Values['repo']) +
+          ifthen(Pos('/', Repos) > 0, ' (' + TxE('number') + ' ' + OfText(HtmlEncode(Copy(Repos, 1, Pos('/', Repos) - 1)),
+          HtmlEncode(Copy(Repos, Pos('/', Repos) + 1, MaxInt))) + ')', ''));
       Phase := Status.Values['phase'];
       if Running and (Phase <> '') then
-        Stats := Stats + Row('status', HtmlEncode(ifthen(Phase = 'git', 'Git', Tx(Phase))));
+        Stats := Stats + Row('database-migration-phase', HtmlEncode(ifthen(Phase = 'git', 'Git', Tx(Phase))));
       Started := StrToInt64Def(Status.Values['started'], 0);
       if Started > 0 then
       begin
@@ -7925,19 +7943,21 @@ var
         else
           Ended := DateTimeToUnix(LocalTimeToUniversal(FileDateToDateTime(FileAge(Path))));
         Secs := Max(0, Ended - Started);
-        Stats := Stats + Row('duration', Format('%d:%.2d:%.2d', [Secs div 3600, (Secs div 60) mod 60, Secs mod 60]));
+        Stats := Stats + Row('duration', Format('%d:%.2d:%.2d', [Secs div 3600, (Secs div 60) mod 60, Secs mod 60]) +
+          ' (' + TxE('hours') + ':' + TxE('minutes') + ':' + TxE('seconds') + ')');
       end;
       if FilesBytes(Status.Values['removed'], F1, B1) or FilesBytes(Status.Values['toremove'], F2, B2) then
       begin
         FilesBytes(Status.Values['removed'], F1, B1);
         if FilesBytes(Status.Values['toremove'], F2, B2) then
-          Stats := Stats + Row('space-freed', IntToStr(F1) + ' / ' + IntToStr(F2) + ' ' + TxE('files') + ', ' +
-            Sz(B1) + ' / ' + Sz(B2))
+          Stats := Stats + Row('space-freed', FilesText('gitea-deleted', OfText(IntToStr(F1), IntToStr(F2)),
+            OfText(Sz(B1), Sz(B2))))
         else
-          Stats := Stats + Row('space-freed', IntToStr(F1) + ' ' + TxE('files') + ', ' + Sz(B1));
+          Stats := Stats + Row('space-freed', FilesText('gitea-deleted', IntToStr(F1), Sz(B1)));
       end;
       if FilesBytes(Status.Values['fetched'], F1, B1) then
-        Stats := Stats + Row('attachments', IntToStr(F1) + ' ' + TxE('files') + ', ' + Sz(B1));
+        // Fetched from GitHub into Gitea, not removed: removing is space-freed's row.
+        Stats := Stats + Row('attachments', FilesText('data-access-what', IntToStr(F1), Sz(B1)) + ' (GitHub)');
     finally
       Status.Free;
     end;
@@ -7958,8 +7978,8 @@ var
       if Pct > 100 then
         Pct := 100;
       // A table, so the bar shows in every browser Omi serves, old ones too.
-      Bar := '<p>' + TxE('gitea-job-progress') + ': <b>' + IntToStr(Pct) + ' %</b> (' + IntToStr(Done) + ' / ' +
-        IntToStr(Total) + ') ' + HtmlEncode(Step) + '</p>' +
+      Bar := '<p>' + TxE('gitea-job-progress') + ': <b>' + IntToStr(Pct) + ' %</b> (' + TxE('done') + ': ' +
+        OfText(IntToStr(Done), IntToStr(Total)) + ') ' + HtmlEncode(Step) + '</p>' +
         '<table border="1" width="100%" cellpadding="0" cellspacing="0"><tr>' +
         ifthen(Pct > 0, '<td width="' + IntToStr(Pct) + '%" bgcolor="#3c78d8" class="job-progress-done">&nbsp;</td>', '') +
         ifthen(Pct < 100, '<td width="' + IntToStr(100 - Pct) + '%">&nbsp;</td>', '') + '</tr></table>';

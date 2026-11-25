@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Mvelaphanḓa",
   "gitea-job-newest-lines": "Mitaladzi miswa ya rekhodo",
   "gitea-job-errors": "Vhukhakhi",
+  "data-access-what": "Zwo dauniḽoudiwaho",
+  "database-migration-phase": "Tshiga",
   "gitea-bad-name": "Ḽeneḽo a si dzina ḽo teaho ḽa muṋe kana ḽa vhuvhulungelo.",
   "gitea-doer": "Mushumisi wa Gitea ane u dzhenisa ha itwa nga ene",
   "list-sync-menu": "Ṱanganyisa",

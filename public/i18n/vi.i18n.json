@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Tiến độ",
   "gitea-job-newest-lines": "Các dòng nhật ký mới nhất",
   "gitea-job-errors": "Lỗi",
+  "data-access-what": "Đã tải về",
+  "database-migration-phase": "Giai đoạn",
   "gitea-bad-name": "Đó không phải là tên chủ sở hữu hoặc kho mã hợp lệ.",
   "gitea-doer": "Người dùng Gitea thực hiện việc nhập",
   "list-sync-menu": "Đồng bộ",

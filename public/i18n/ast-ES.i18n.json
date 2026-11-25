@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Progresu",
   "gitea-job-newest-lines": "Llinies más nueves del rexistru",
   "gitea-job-errors": "Errores",
+  "data-access-what": "Descargao",
+  "database-migration-phase": "Fase",
   "gitea-bad-name": "Esi nun ye un nome válidu de propietariu o repositoriu.",
   "gitea-doer": "Usuariu de Gitea col que se fai la importación",
   "list-sync-menu": "Sincronizar",

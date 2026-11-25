@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "పురోగతి",
   "gitea-job-newest-lines": "లాగ్‌లోని కొత్త పంక్తులు",
   "gitea-job-errors": "లోపాలు",
+  "data-access-what": "డౌన్‌లోడ్ చేసినది",
+  "database-migration-phase": "దశ",
   "gitea-bad-name": "అది చెల్లుబాటు అయ్యే యజమాని లేదా రిపోజిటరీ పేరు కాదు.",
   "gitea-doer": "దిగుమతి చేసే Gitea వినియోగదారు",
   "list-sync-menu": "సమకాలీకరణ",

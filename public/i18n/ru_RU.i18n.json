@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Прогресс",
   "gitea-job-newest-lines": "Последние строки журнала",
   "gitea-job-errors": "Ошибки",
+  "data-access-what": "Скачано",
+  "database-migration-phase": "Этап",
   "gitea-bad-name": "Это недопустимое имя владельца или репозитория.",
   "gitea-doer": "Пользователь Gitea, от имени которого выполняется импорт",
   "list-sync-menu": "Синхронизация",

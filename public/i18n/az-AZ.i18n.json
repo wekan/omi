@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Tərəqqi",
   "gitea-job-newest-lines": "Jurnalın ən yeni sətirləri",
   "gitea-job-errors": "Səhvlər",
+  "data-access-what": "Yüklənən",
+  "database-migration-phase": "Mərhələ",
   "gitea-bad-name": "Bu, etibarlı sahib və ya repozitori adı deyil.",
   "gitea-doer": "İdxalın adından aparıldığı Gitea istifadəçisi",
   "list-sync-menu": "Sinxronlaşdırma",

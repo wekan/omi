@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Avansamento",
   "gitea-job-newest-lines": "Łe righe pì nove del registro",
   "gitea-job-errors": "Erori",
+  "data-access-what": "Scargà",
+  "database-migration-phase": "Fase",
   "gitea-bad-name": "Questo no'l xe un nome vàłido de paron o de depòzito.",
   "gitea-doer": "Utente de Gitea co cui se fa l'inportasion",
   "list-sync-menu": "Sincronisa",

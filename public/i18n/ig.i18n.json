@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Ọganihu",
   "gitea-job-newest-lines": "Ahịrị ndekọ kacha ọhụrụ",
   "gitea-job-errors": "Njehie",
+  "data-access-what": "Ebudatara",
+  "database-migration-phase": "Nkeji",
   "gitea-bad-name": "Nke ahụ abụghị aha onye nwe ma ọ bụ ebe nchekwa koodu ziri ezi.",
   "gitea-doer": "Onye ọrụ Gitea a na-eji eme mbubata",
   "list-sync-menu": "Nhazi",

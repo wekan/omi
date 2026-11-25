@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Priebeh",
   "gitea-job-newest-lines": "Najnovšie riadky protokolu",
   "gitea-job-errors": "Chyby",
+  "data-access-what": "Stiahnuté",
+  "database-migration-phase": "Fáza",
   "gitea-bad-name": "To nie je platný názov vlastníka ani repozitára.",
   "gitea-doer": "Používateľ Gitea, v mene ktorého sa import vykoná",
   "list-sync-menu": "Synchronizácia",

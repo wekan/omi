@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Progres",
   "gitea-job-newest-lines": "Cele mai noi linii din jurnal",
   "gitea-job-errors": "Erori",
+  "data-access-what": "Descărcat",
+  "database-migration-phase": "Fază",
   "gitea-bad-name": "Acesta nu este un nume valid de proprietar sau de depozit.",
   "gitea-doer": "Utilizatorul Gitea în numele căruia se face importul",
   "list-sync-menu": "Sincronizare",

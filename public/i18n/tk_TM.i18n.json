@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Ösüş",
   "gitea-job-newest-lines": "Žurnalyň iň täze setirleri",
   "gitea-job-errors": "Ýalňyşlyklar",
+  "data-access-what": "Göçürilip alnan",
+  "database-migration-phase": "Tapgyr",
   "gitea-bad-name": "Bu dogry eýe ýa-da repozitoriý ady däl.",
   "gitea-doer": "Importy amala aşyrýan Gitea ulanyjysy",
   "list-sync-menu": "Sinhronlamak",

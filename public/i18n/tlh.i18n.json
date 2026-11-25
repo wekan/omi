@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "ta'lu'pu'bogh Qu' 'ay'",
   "gitea-job-newest-lines": "ta' ghItlh tlhegh chu'qu'",
   "gitea-job-errors": "Qaghmey",
+  "data-access-what": "Suqlu'pu'bogh",
+  "database-migration-phase": "'ay'",
   "gitea-bad-name": "ghajwI' pong pagh polwI' pong lugh 'oHbe' vam'e'.",
   "gitea-doer": "Suqlu'meH Gitea lo'wI'",
   "list-sync-menu": "rurmoH",

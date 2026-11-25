@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "វឌ្ឍនភាព",
   "gitea-job-newest-lines": "បន្ទាត់កំណត់ហេតុថ្មីបំផុត",
   "gitea-job-errors": "កំហុស",
+  "data-access-what": "បានទាញយក",
+  "database-migration-phase": "ដំណាក់កាល",
   "gitea-bad-name": "នោះមិនមែនជាឈ្មោះម្ចាស់ ឬឃ្លាំងត្រឹមត្រូវទេ។",
   "gitea-doer": "អ្នកប្រើប្រាស់ Gitea ដែលការនាំចូលធ្វើក្នុងនាម",
   "list-sync-menu": "ធ្វើសមកាលកម្ម",

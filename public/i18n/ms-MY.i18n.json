@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Kemajuan",
   "gitea-job-newest-lines": "Baris log terbaharu",
   "gitea-job-errors": "Ralat",
+  "data-access-what": "Dimuat turun",
+  "database-migration-phase": "Fasa",
   "gitea-bad-name": "Itu bukan nama pemilik atau repositori yang sah.",
   "gitea-doer": "Pengguna Gitea yang digunakan untuk import",
   "list-sync-menu": "Penyegerakan",

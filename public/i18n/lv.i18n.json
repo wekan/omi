@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Norise",
   "gitea-job-newest-lines": "Jaunākās žurnāla rindas",
   "gitea-job-errors": "Kļūdas",
+  "data-access-what": "Lejuplādēts",
+  "database-migration-phase": "Fāze",
   "gitea-bad-name": "Tas nav derīgs īpašnieka vai repozitorija nosaukums.",
   "gitea-doer": "Gitea lietotājs, kura vārdā tiek veikts imports",
   "list-sync-menu": "Sinhronizācija",

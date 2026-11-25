@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "प्रगति",
   "gitea-job-newest-lines": "लॉग की सबसे नई पंक्तियाँ",
   "gitea-job-errors": "त्रुटियाँ",
+  "data-access-what": "डाउनलोड किया गया",
+  "database-migration-phase": "चरण",
   "gitea-bad-name": "यह मान्य स्वामी या रिपॉज़िटरी नाम नहीं है।",
   "gitea-doer": "वह Gitea उपयोगकर्ता जिसके रूप में आयात किया जाता है",
   "list-sync-menu": "सिंक",

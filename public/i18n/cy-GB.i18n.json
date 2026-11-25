@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Cynnydd",
   "gitea-job-newest-lines": "Llinellau diweddaraf y log",
   "gitea-job-errors": "Gwallau",
+  "data-access-what": "Wedi'i lawrlwytho",
+  "database-migration-phase": "Cyfnod",
   "gitea-bad-name": "Nid yw hwnnw'n enw perchennog neu ystorfa dilys.",
   "gitea-doer": "Defnyddiwr Gitea y gwneir y mewnforio fel",
   "list-sync-menu": "Cydweddu",

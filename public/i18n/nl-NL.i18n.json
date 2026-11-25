@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Voortgang",
   "gitea-job-newest-lines": "Nieuwste logregels",
   "gitea-job-errors": "Fouten",
+  "data-access-what": "Gedownload",
+  "database-migration-phase": "Fase",
   "gitea-bad-name": "Dat is geen geldige naam voor een eigenaar of repository.",
   "gitea-doer": "Gitea-gebruiker namens wie de import gebeurt",
   "list-sync-menu": "Synchronisatie",

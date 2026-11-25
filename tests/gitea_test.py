@@ -559,7 +559,7 @@ def test_web(work, fixture_ids):
                     "progress 4/10 rows committed: 340\n")
         b.click(action="/gitea/jobs")
         b.click(action="/gitea/jobs/" + prog)
-        check("Progress: <b>40 %</b> (4 / 10) rows committed: 340" in b.page and 'width="40%"' in b.page
+        check("Progress: <b>40 %</b> (Done: 4 of 10) rows committed: 340" in b.page and 'width="40%"' in b.page
               and "job-progress-done" in b.page, "a running delete shows its progress bar, percentage and step")
         check("Errors" in b.page and "cannot remove /data/x" in b.page.split("Newest log lines")[0],
               "and its errors, above the newest lines")
@@ -568,7 +568,7 @@ def test_web(work, fixture_ids):
         with open(os.path.join(jobs, prog), "a") as f:
             f.write("progress 7/10 files: repository /data/big.git\n")
         b.click(label="Refresh")
-        check("Progress: <b>70 %</b> (7 / 10)" in b.page, "Refresh shows the new progress")
+        check("Progress: <b>70 %</b> (Done: 7 of 10)" in b.page, "Refresh shows the new progress")
         with open(os.path.join(jobs, prog), "a") as f:
             f.write("Deleted Big: 340 rows, 6 files, 1000 bytes freed.\nexit 0\n")
         b.click(action="/gitea/jobs")
@@ -586,19 +586,23 @@ def test_web(work, fixture_ids):
         b.click(action="/gitea/jobs")
         b.click(action="/gitea/jobs/" + imp_log)
         page = b.page
-        check("Repositories</b></td><td>1 / 48" in page and "Repository</b></td><td>wekan/wekan" in page,
-              f"the job page shows which repository of how many {page[:3000]}")
-        check("Status</b></td><td>Space freed" in page, "and what it is doing")
-        check(re.search(r"Duration</b></td><td>1:0[12]:\d\d", page), "and for how long")
-        check(re.search(r"Space freed</b></td><td>1200 / 5000 Files, 3([.,]0)? GB / 12([.,]0)? GB", page),
+        check("Repositories</b></td><td>Total: 48" in page and
+              "Repository</b></td><td>wekan/wekan (Number 1 of 48)" in page,
+              f"the job page says which repository of how many, in words {page[:3000]}")
+        check("Phase</b></td><td>Space freed" in page, "and what it is doing")
+        check(re.search(r"Duration</b></td><td>1:0[12]:\d\d \(hours:minutes:seconds\)", page),
+              "and for how long, saying what the numbers are")
+        check(re.search(r"Space freed</b></td><td>Deleted: 1200 of 5000 Files, 3([.,]0)? GB of 12([.,]0)? GB", page),
               f"and the files removed of how many, with their sizes {re.findall(r'Space freed</b></td><td>[^<]*', page)}")
-        check(re.search(r"Attachments</b></td><td>3 Files, ", page), "and the files fetched")
+        check(re.search(r"Attachments</b></td><td>Downloaded: 3 Files, [^<]* \(GitHub\)", page),
+              f"and the files fetched from GitHub, said as downloaded {re.findall(r'Attachments</b></td><td>[^<]*', page)}")
+        check(not re.search(r"</b></td><td>\d+ / \d+", page), "negative: no bare number pair without words")
         check("status repo" not in page.split("Newest log lines")[1].split("</pre>")[0],
               "negative: the status lines are not among the newest lines")
         with open(os.path.join(jobs, imp_log), "a") as f:
             f.write("status phase save\nstatus repos 2/48\nstatus repo wekan/wekan-snap\n")
         b.click(label="Refresh")
-        check("Repositories</b></td><td>2 / 48" in b.page and "wekan/wekan-snap" in b.page and "Status</b></td><td>Save" in b.page,
+        check("wekan/wekan-snap (Number 2 of 48)" in b.page and "Phase</b></td><td>Save" in b.page,
               "Refresh shows the newest of each")
         # --- deleting from the pages ---
         b.click(action="/gitea")
@@ -1729,7 +1733,7 @@ def test_translations():
     import json as _json
     i18n = os.path.join(REPO, "public", "i18n")
     en = _json.load(open(os.path.join(i18n, "en.i18n.json"), encoding="utf-8"))
-    used = set(re.findall(r"Tx?E?\('((?:gitea|avatars|stats-count|database-migration|reason|billing-total|vcs-wiki|list-sync-menu|list-sync-source-none)[a-z-]*)'",
+    used = set(re.findall(r"Tx?E?\('((?:gitea|avatars|stats-count|database-migration|data-access|reason|billing-total|vcs-wiki|list-sync-menu|list-sync-source-none)[a-z-]*)'",
                           open(os.path.join(REPO, "public", "server.pas"), encoding="utf-8").read()))
     check(used and all(k in en for k in used), f"every key the Gitea pages use is in en.i18n.json {sorted(k for k in used if k not in en)}")
     wekan = os.path.join(os.path.dirname(TOOLS), "imports", "i18n", "data")
@@ -1740,7 +1744,7 @@ def test_translations():
         wpath = os.path.join(wekan, name)
         if os.path.isfile(wpath):
             w = _json.load(open(wpath, encoding="utf-8"))
-            differ += [f"{name}:{k}" for k in used if k.startswith("gitea") and k in w and w[k] != d.get(k)]
+            differ += [f"{name}:{k}" for k in used if k.startswith(("gitea", "data-access-what", "database-migration-phase")) and k in w and w[k] != d.get(k)]
     check(not missing, f"every language file has the Gitea folder keys {missing[:5]}")
     if os.path.isdir(wekan):
         check(not differ, f"the Gitea folder keys are WeKan's translations, copied {differ[:5]}")

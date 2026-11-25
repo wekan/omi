@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "პროგრესი",
   "gitea-job-newest-lines": "ჟურნალის უახლესი სტრიქონები",
   "gitea-job-errors": "შეცდომები",
+  "data-access-what": "ჩამოტვირთული",
+  "database-migration-phase": "ფაზა",
   "gitea-bad-name": "ეს არ არის მფლობელის ან რეპოზიტორიის სწორი სახელი.",
   "gitea-doer": "Gitea-ს მომხმარებელი, რომლის სახელითაც სრულდება იმპორტი",
   "list-sync-menu": "სინქრონიზაცია",

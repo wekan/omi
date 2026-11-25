@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Edenemine",
   "gitea-job-newest-lines": "Logi uusimad read",
   "gitea-job-errors": "Vead",
+  "data-access-what": "Alla laaditud",
+  "database-migration-phase": "Faas",
   "gitea-bad-name": "See pole kehtiv omaniku või hoidla nimi.",
   "gitea-doer": "Gitea kasutaja, kelle nimel import tehakse",
   "list-sync-menu": "Sünkroonimine",

@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "ترقیات",
   "gitea-job-newest-lines": "ژورنالنینگ اینگ ینگی قطارلری",
   "gitea-job-errors": "خطالر",
+  "data-access-what": "یوکلب آلینگن",
+  "database-migration-phase": "باسقیچ",
   "gitea-bad-name": "بو توغری ایگه یاکی ریپازیتاری نامی ایمس.",
   "gitea-doer": "ایمپورت اونینگ نامیدن بجریله‌دیگن Gitea فایدلنووچیسی",
   "list-sync-menu": "سینخرانلش",

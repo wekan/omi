@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "முன்னேற்றம்",
   "gitea-job-newest-lines": "பதிவின் புதிய வரிகள்",
   "gitea-job-errors": "பிழைகள்",
+  "data-access-what": "பதிவிறக்கப்பட்டது",
+  "database-migration-phase": "கட்டம்",
   "gitea-bad-name": "அது சரியான உரிமையாளர் அல்லது களஞ்சியப் பெயர் அல்ல.",
   "gitea-doer": "இறக்குமதி செய்யப்படும் Gitea பயனர்",
   "list-sync-menu": "ஒத்திசைவு",

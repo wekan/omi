@@ -1787,6 +1787,8 @@
   "gitea-job-progress": "Progress",
   "gitea-job-newest-lines": "Newest log lines",
   "gitea-job-errors": "Errors",
+  "data-access-what": "Downloaded",
+  "database-migration-phase": "Phase",
   "gitea-bad-name": "That is not a valid owner or repository name.",
   "gitea-doer": "Gitea user the import is done as",
   "list-sync-menu": "Sync",

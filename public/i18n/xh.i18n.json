@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Inkqubela",
   "gitea-job-newest-lines": "Imigca emitsha yerekhodi",
   "gitea-job-errors": "Iimpazamo",
+  "data-access-what": "Okukhutshelweyo",
+  "database-migration-phase": "Isigaba",
   "gitea-bad-name": "Elo ayilogama elisemthethweni lomnini okanye lendawo yokugcina.",
   "gitea-doer": "Umsebenzisi we-Gitea ekwenziwa ngaye ukungenisa",
   "list-sync-menu": "Vumelanisa",

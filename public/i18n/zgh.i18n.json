@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "ⴰⵙⴼⴰⵔⵉ",
   "gitea-job-newest-lines": "ⵉⵣⵔⵉⵔⵉⴳⵏ ⵉⵎⴰⵢⵏⵓⵜⵏ ⵏ ⵉⵖⵎⵉⵙⵏ",
   "gitea-job-errors": "ⵜⵉⵣⴳⵍⵉⵏ",
+  "data-access-what": "ⵉⵜⵜⵓⴳⵎⵏ",
+  "database-migration-phase": "ⵜⴰⵙⴼⵉⴼⵜ",
   "gitea-bad-name": "ⵡⴰⴷ ⵓⵔ ⵉⴳⵉ ⵉⵙⵎ ⵉⵖⵓⴷⴰⵏ ⵏ ⴱⴰⴱ ⵏⵖ ⵏ ⵓⴽⵓⴼⵉ.",
   "gitea-doer": "ⴰⵏⵙⵙⵎⵔⵙ ⵏ Gitea ⵙ ⵉⵙⵎ ⵏⵏⵙ ⴰⵢ ⵉⵜⵜⵡⴰⴳ ⵓⵙⴽⵛⵓⵎ",
   "list-sync-menu": "ⴰⵙⵎⵢⴰⴽⵓⴷ",

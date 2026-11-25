@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Напредак",
   "gitea-job-newest-lines": "Најновији редови дневника",
   "gitea-job-errors": "Грешке",
+  "data-access-what": "Преузето",
+  "database-migration-phase": "Фаза",
   "gitea-bad-name": "То није исправно име власника или спремишта.",
   "gitea-doer": "Gitea корисник у чије име се врши увоз",
   "list-sync-menu": "Синхронизација",

@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Πρόοδος",
   "gitea-job-newest-lines": "Νεότερες γραμμές καταγραφής",
   "gitea-job-errors": "Σφάλματα",
+  "data-access-what": "Λήψη",
+  "database-migration-phase": "Φάση",
   "gitea-bad-name": "Αυτό δεν είναι έγκυρο όνομα κατόχου ή αποθετηρίου.",
   "gitea-doer": "Χρήστης Gitea ως τον οποίο γίνεται η εισαγωγή",
   "list-sync-menu": "Συγχρονισμός",

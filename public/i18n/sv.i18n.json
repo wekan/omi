@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Förlopp",
   "gitea-job-newest-lines": "Senaste loggraderna",
   "gitea-job-errors": "Fel",
+  "data-access-what": "Hämtat",
+  "database-migration-phase": "Fas",
   "gitea-bad-name": "Det är inte ett giltigt namn på en ägare eller utvecklingskatalog.",
   "gitea-doer": "Gitea-användare som importen görs som",
   "list-sync-menu": "Synkronisering",

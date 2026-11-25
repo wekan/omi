@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "פּראָגרעס",
   "gitea-job-newest-lines": "די נײַסטע שורות פֿון זשורנאַל",
   "gitea-job-errors": "טעותן",
+  "data-access-what": "אַראָפּגעלאָדן",
+  "database-migration-phase": "פֿאַזע",
   "gitea-bad-name": "דאָס איז ניט קיין גילטיקער באַזיצער־ אָדער רעפּאָזיטאָריע־נאָמען.",
   "gitea-doer": "Gitea־באַניצער אין וועמענס נאָמען דער אימפּאָרט ווערט געמאַכט",
   "list-sync-menu": "סינכראָניזירן",

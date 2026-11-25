@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "진행률",
   "gitea-job-newest-lines": "최신 로그 줄",
   "gitea-job-errors": "오류",
+  "data-access-what": "다운로드한 항목",
+  "database-migration-phase": "단계",
   "gitea-bad-name": "유효한 소유자 또는 리포지토리 이름이 아닙니다.",
   "gitea-doer": "가져오기를 수행하는 Gitea 사용자",
   "list-sync-menu": "동기화",

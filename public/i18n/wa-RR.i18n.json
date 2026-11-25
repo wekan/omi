@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Pag-uswag",
   "gitea-job-newest-lines": "Mga gibag-ohi nga linya han rekord",
   "gitea-job-errors": "Mga sayop",
+  "data-access-what": "Na-download",
+  "database-migration-phase": "Yugto",
   "gitea-bad-name": "Diri ito husto nga ngaran han tag-iya o repository.",
   "gitea-doer": "Gumaramit han Gitea nga ginagamit ha pag-import",
   "list-sync-menu": "Pagpasibo",

@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Taraqqiyot",
   "gitea-job-newest-lines": "Jurnalning eng yangi qatorlari",
   "gitea-job-errors": "Xatolar",
+  "data-access-what": "Yuklab olingan",
+  "database-migration-phase": "Bosqich",
   "gitea-bad-name": "Bu toʻgʻri ega yoki repozitoriy nomi emas.",
   "gitea-doer": "Import uning nomidan bajariladigan Gitea foydalanuvchisi",
   "list-sync-menu": "Sinxronlash",

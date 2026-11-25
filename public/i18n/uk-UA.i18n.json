@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Прогрес",
   "gitea-job-newest-lines": "Найновіші рядки журналу",
   "gitea-job-errors": "Помилки",
+  "data-access-what": "Завантажено",
+  "database-migration-phase": "Фаза",
   "gitea-bad-name": "Це не дійсна назва власника або сховища.",
   "gitea-doer": "Користувач Gitea, від імені якого виконується імпорт",
   "list-sync-menu": "Синхронізація",

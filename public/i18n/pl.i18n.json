@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Postęp",
   "gitea-job-newest-lines": "Najnowsze wiersze dziennika",
   "gitea-job-errors": "Błędy",
+  "data-access-what": "Pobrano",
+  "database-migration-phase": "Faza",
   "gitea-bad-name": "To nie jest prawidłowa nazwa właściciela ani repozytorium.",
   "gitea-doer": "Użytkownik Gitea, jako który wykonywany jest import",
   "list-sync-menu": "Synchronizacja",

@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "התקדמות",
   "gitea-job-newest-lines": "שורות היומן החדשות ביותר",
   "gitea-job-errors": "שגיאות",
+  "data-access-what": "הורד",
+  "database-migration-phase": "שלב",
   "gitea-bad-name": "זה אינו שם בעלים או מאגר תקין.",
   "gitea-doer": "משתמש Gitea שבשמו מתבצע הייבוא",
   "list-sync-menu": "סנכרון",

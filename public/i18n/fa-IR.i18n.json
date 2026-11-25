@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "پیشرفت",
   "gitea-job-newest-lines": "جدیدترین خطوط گزارش",
   "gitea-job-errors": "خطاها",
+  "data-access-what": "دریافت‌شده",
+  "database-migration-phase": "مرحله",
   "gitea-bad-name": "این نام معتبر مالک یا مخزن نیست.",
   "gitea-doer": "کاربر Gitea که وارد کردن به نام او انجام می‌شود",
   "list-sync-menu": "همگام‌سازی",

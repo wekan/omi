@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "進捗",
   "gitea-job-newest-lines": "ログの最新行",
   "gitea-job-errors": "エラー",
+  "data-access-what": "ダウンロード対象",
+  "database-migration-phase": "フェーズ",
   "gitea-bad-name": "有効なオーナー名またはリポジトリ名ではありません。",
   "gitea-doer": "インポートを実行する Gitea ユーザー",
   "list-sync-menu": "同期",

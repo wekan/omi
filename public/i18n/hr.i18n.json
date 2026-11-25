@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Napredak",
   "gitea-job-newest-lines": "Najnoviji retci zapisnika",
   "gitea-job-errors": "Pogreške",
+  "data-access-what": "Preuzeto",
+  "database-migration-phase": "Faza",
   "gitea-bad-name": "To nije valjano ime vlasnika ili repozitorija.",
   "gitea-doer": "Gitea korisnik kao koji se obavlja uvoz",
   "list-sync-menu": "Sinkronizacija",

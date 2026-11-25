@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Foarútgong",
   "gitea-job-newest-lines": "Nijste rigels fan it lochboek",
   "gitea-job-errors": "Flaters",
+  "data-access-what": "Downloade",
+  "database-migration-phase": "Faze",
   "gitea-bad-name": "Dat is gjin jildige namme foar in eigner of repository.",
   "gitea-doer": "Gitea-brûker as wa't de ymport dien wurdt",
   "list-sync-menu": "Syngronisearje",

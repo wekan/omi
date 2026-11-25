@@ -1780,6 +1780,8 @@
   "gitea-job-progress": "Progression",
   "gitea-job-newest-lines": "Linhas mai recentas del jornal",
   "gitea-job-errors": "Errors",
+  "data-access-what": "Telecargat",
+  "database-migration-phase": "Fasa",
   "gitea-bad-name": "Aquò es pas un nom de proprietari o de depaus valid.",
   "gitea-doer": "Utilizaire Gitea al nom del qual se fa l'importacion",
   "list-sync-menu": "Sincronizacion",
