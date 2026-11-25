@@ -2901,6 +2901,7 @@ begin
       if not GtNameIsSafe(Parts[I]) then
         raise EGw.Create('not a repository name: ''' + Parts[I] + '''');
       Want.Add(LowerCase(Parts[I]));
+      Missing.Add(LowerCase(Parts[I]));
     end;
     for I := 0 to Skip.Count - 1 do
       Skip[I] := LowerCase(Skip[I]);
@@ -2947,16 +2948,20 @@ begin
         if Assigned(Say) then
           Say(Full + ': not synced any more (in ' + ExcludeFile + '), left out');
         Count('left out');
-        if Want.IndexOf(LowerCase(JStr(Gr, 'name'))) >= 0 then
-          Want.Delete(Want.IndexOf(LowerCase(JStr(Gr, 'name'))));
+        if Missing.IndexOf(LowerCase(JStr(Gr, 'name'))) >= 0 then
+          Missing.Delete(Missing.IndexOf(LowerCase(JStr(Gr, 'name'))));
         Continue;
       end;
       Repos.Add(Gr.Clone);
-      if Want.IndexOf(LowerCase(JStr(Gr, 'name'))) >= 0 then
-        Want.Delete(Want.IndexOf(LowerCase(JStr(Gr, 'name'))));
+      // What was asked for and found is crossed off Missing, never off Want:
+      // Want emptied by the first repository found meant "every repository"
+      // for the rest, and an import of wekan/wekan went on to the 47
+      // repositories after it.
+      if Missing.IndexOf(LowerCase(JStr(Gr, 'name'))) >= 0 then
+        Missing.Delete(Missing.IndexOf(LowerCase(JStr(Gr, 'name'))));
     end;
-    if (Length(Parts) > 0) and (Want.Count > 0) then
-      raise EGw.Create('not on GitHub under ' + Name + ': ' + StringReplace(Trim(Want.Text), LineEnding, ', ',
+    if (Length(Parts) > 0) and (Missing.Count > 0) then
+      raise EGw.Create('not on GitHub under ' + Name + ': ' + StringReplace(Trim(Missing.Text), LineEnding, ', ',
         [rfReplaceAll]));
     Db := OpenDb;
     NewFiles := TJSONArray.Create;

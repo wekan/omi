@@ -37,6 +37,9 @@ class FakeGitHub:
         self.low_remaining = False
         # Paths answered 404, as GitHub answers a repository it does not show.
         self.not_found = set()
+        # More repositories of the organization, listed after proj; nothing of
+        # theirs is served, so a request for one shows it was not left out.
+        self.extra_repos = []
         outer = self
 
         class H(http.server.BaseHTTPRequestHandler):
@@ -188,7 +191,7 @@ class FakeGitHub:
         data = {
             f"/api/users/{self.org}": self.owner,
             f"/api/orgs/{self.org}": self.owner,
-            f"/api/orgs/{self.org}/repos": [self.repo],
+            f"/api/orgs/{self.org}/repos": [self.repo] + self.extra_repos,
             f"/api/repos/{full}/labels": self.labels,
             f"/api/repos/{full}/milestones": self.milestones,
             f"/api/repos/{full}/issues": self.since(self.issues, q),

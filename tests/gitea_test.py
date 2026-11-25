@@ -1330,6 +1330,22 @@ def test_import_live(work):
         rc, after, _ = g.doctor()
         check(after == before, "and leaves Gitea as it was")
         os.remove(stopf)
+        # Only the repositories asked for: an import of wekan/wekan went on to
+        # the 47 repositories after it, since the first one found emptied the
+        # list of those asked for, and an empty list means every repository.
+        fake.extra_repos = [dict(fake.repo, id=7001, name="proj2", full_name="omigh/proj2",
+                                 html_url=f"{fake.base}/omigh/proj2")]
+        fake.not_found.add("/api/repos/omigh/proj/labels")  # stop before writing anything
+        fake.log.clear()
+        rc, out, err = imp("--repo", "proj")
+        check("status repos 1/1" in out + err and not any(p.startswith("/api/repos/omigh/proj2") for p, _, _ in fake.log)
+              and "omigh/proj2" not in out + err,
+              f"--repo proj: proj2, listed after it, is left alone {[p for p, _, _ in fake.log if 'proj2' in p]}")
+        rc, out, err = imp("--repo", "nosuch")
+        check(rc != 0 and "not on GitHub under omigh: nosuch" in out + err,
+              f"negative: a repository asked for that GitHub does not list is named {out[-200:]}")
+        fake.extra_repos = []
+        fake.not_found.clear()
         # GitHub refuses something: the import ends with that, exit 1 - it
         # ended in "EBusError: Bus error" (exit 217), freeing its answer twice.
         fake.not_found.add("/api/repos/omigh/proj/labels")
