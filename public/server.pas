@@ -6505,6 +6505,13 @@ begin
         J.Free;
         Code := 0;
       end
+      else if Kind = 'orphans' then
+      begin
+        J := GwDeleteOrphans(P, Confirm, SettingPath('GITEA_PID_FILE', ''), GetGiteaIndexPath, @Say);
+        Say(J.FormatJSON);
+        J.Free;
+        Code := 0;
+      end
       else if Kind = 'import' then
         Code := GiteaRunImport(P, Owner, Repo, @Say);
     except
@@ -6538,7 +6545,9 @@ begin
   Who := Owner;
   if Repo <> '' then
     Who := Owner + '-' + Repo;
-  JobName := FormatDateTime('yyyy-mm-dd_hh-nn-ss', Now) + '-' + Kind + '-' + Who + '.log';
+  if Who <> '' then
+    Who := '-' + Who;
+  JobName := FormatDateTime('yyyy-mm-dd_hh-nn-ss', Now) + '-' + Kind + Who + '.log';
   {$IFDEF OMI_NO_THREADS}
   Job := TGiteaJob.Create;
   {$ELSE}
@@ -6605,7 +6614,7 @@ begin
   end;
 end;
 
-// ./public/server gitea delete-repo|delete-owner|exclude|status ...: the writes,
+// ./public/server gitea delete-repo|delete-owner|delete-orphans|exclude|status ...: the writes,
 // in Omi itself (public/omigiteaw.pas). Gitea must be stopped.
 type
   TGiteaCliSay = class
@@ -6912,6 +6921,12 @@ begin
           ifthen(GetEnvironmentVariable('OMI_GITHUB_NO_FILE_HOSTS') = '1', '',
           'https://user-images.githubusercontent.com')), Doer, AppPath, ExcludeFile, PidFile, GitProgram, FetchMode,
           @SayObj.Say);
+      end
+      else if Cmd = 'delete-orphans' then
+      begin
+        if IndexPath = '' then
+          IndexPath := GetGiteaIndexPath;
+        J := GwDeleteOrphans(P, Confirm, PidFile, IndexPath, @SayObj.Say);
       end
       else if (Cmd = 'delete-repo') or (Cmd = 'delete-owner') or (Cmd = 'delete') then
       begin
@@ -7313,7 +7328,7 @@ var
       Exit;
     end;
     if GtQuery(P.DbPath, 'SELECT version FROM version', [], Rows, E) and (Length(Rows) > 0) then
-      Body := Body + '<p>' + TxE('database-migration') + ': <b>' + HtmlEncode(Rows[0][0]) + '</b></p>'
+      Body := Body + '<p>' + TxE('gitea-db-migration-version') + ': <b>' + HtmlEncode(Rows[0][0]) + '</b></p>'
     else
       Err := Tx('error') + ': ' + E;
     Body := Body + '<table border="1" cellpadding="4" cellspacing="0">' +
@@ -7789,7 +7804,7 @@ var
           Body := Body + '<tr>' + Cell(HtmlEncode(Parts[0])) + Cell('<tt>' + HtmlEncode(Parts[1]) + '</tt>') +
             NumCell(Sz(StrToInt64Def(Parts[2], 0))) + Cell(HtmlEncode(Parts[3])) + '</tr>';
         end;
-        Body := Body + '</table>';
+        Body := Body + '</table><p>' + Nav('/gitea/orphans/delete', Tx('gitea-orphans-delete'), '') + '</p>';
       end;
     end;
     GtFreeReport(R);
@@ -8352,9 +8367,105 @@ var
     Send(Tx('gitea-delete-repo'), RepoCrumbs('<strong>' + TxE('delete') + '</strong>'), Body);
   end;
 
+  // Deleting every orphan: what it removes, by type, and the number to type.
+  procedure PageDeleteOrphans;
+  var
+    Body, E, JobName, Kind: string;
+    R: TGtReport;
+    Kinds: TStringList;
+    Parts: TStringArray;
+    K, N: Integer;
+    Running: TStringList;
+    CanDelete: Boolean;
+    Count: string;
+  begin
+    if not LoadReport(R) then
+    begin
+      GtFreeReport(R);
+      Send(Tx('gitea-orphans-delete'), Crumbs([Home, Nav('/gitea/orphans', Tx('gitea-orphans'), ''),
+        '<strong>' + TxE('delete') + '</strong>']), '');
+      Exit;
+    end;
+    Kinds := TStringList.Create;
+    try
+      Count := IntToStr(R.Orphans.Count);
+      if Op = 'delete' then
+      begin
+        if PostedAction <> 'gitea-delete-orphans' then
+        begin
+          RedirectToPublicHome(ARequest, AResponse);
+          Exit;
+        end;
+        if (R.Orphans.Count = 0) or (Trim(GetFormFieldValue(ARequest, 'confirm')) <> Count) then
+          Err := Tx('gitea-orphans-delete-wrong-number')
+        else if GiteaStartJob('orphans', '', '', Count, Username, False, JobName, E) then
+        begin
+          LogActivity(Username, SessionId, 'gitea-delete-orphans', 'started', Count + ' ' + JobName, ARequest, 0);
+          Msg := Tx('gitea-job-started');
+          ShowJob(JobName);
+          Exit;
+        end
+        else
+          Err := Tx('error') + ': ' + E;
+      end;
+      for K := 0 to R.Orphans.Count - 1 do
+      begin
+        Parts := R.Orphans[K].Split([#9]);
+        if Length(Parts) < 3 then
+          Continue;
+        Kind := Parts[0];
+        N := Kinds.IndexOfName(Kind);
+        if N < 0 then
+          Kinds.Add(Kind + '=0 0');
+        N := Kinds.IndexOfName(Kind);
+        Parts := (Kinds.ValueFromIndex[N] + ' ' + Parts[2]).Split([' ']);
+        Kinds.ValueFromIndex[N] := IntToStr(StrToInt64Def(Parts[0], 0) + 1) + ' ' +
+          IntToStr(StrToInt64Def(Parts[1], 0) + StrToInt64Def(Parts[2], 0));
+      end;
+      Body := IndexLine(R) + '<h2>' + TxE('gitea-orphans-delete') + '</h2><p>' + TxE('gitea-dry-run') + '</p>';
+      CanDelete := R.Orphans.Count > 0;
+      Running := GwRunning(P, SettingPath('GITEA_PID_FILE', ''));
+      try
+        if Running.Count > 0 then
+        begin
+          Body := Body + '<p><font color="red"><b>' + TxE('gitea-running') + '</b></font></p><ul>';
+          for K := 0 to Running.Count - 1 do
+            Body := Body + '<li>' + HtmlEncode(Running[K]) + '</li>';
+          Body := Body + '</ul>';
+          CanDelete := False;
+        end;
+      finally
+        Running.Free;
+      end;
+      Body := Body + '<table border="1" cellpadding="4" cellspacing="0">' +
+        BkHeaderRow([Tx('type'), Tx('stats-count'), Tx('size')]);
+      for K := 0 to Kinds.Count - 1 do
+      begin
+        Parts := Kinds.ValueFromIndex[K].Split([' ']);
+        Body := Body + '<tr>' + Cell(HtmlEncode(Kinds.Names[K])) + NumCell(HtmlEncode(Parts[0])) +
+          NumCell(Sz(StrToInt64Def(Parts[1], 0))) + '</tr>';
+      end;
+      Body := Body + '<tr>' + Cell('<b>' + TxE('billing-total') + '</b>') + NumCell('<b>' + Count + '</b>') +
+        NumCell('<b>' + Sz(R.TotalOrphanBytes) + '</b>') + '</tr></table>';
+      if CanDelete then
+        Body := Body + '<form method="POST" action="/gitea/orphans/delete">' +
+          BuildAuthHiddenFields(ARequest, 'gitea-delete-orphans') + BuildHiddenInput('op', 'delete') +
+          '<p>' + TxE('gitea-orphans-delete-confirm') + ' <input type="text" name="confirm" size="10" value=""> ' +
+          '<input type="submit" value="' + TxE('delete') + '"></p></form>';
+    finally
+      Kinds.Free;
+      GtFreeReport(R);
+    end;
+    Send(Tx('gitea-orphans-delete'), Crumbs([Home, Nav('/gitea/orphans', Tx('gitea-orphans'), ''),
+      '<strong>' + TxE('delete') + '</strong>']), Body);
+  end;
+
   function GiteaWritePages: Boolean;
   begin
     Result := True;
+    if (Length(Segs) = 3) and (Segs[1] = 'orphans') and (Segs[2] = 'delete') then
+      PageDeleteOrphans
+    else
     if (Length(Segs) = 5) and (Segs[1] = 'o') and ((Segs[4] = 'delete') or (Segs[4] = 'sync')) then
     begin
       if not FindRepo(Segs[2], Segs[3]) then
@@ -8628,7 +8739,7 @@ begin
   // ./public/server gitea ...: the command line, no web server.
   if ParamStr(1) = 'gitea' then
   begin
-    if AnsiMatchStr(ParamStr(2), ['delete-repo', 'delete-owner', 'delete', 'exclude', 'status', 'import', 'git', 'git-fetch', 'git-index-pack', 'git-refs', 'test-token']) then
+    if AnsiMatchStr(ParamStr(2), ['delete-repo', 'delete-owner', 'delete', 'delete-orphans', 'exclude', 'status', 'import', 'git', 'git-fetch', 'git-index-pack', 'git-refs', 'test-token']) then
       ExitCode := GiteaWriteCli
     else
       ExitCode := GiteaCli;

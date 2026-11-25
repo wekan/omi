@@ -439,7 +439,7 @@ def test_web(work, fixture_ids):
             f.write("#omi-gitea-index 1\n#source\tdisk\n#time\t2026-01-01T00:00:00Z\n"
                     "#appini\t/elsewhere/custom/conf/app.ini\nA\t0/0/00000000-0000-0000-0000-000000000000\t1\n")
         b.click(action="/gitea")
-        check("HTML 4.01 Transitional" in b.page and "database migration" in b.page.lower(), "overview page")
+        check("HTML 4.01 Transitional" in b.page and "gitea database migration version" in b.page.lower(), "overview page")
         check("not been measured yet" in b.page, "another folder's index is not used: the folders are not measured yet")
         check("Orphans" not in b.page.split("Size index")[0] or "not been measured yet" in b.page,
               "no orphans from another folder's index")
@@ -479,6 +479,15 @@ def test_web(work, fixture_ids):
         b.click(action="/gitea")
         b.click(action="/gitea/orphans")
         check("ghost/gone.git" in b.page and fx.ATT_ORPHAN in b.page, "orphans page")
+        # Delete all orphans: the page says what goes, and a wrong number deletes nothing.
+        b.click(action="/gitea/orphans/delete")
+        check('name="confirm"' in b.page and "attachment-file" in b.page and "git-directory" in b.page,
+              "the delete-orphans page lists what goes, by type, and asks for the number")
+        orphan_file = os.path.join(work, "data", "attachments", fx.ATT_ORPHAN[0], fx.ATT_ORPHAN[1], fx.ATT_ORPHAN)
+        b.click(action="/gitea/orphans/delete", op="delete", extra={"confirm": "999"})
+        check("The number typed is not the number of orphans" in b.page and os.path.exists(orphan_file),
+              "negative: a wrong number deletes nothing")
+        b.click(action="/gitea")
         # Refusals: names that are not Gitea names are never paths.
         for bad in ["/gitea/o/..", "/gitea/o/%2e%2e", "/gitea/o/acme/..%2F..%2Fetc", "/gitea/o/a%2Fb",
                     "/gitea/o/acme/big%00", "/gitea/o/.hidden", "/gitea/o/acme/-x"]:
@@ -856,6 +865,88 @@ def test_delete_fixture(work):
     check(db.execute("SELECT COUNT(*) FROM package").fetchone()[0] == 0
           and db.execute("SELECT COUNT(*) FROM package_blob").fetchone()[0] == 0, "and its package rows")
     db.close()
+
+
+def test_delete_orphans(work):
+    """Delete all orphans: the files nothing uses and the rows whose file is gone;
+    what is in use, or is not safe to delete, stays."""
+    import json as _json
+    g = os.path.join(work, "gorph")
+    fx.make(g)
+    ini = os.path.join(g, "custom", "conf", "app.ini")
+    index = os.path.join(g, "index.txt")
+    rc, out, err = cli("index", "--config", ini, "--index", index)
+    check(rc == 0, f"orphans: index built {err.strip()}")
+    data = os.path.join(g, "data")
+    dbp = os.path.join(data, "gitea.db")
+    att = lambda u: os.path.join(data, "attachments", u[0], u[1], u)
+    lfs = lambda o: os.path.join(data, "lfs", o[:2], o[2:4], o[4:])
+    files = {"attachment": att(fx.ATT_ORPHAN), "lfs": lfs(fx.OID_ORPHAN),
+             "git": os.path.join(data, "gitea-repositories", "ghost", "gone.git"),
+             "avatar": os.path.join(data, "avatars", fx.AVATAR_ORPHAN)}
+    check(all(os.path.exists(x) for x in files.values()), "orphans: the fixture has its orphan files")
+
+    def count(sql, *a):
+        c = sqlite3.connect(dbp)
+        try:
+            return c.execute(sql, a).fetchone()[0]
+        finally:
+            c.close()
+
+    rows_before = (count("SELECT COUNT(*) FROM attachment"), count("SELECT COUNT(*) FROM lfs_meta_object"))
+    # Negatives: no number, a wrong one - nothing goes.
+    for confirm in (None, "6", "seven"):
+        rc, out, err = cli("delete-orphans", "--config", ini, "--index", index, *(["--confirm", confirm] if confirm else []))
+        check(rc != 0 and "not the number of orphans" in err and all(os.path.exists(x) for x in files.values())
+              and rows_before == (count("SELECT COUNT(*) FROM attachment"), count("SELECT COUNT(*) FROM lfs_meta_object")),
+              f"orphans: confirm {confirm!r} is refused and deletes nothing")
+    # Gitea "running": something answers on its HTTP port.
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    s.listen(1)
+    port = s.getsockname()[1]
+    text = open(ini).read()
+    open(ini, "w").write(text.replace("HTTP_PORT = 1\n", f"HTTP_PORT = {port}\n"))
+    rc, out, err = cli("delete-orphans", "--config", ini, "--index", index, "--confirm", "7")
+    check(rc != 0 and "Gitea is running" in err and all(os.path.exists(x) for x in files.values()),
+          "orphans: refused while Gitea runs")
+    s.close()
+    open(ini, "w").write(text)
+    # Gitea took the orphan attachment into use after the measuring: it must stay.
+    c = sqlite3.connect(dbp)
+    vals = {"uuid": fx.ATT_ORPHAN, "repo_id": 0, "issue_id": 0, "release_id": 0, "comment_id": 0, "uploader_id": 0,
+            "name": "late.bin", "size": os.path.getsize(att(fx.ATT_ORPHAN)), "created_unix": 0}
+    c.execute(f"INSERT INTO attachment ({', '.join(vals)}) VALUES ({', '.join('?' * len(vals))})", list(vals.values()))
+    c.commit()
+    c.close()
+    # The job counts the orphans again: the number seen before is refused.
+    rc, out, err = cli("delete-orphans", "--config", ini, "--index", index, "--confirm", "7", "--json")
+    check(rc != 0 and "(6)" in err and os.path.exists(files["lfs"]),
+          "negative: the orphans changed after the page was read, so its number is refused")
+    rc, out, err = cli("delete-orphans", "--config", ini, "--index", index, "--confirm", "6", "--json")
+    check(rc == 0, f"orphans: deleted with the number typed {err.strip()[-300:]}")
+    result = _json.loads(out) if rc == 0 and out.strip().startswith("{") else {}
+    check(result.get("orphans") == 6 and result.get("rows") == 2 and result.get("kept") == 1,
+          f"orphans: 6 orphans, 2 rows deleted, the size mismatch kept {result}")
+    check(os.path.exists(files["attachment"]), "negative: a file the database uses again is kept")
+    check(not any(os.path.exists(files[k]) for k in ("lfs", "git", "avatar")),
+          "orphans: the LFS file, git folder and avatar nothing uses are gone")
+    check(count("SELECT COUNT(*) FROM attachment WHERE uuid = ?", fx.ATT_MISSING) == 0
+          and count("SELECT COUNT(*) FROM lfs_meta_object WHERE oid = ?", fx.OID_MISSING) == 0,
+          "orphans: the attachment and LFS rows whose file is gone are deleted")
+    kept = [att(fx.ATT_SIZE), att(fx.ATT_BIG), lfs(fx.OID_SHARED), lfs(fx.OID_BOB),
+            os.path.join(data, "gitea-repositories", "acme", "big.git"),
+            os.path.join(data, "avatars", fx.AVATAR_ACME),
+            os.path.join(data, "packages", fx.PKG_SHA[:2], fx.PKG_SHA[2:4], fx.PKG_SHA)]
+    check(all(os.path.exists(x) for x in kept), "negative: every file the database uses stays")
+    check(count("SELECT COUNT(*) FROM repository") == 3 and count("SELECT COUNT(*) FROM attachment WHERE uuid = ?", fx.ATT_SIZE) == 1,
+          "negative: repositories and used rows stay")
+    check(not os.path.exists(os.path.join(data, ".omi-gitea.lock")) and not os.path.exists(os.path.join(data, ".omi-gitea.journal")),
+          "orphans: no lock or journal is left")
+    rc, out, err = cli("index", "--config", ini, "--index", index)
+    rc, out, _ = cli("orphans", "--bytes", "--config", ini, "--index", index)
+    check(sorted(x["kind"] for x in table(out)) == ["attachment-size"],
+          f"orphans: measured again, only the size mismatch is left {out.strip()[-300:]}")
 
 
 def test_no_python_or_gitea_at_runtime():
@@ -1944,6 +2035,7 @@ def main():
         test_stop_reaches_the_write()
         test_delete_coverage()
         test_delete_fixture(work)
+        test_delete_orphans(work)
         test_delete_live(work)
         test_pascal_git(os.path.join(work, "pascal-git"))
         test_import_live(work)

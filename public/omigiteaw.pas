@@ -247,6 +247,14 @@ function GwPlanDelete(const P: TGtPaths; const Owner, Repo: string): TJSONObject
 function GwDelete(const P: TGtPaths; const Owner, Repo, Confirm, PidFile, ExcludeFile, By,
   IndexPath: string; ExcludeFromSync: Boolean; Say: TGwSay): TJSONObject;
 
+// Deletes every orphan of the size index (GtLoadReport's): the files nothing
+// in the database uses, and the attachment and LFS rows whose file is gone.
+// Confirm must be the number of orphans, typed. Each file is checked against
+// the database again just before it goes (the journal's Referenced), so what
+// Gitea uses is kept. Repository rows, package rows and size mismatches are
+// kept too: deleting them is not safe here.
+function GwDeleteOrphans(const P: TGtPaths; const Confirm, PidFile, IndexPath: string; Say: TGwSay): TJSONObject;
+
 // The exclude file shared with github-to-gitea (github-to-gitea.exclude.txt):
 // gitea_attachments.parse_exclude_file's rules - everything from '#' to the
 // end of a line is a comment, entries one a line or comma separated.
@@ -1807,6 +1815,161 @@ begin
     Deleted.Free;
     PlanJ.Free;
     Tables.Free;
+    W.Free;
+  end;
+end;
+
+{ --- deleting the orphans ------------------------------------------------------ }
+
+function GwDeleteOrphans(const P: TGtPaths; const Confirm, PidFile, IndexPath: string; Say: TGwSay): TJSONObject;
+var
+  W: TGwWriter;
+  Db: TGwDb;
+  R: TGtReport;
+  E, Kind, Rel, Key, Reason, Root, RefKind: string;
+  Parts: TStringArray;
+  Entries: TJSONArray;
+  I: Integer;
+  Bytes, Rows, Kept, Removed, Size: Int64;
+
+  function AttachmentFile(const Uuid: string): string;
+  begin
+    Result := GtPath([P.Attachments, Copy(Uuid, 1, 1), Copy(Uuid, 2, 1), Uuid]);
+  end;
+
+  function LfsFile(const Oid: string): string;
+  begin
+    Result := GtPath([P.Lfs, Copy(Oid, 1, 2), Copy(Oid, 3, 2), Copy(Oid, 5, MaxInt)]);
+  end;
+
+begin
+  if IndexPath = '' then
+    raise EGw.Create('no size index: measure the Gitea folder first');
+  W := TGwWriter.Enter(P, PidFile, Say);
+  Entries := TJSONArray.Create;
+  R := Default(TGtReport);
+  try
+    if not GtLoadReport(P, IndexPath, R, E) then
+      raise EGw.Create('cannot read the size index: ' + E);
+    if Trim(Confirm) <> IntToStr(R.Orphans.Count) then
+      raise EGw.Create('The number typed is not the number of orphans (' + IntToStr(R.Orphans.Count) +
+        '). Nothing was deleted.');
+    Bytes := 0;
+    Rows := 0;
+    Kept := 0;
+    Db := TGwDb.Open(P.DbPath, False);
+    try
+      Db.Exec('BEGIN IMMEDIATE', []);
+      try
+        for I := 0 to R.Orphans.Count - 1 do
+        begin
+          Parts := R.Orphans[I].Split([#9]);
+          if Length(Parts) < 4 then
+            Continue;
+          Kind := Parts[0];
+          Rel := Parts[1];
+          Size := StrToInt64Def(Parts[2], 0);
+          Reason := Parts[3];
+          Root := '';
+          RefKind := '';
+          Key := '';
+          case Kind of
+            'attachment-file':
+              begin
+                Root := P.Attachments;
+                RefKind := 'attachment';
+                Key := ExtractFileName(Rel);
+              end;
+            'lfs-file':
+              begin
+                Root := P.Lfs;
+                RefKind := 'lfs';
+                Key := LowerCase(StringReplace(Rel, '/', '', [rfReplaceAll]));
+              end;
+            'package-file':
+              begin
+                Root := P.Packages;
+                RefKind := 'package';
+                Key := LowerCase(ExtractFileName(Rel));
+              end;
+            'avatar-file':
+              begin
+                Root := P.Avatars;
+                RefKind := 'avatar';
+                Key := Rel;
+              end;
+            'repo-avatar-file':
+              begin
+                Root := P.RepoAvatars;
+                RefKind := 'avatar';
+                Key := Rel;
+              end;
+            'git-directory':
+              begin
+                Root := P.RepoRoot;
+                RefKind := 'repo';
+                Key := LowerCase(Rel);
+                if Copy(Key, Length(Key) - 8, 9) = '.wiki.git' then
+                  Key := Copy(Key, 1, Length(Key) - 9)
+                else if Copy(Key, Length(Key) - 3, 4) = '.git' then
+                  Key := Copy(Key, 1, Length(Key) - 4);
+              end;
+            'attachment-row':
+              // Only while its file is still not there.
+              if not FileExists(AttachmentFile(Rel)) then
+              begin
+                Inc(Rows, Db.Changes('DELETE FROM attachment WHERE uuid = ?1', [Rel]));
+                Continue;
+              end;
+            'lfs-row':
+              begin
+                if Copy(Reason, 1, 7) = 'its rep' then
+                  Inc(Rows, Db.Changes('DELETE FROM lfs_meta_object WHERE oid = ?1 AND ' +
+                    'repository_id NOT IN (SELECT id FROM repository)', [Rel]))
+                else if not FileExists(LfsFile(Rel)) then
+                  Inc(Rows, Db.Changes('DELETE FROM lfs_meta_object WHERE oid = ?1', [Rel]));
+                Continue;
+              end;
+          end;
+          if (Root = '') or not NoDotDot(Rel) then
+          begin
+            Inc(Kept);
+            if Assigned(Say) then
+              Say('Kept: ' + Kind + ' ' + Rel + ' (' + Reason + ')');
+            Continue;
+          end;
+          Entries.Add(TJSONObject.Create(['kind', RefKind, 'key', Key, 'path', GtPath([Root, Rel])]));
+          Inc(Bytes, Size);
+        end;
+        // The files go after the commit; say which first.
+        W.WriteJournal('delete orphans', Entries);
+        Db.Exec('COMMIT', []);
+      except
+        Db.Exec('ROLLBACK', []);
+        FreeAndNil(Db);
+        if FileExists(W.JournalPath) then
+          DeleteFile(W.JournalPath);
+        raise;
+      end;
+    finally
+      Db.Free;
+    end;
+    if Assigned(Say) then
+      Say('Orphans: ' + IntToStr(R.Orphans.Count) + '; rows deleted: ' + IntToStr(Rows) + '; files to remove: ' +
+        IntToStr(Entries.Count) + ', ' + IntToStr(Bytes) + ' bytes; kept: ' + IntToStr(Kept) + '.');
+    GwStatus(Say, 'toremove', IntToStr(Entries.Count) + ' ' + IntToStr(Bytes));
+    W.ProgressDone := 0;
+    W.ProgressTotal := Entries.Count;
+    Removed := W.FinishJournal;
+    MarkIndex(IndexPath, Entries, P);
+    if Assigned(Say) then
+      Say('Deleted the orphans: ' + IntToStr(Rows) + ' rows, ' + IntToStr(Removed) + ' files, ' +
+        IntToStr(W.ProgressBytes) + ' bytes freed.');
+    Result := TJSONObject.Create(['orphans', R.Orphans.Count, 'rows', Rows, 'files', Removed,
+      'bytes', W.ProgressBytes, 'kept', Kept]);
+  finally
+    GtFreeReport(R);
+    Entries.Free;
     W.Free;
   end;
 end;

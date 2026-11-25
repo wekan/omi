@@ -115,7 +115,7 @@ back to `/`.
 
 | Page | Shows |
 |------|-------|
-| `/gitea` | the paths read from app.ini (and whether each exists), the migration version, row counts, the sizes of everything, **Measure again** |
+| `/gitea` | the paths read from app.ini (and whether each exists), Gitea's database migration version, row counts, the sizes of everything, **Measure again** |
 | `/gitea/owners` | every user and organization with its repositories, git, LFS, attachments, packages, total, the database's size and its mismatches; sorted by any column, largest first |
 | `/gitea/repos` | every repository, sortable, 500 at a time |
 | `/gitea/o/<owner>` | the owner's sizes, repositories and packages |
@@ -126,6 +126,7 @@ back to `/`.
 | `.../<repo>/attachments` | the repository's attachments, largest first, with their path and whether the file is there |
 | `.../<repo>/lfs` | the repository's LFS objects, largest first |
 | `/gitea/orphans` | the orphans report (its first 5000 lines) |
+| `/gitea/orphans/delete` | **Delete all orphans**: how many of each type and their size, then the number of orphans typed to go on; runs as a job |
 
 Authors imported by a migration (`original_author`) are shown as
 `<login> (GitHub)`. Bodies are shown as escaped text with their line breaks.
@@ -454,7 +455,19 @@ From a terminal:
 ./public/server gitea status --config app.ini
 ./public/server gitea delete-owner --config app.ini --owner NAME --dry-run [--json]
 ./public/server gitea delete-owner --config app.ini --owner NAME --confirm NAME
+./public/server gitea delete-orphans --config app.ini [--index FILE] --confirm NUMBER [--json]
 ```
+
+**Delete all orphans** deletes what the size index's orphans report lists,
+with Gitea stopped and the number of orphans typed: the files nothing in the
+database uses (attachments, LFS objects, package blobs, avatars, git
+directories), and the `attachment` and `lfs_meta_object` rows whose file is
+still gone. Every file is checked against the database again just before it
+is removed (the same journal a delete uses), so a file Gitea took into use
+after the measuring stays. Kept, because deleting them is not safe here:
+repository rows whose owner is gone (delete the repository), package rows
+without a blob, and attachments whose size differs from their row's. The
+index loses the removed lines and is marked out of date.
 
 ## Translations
 
