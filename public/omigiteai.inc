@@ -2022,8 +2022,20 @@ begin
     if not JBool(Releases.Items[I], 'draft') then
       KeptTags.Add(JStr(Releases.Items[I], 'tag_name'));
   end;
+  // No published release on GitHub: nothing kept, and nothing removed either
+  // (FreeReleaseSpace and the write keep their hands off then), as
+  // github-to-gitea deletes files only of releases GitHub lists.
+  // ifthen_ evaluates both of its values, so KeptTags[0] is read only when
+  // there is one: with none it was "List index (0) out of bounds".
   if Assigned(Say) then
-    Say('  release files kept: ' + ifthen_(KeptTags.Count = 1, KeptTags[0], IntToStr(KeptTags.Count) + ' newest releases'));
+  begin
+    if KeptTags.Count = 0 then
+      Say('  release files: GitHub has no release, Gitea''s are left as they are')
+    else if KeptTags.Count = 1 then
+      Say('  release files kept: ' + KeptTags[0])
+    else
+      Say('  release files kept: ' + IntToStr(KeptTags.Count) + ' newest releases');
+  end;
 end;
 
 // FIRST, before git and before a single file is fetched: the disk is made
@@ -2046,7 +2058,7 @@ begin
   Bytes := 0;
   FreeAndNil(KeepUntilDone);
   KeptIncomplete := False;
-  if (KeptTags = nil) or (RepoId = '') then
+  if (KeptTags = nil) or (KeptTags.Count = 0) or (RepoId = '') then
     Exit;
   if Assigned(Say) then
     Say('  release files: looking for those of older releases and older versions in Gitea');

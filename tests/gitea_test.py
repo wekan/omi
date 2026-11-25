@@ -1649,6 +1649,16 @@ def test_import_live(work):
         rc, after_ver, _ = g.doctor()
         new = [x for x in after_ver if x not in before]
         check(rc == 0 and not new, f"gitea doctor check --all after the version files {new}")
+        # GitHub lists no release at all (wekan-autoinstall): the import ended
+        # with "List index (0) out of bounds" - and Gitea's release files must
+        # stay, as github-to-gitea removes files only of releases GitHub lists.
+        kept_before = gitea_files("v1.3")
+        saved_releases, fake.releases = fake.releases, []
+        rc, out, err = imp()
+        fake.releases = saved_releases
+        check(rc == 0 and "out of bounds" not in out + err and "GitHub has no release" in out + err,
+              f"no release on GitHub: the import goes on {err[-300:]}")
+        check(gitea_files("v1.3") == kept_before and kept_before, f"and Gitea's release files stay {gitea_files('v1.3')}")
         # Whether a removed file is still referred to is asked per file; with
         # `lower(uuid) = lower(?)` that read the whole attachment table each time
         # (hours for years of release files). It must use the uuid index.
