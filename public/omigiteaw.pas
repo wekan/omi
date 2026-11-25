@@ -1205,7 +1205,7 @@ begin
   for I := 0 to High(Rows) do
     // A repository whose owner_name is stale (a renamed owner) has its folder elsewhere.
     if (Rows[I][0] <> '') and (RepoOnly or (Rows[I][0] <> Lower)) and GtNameIsSafe(Rows[I][0]) and
-      GtNameIsSafe(Rows[I][1]) then
+      GtRepoNameIsValid(Rows[I][1]) then
     begin
       AddEntry(Result, GtPath([P.RepoRoot, Rows[I][0], Rows[I][1] + '.git']), 'repo', Rows[I][0] + '/' + Rows[I][1]);
       AddEntry(Result, GtPath([P.RepoRoot, Rows[I][0], Rows[I][1] + '.wiki.git']), 'repo',
@@ -1330,7 +1330,7 @@ begin
   RepoName := '';
   if Repo <> '' then
   begin
-    if not GtNameIsSafe(Repo) then
+    if not GtRepoNameIsValid(Repo) then
       raise EGw.Create('not a Gitea repository name: ''' + Repo + '''');
     Rows := Db.Query('SELECT id, name FROM repository WHERE owner_id = ?1 AND lower_name = ?2', [O.Id, LowerCase(Repo)]);
     if Length(Rows) = 0 then
@@ -1578,7 +1578,7 @@ var
   Parts: TStringArray;
 begin
   Parts := Full.Split(['/']);
-  Result := (Length(Parts) = 2) and GtNameIsSafe(Parts[0]) and GtNameIsSafe(Parts[1]);
+  Result := (Length(Parts) = 2) and GtNameIsSafe(Parts[0]) and GtRepoNameIsValid(Parts[1]);
 end;
 
 function GwIsExcluded(const Path, Full: string): Boolean;
@@ -1685,7 +1685,7 @@ begin
   Done := 0;
   if not GtNameIsSafe(Owner) then
     raise EGw.Create('not a Gitea owner name: ''' + Owner + '''');
-  if (Repo <> '') and not GtNameIsSafe(Repo) then
+  if (Repo <> '') and not GtRepoNameIsValid(Repo) then
     raise EGw.Create('not a Gitea repository name: ''' + Repo + '''');
   if Repo <> '' then
     Target := Owner + '/' + Repo

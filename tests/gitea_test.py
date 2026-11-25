@@ -1450,6 +1450,16 @@ def test_import_live(work):
         rc, out, err = imp("--repo", "nosuch")
         check(rc != 0 and "not on GitHub under omigh: nosuch" in out + err,
               f"negative: a repository asked for that GitHub does not list is named {out[-200:]}")
+        # A repository named .github (an organization's profile and
+        # community files) is a Gitea name: it is imported, not refused.
+        fake.extra_repos = [dict(fake.repo, id=7002, name=".github", full_name="omigh/.github",
+                                 html_url=f"{fake.base}/omigh/.github")]
+        fake.not_found.add("/api/repos/omigh/.github/labels")
+        rc, out, err = imp("--repo", ".github")
+        check("not a" not in out + err and "status repos 1/1" in out + err and "omigh/.github" in out + err,
+              f".github is imported as a repository {out[-300:]}")
+        rc, out, err = imp("--repo", "x.wiki")
+        check(rc != 0 and "not a repository name: 'x.wiki'" in out + err, "negative: x.wiki is not a repository name")
         fake.extra_repos = []
         fake.not_found.clear()
         # GitHub refuses something: the import ends with that, exit 1 - it
@@ -1955,7 +1965,14 @@ def test_delete_repo_fixture(work):
         args = ["delete-repo", *common, "--owner", "acme", "--repo", "big"] + (["--confirm", confirm] if confirm else [])
         rc, out, err = omigitea(*args)
         check(rc != 0 and count("SELECT COUNT(*) FROM repository") == 3, f"a repository delete {what} is refused")
-    for owner, repo in (("acme", "../big"), ("..", "big"), ("acme", "big/../../x"), ("acme", ".git"), ("acme", "-x")):
+    # Gitea's own repository names (models/repo/repo.go): .github is one, so
+    # it is looked for, not refused as a name.
+    rc, out, err = omigitea("delete-repo", *common, "--owner=acme", "--repo=.github", "--confirm=acme/.github")
+    check(rc != 0 and "no repository acme/.github" in err and "not a Gitea" not in err,
+          f"acme/.github is a repository name {err.strip()[-200:]}")
+    for owner, repo in (("acme", "../big"), ("..", "big"), ("acme", "big/../../x"), ("acme", ".git"), ("acme", "-x"),
+                        ("acme", "."), ("acme", "a..b"), ("acme", "x.wiki"), ("acme", "x.RSS"), ("acme", "x.atom"),
+                        ("acme", "a b")):
         rc, out, err = omigitea("delete-repo", *common, "--owner=" + owner, "--repo=" + repo, f"--confirm={owner}/{repo}")
         check(rc != 0 and "not a Gitea" in err, f"{owner}/{repo} is refused as a name")
     s_ = socket.socket()
@@ -2004,7 +2021,8 @@ def test_delete_repo_fixture(work):
     rc, out, err = omigitea("exclude", *common, "--json")
     check(rc == 0 and _json.loads(out)["excluded"] == ["acme/big", "wekan/a", "wekan/b"],
           "the exclude file is read with github-to-gitea's rules")
-    for bad in ("acme", "a/b/c", "../x", "acme/..", "a/.b", "a b/c", ""):
+    # a/.b is a name: Gitea takes .b as a repository (models/repo/repo.go).
+    for bad in ("acme", "a/b/c", "../x", "acme/..", "a/b..c", "a/x.wiki", ".a/b", "a b/c", ""):
         rc, out, err = omigitea("exclude", *common, "--add=" + bad)
         check(rc != 0 and "not an owner/name" in err, f"exclude of a malformed name {bad!r} is refused")
     rc, out, err = omigitea("exclude", *common, "--remove", "wekan/A", "--json")

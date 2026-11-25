@@ -2765,7 +2765,7 @@ begin
   Files := nil;
   Full := JStr(Gr, 'full_name');
   Name := JStr(Gr, 'name');
-  if not GtNameIsSafe(Name) then
+  if not GtRepoNameIsValid(Name) then
     raise EGw.Create('not a Gitea repository name: ''' + Name + '''');
   LowerOwner := LowerCase(OwnerName);
   GitDir := GtPath([P.RepoRoot, LowerOwner, LowerCase(Name) + '.git']);
@@ -2971,7 +2971,7 @@ begin
     Parts := OnlyRepos.Split([' ', ','], TStringSplitOptions.ExcludeEmpty);
     for I := 0 to High(Parts) do
     begin
-      if not GtNameIsSafe(Parts[I]) then
+      if not GtRepoNameIsValid(Parts[I]) then
         raise EGw.Create('not a repository name: ''' + Parts[I] + '''');
       Want.Add(LowerCase(Parts[I]));
       Missing.Add(LowerCase(Parts[I]));

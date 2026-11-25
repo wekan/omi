@@ -8209,7 +8209,7 @@ var
       Repos := '';
       for K := 0 to High(Parts) do
       begin
-        if not GtNameIsSafe(Parts[K]) then
+        if not GtRepoNameIsValid(Parts[K]) then
           Valid := False;
         Repos := Repos + ifthen(Repos <> '', ' ', '') + Parts[K];
       end;

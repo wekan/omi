@@ -209,6 +209,11 @@ function GtResolvePaths(const AppIni: string; out P: TGtPaths; out ErrorText: st
 // One owner or repository name as Gitea allows it: [A-Za-z0-9_.-], not '.'
 // or '..', no leading '.' or '-'. A name that is not is never a path.
 function GtNameIsSafe(const Name: string): Boolean;
+// A repository name as Gitea takes one (models/repo/repo.go IsUsableRepoName):
+// letters, digits, '_', '-' and '.', no '..', not '.', '..' or '-', and not
+// ending in .wiki, .git, .rss or .atom - so .github is one. Unlike Gitea,
+// not starting with '-', so a name is never read as a command's option.
+function GtRepoNameIsValid(const Name: string): Boolean;
 
 // A read-only query (file:...?mode=ro). MaxRows 0 is every row.
 function GtQuery(const DbPath, Sql: string; const Params: array of string;
@@ -829,6 +834,29 @@ begin
       Exit;
   if Pos('..', Name) > 0 then
     Exit;
+  Result := True;
+end;
+
+const
+  RESERVED_REPO_SUFFIXES: array[0..3] of string = ('.wiki', '.git', '.rss', '.atom');
+
+function GtRepoNameIsValid(const Name: string): Boolean;
+var
+  I: Integer;
+  L: string;
+begin
+  Result := False;
+  if (Name = '') or (Length(Name) > 255) or (Name[1] = '-') or (Pos('..', Name) > 0) then
+    Exit;
+  for I := 1 to Length(Name) do
+    if not (Name[I] in ['A'..'Z', 'a'..'z', '0'..'9', '_', '.', '-']) then
+      Exit;
+  L := LowerCase(Name);
+  if (L = '.') or (L = '-') then
+    Exit;
+  for I := 0 to 3 do
+    if Copy(L, Length(L) - Length(RESERVED_REPO_SUFFIXES[I]) + 1, MaxInt) = RESERVED_REPO_SUFFIXES[I] then
+      Exit;
   Result := True;
 end;
 
