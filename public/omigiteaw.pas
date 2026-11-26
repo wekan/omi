@@ -292,6 +292,19 @@ threadvar
   // import keeps - 'newest' (the default, 1), a number, or 'all'. Older
   // releases are imported without files, and their files in Gitea removed.
   GwReleaseAssetsKeep: string;
+  // The job's debug log, <jobs>/<name>.debug.txt beside its log ('' for
+  // none): every line of the job with its time, and every error the job met
+  // - where, its kind and message, and whether the job went on (handled) or
+  // stopped (raised) - so a failure, and a step that hangs, can be found and
+  // fixed from it. The job page shows only the plain log.
+  GwDebugFile: string;
+
+// A line in the debug log: Where is the step ("save", "github GET ..."),
+// What what happened. Written at once, so a job that hangs shows its last step.
+procedure GwDebug(const Where, What: string);
+// An error in the debug log: E's class and message, and Handling - 'handled'
+// (the job goes on, perhaps with a default) or 'raised' (it stops this step).
+procedure GwDebugError(const Where: string; E: Exception; const Handling: string);
 
 // "Test the token" (server.pas): GitHub's answer to GET /user with the token
 // read from TokenFile. Result is 'none' (no token), 'ok', 'rejected' (401),
@@ -392,7 +405,13 @@ begin
       F.Free;
     end;
   except
-    Result := '';
+    on E: Exception do
+    begin
+      // A file that is not there is no error: only one that cannot be read.
+      if FileExists(Path) then
+        GwDebugError('read ' + Path, E, 'handled: read as empty');
+      Result := '';
+    end;
   end;
 end;
 
@@ -984,6 +1003,7 @@ begin
     except
       on E: EGw do
       begin
+        GwDebugError('gitea database ' + P.DbPath, E, 'raised: in use by another program');
         Busy := E.Message;
       end;
     end;
@@ -1001,8 +1021,12 @@ begin
     if FileExists(JournalPath) and Assigned(Say) then
       Say('Finished a write that was interrupted: ' + IntToStr(FinishJournal) + ' files removed.');
   except
-    Destroy;
-    raise;
+    on E: Exception do
+    begin
+      GwDebugError('journal ' + JournalPath, E, 'raised: the interrupted write could not be finished');
+      Destroy;
+      raise;
+    end;
   end;
 end;
 
@@ -1047,6 +1071,46 @@ end;
 // (<n>/<total>), repo, phase (a translation key: issues, comments,
 // pull-requests, releases, space-freed, attachments, save; or git), toremove,
 // removed and fetched (<files> <bytes>).
+var
+  GwDebugLock: TRTLCriticalSection;
+
+procedure GwDebug(const Where, What: string);
+var
+  F: TFileStream;
+  S: string;
+begin
+  if GwDebugFile = '' then
+    Exit;
+  S := FormatDateTime('yyyy-mm-dd hh:nn:ss.zzz', Now) + ' [' + Where + '] ' + What + #10;
+  EnterCriticalSection(GwDebugLock);
+  try
+    try
+      if FileExists(GwDebugFile) then
+        F := TFileStream.Create(GwDebugFile, fmOpenWrite or fmShareDenyNone)
+      else
+        F := TFileStream.Create(GwDebugFile, fmCreate or fmShareDenyNone);
+      try
+        F.Seek(0, soEnd);
+        F.WriteBuffer(S[1], Length(S));
+      finally
+        F.Free;
+      end;
+    except
+      // The debug log never stops the job it describes.
+    end;
+  finally
+    LeaveCriticalSection(GwDebugLock);
+  end;
+end;
+
+procedure GwDebugError(const Where: string; E: Exception; const Handling: string);
+begin
+  if E = nil then
+    GwDebug(Where, 'ERROR (' + Handling + ')')
+  else
+    GwDebug(Where, 'ERROR ' + E.ClassName + ' (' + Handling + '): ' + E.Message);
+end;
+
 procedure GwStatus(Say: TGwSay; const Key, Value: string);
 begin
   if Assigned(Say) then
@@ -1777,11 +1841,15 @@ begin
         Inc(Done);
         GwProgress(Say, Done, Steps, 'rows committed: ' + IntToStr(Total));
       except
-        Db.Exec('ROLLBACK', []);
-        FreeAndNil(Db);
-        // Nothing was deleted: the journal's files are all still referenced.
-        W.FinishJournal;
-        raise;
+        on E: Exception do
+        begin
+          GwDebugError('delete', E, 'raised: rolled back, nothing deleted');
+          Db.Exec('ROLLBACK', []);
+          FreeAndNil(Db);
+          // Nothing was deleted: the journal's files are all still referenced.
+          W.FinishJournal;
+          raise;
+        end;
       end;
     finally
       Db.Free;
@@ -1952,11 +2020,15 @@ begin
         W.WriteJournal('delete orphans', Entries);
         Db.Exec('COMMIT', []);
       except
-        Db.Exec('ROLLBACK', []);
-        FreeAndNil(Db);
-        if FileExists(W.JournalPath) then
-          DeleteFile(W.JournalPath);
-        raise;
+        on E: Exception do
+        begin
+          GwDebugError('delete orphans', E, 'raised: rolled back, nothing deleted');
+          Db.Exec('ROLLBACK', []);
+          FreeAndNil(Db);
+          if FileExists(W.JournalPath) then
+            DeleteFile(W.JournalPath);
+          raise;
+        end;
       end;
     finally
       Db.Free;
@@ -1983,4 +2055,8 @@ end;
 
 {$I omigiteai.inc}
 
+initialization
+  InitCriticalSection(GwDebugLock);
+finalization
+  DoneCriticalSection(GwDebugLock);
 end.

@@ -37,7 +37,7 @@ unit omigit;
 interface
 
 uses
-  SysUtils, Classes, sha1, zbase, zinflate, crc, fphttpclient,
+  SysUtils, Classes, contnrs, sha1, zbase, zinflate, crc, fphttpclient,
   {$IFNDEF HASAMIGA}
   opensslsockets,
   {$ENDIF}
@@ -78,7 +78,7 @@ type
     function ReadPacked(const Sha: TGitSha; out Kind: Integer; Dest: TStream; Depth: Integer): Boolean;
     function ReadLoose(const Hex: string; out Kind: Integer; Dest: TStream): Boolean;
     function ReadInto(const Hex: string; out Kind: Integer; Dest: TStream; Depth: Integer): Boolean;
-    procedure LooseRefs(const Dir, Prefix: string; Into: TStringList);
+    procedure LooseRefs(const Dir, Prefix: string; Into: TStringList; Index: TFPStringHashTable);
   public
     constructor Open(const Dir: string);
     destructor Destroy; override;
@@ -263,6 +263,43 @@ end;
 function CompareRefNames(List: TStringList; A, B: Integer): Integer;
 begin
   Result := CompareStr(List.Names[A], List.Names[B]);
+end;
+
+// A ref set in List ("name=sha"), found through Index (name -> its line), so
+// a repository with tens of thousands of refs - every refs/pull/N/head of a
+// GitHub mirror - is read and written in linear time: TStringList.Values
+// searches the whole list on every call, which made each read quadratic.
+procedure PutRef(List: TStringList; Index: TFPStringHashTable; const Name, Value: string);
+var
+  Node: THTCustomNode;
+begin
+  Node := Index.Find(Name);
+  if Node <> nil then
+    List[StrToInt(THTStringNode(Node).Data)] := Name + '=' + Value
+  else
+  begin
+    Index.Add(Name, IntToStr(List.Count));
+    List.Add(Name + '=' + Value);
+  end;
+end;
+
+// The packed-refs file's refs into List.
+procedure ReadPackedRefs(const Path: string; List: TStringList; Index: TFPStringHashTable);
+var
+  Lines: TStringArray;
+  I, Sp: Integer;
+  L: string;
+begin
+  Lines := ReadText(Path).Split([#10]);
+  for I := 0 to High(Lines) do
+  begin
+    L := TrimRight(Lines[I]);
+    if (L = '') or (L[1] in ['#', '^']) then
+      Continue;
+    Sp := Pos(' ', L);
+    if (Sp = 41) and GitIsHex(System.Copy(L, 1, 40)) then
+      PutRef(List, Index, System.Copy(L, 42, MaxInt), LowerCase(System.Copy(L, 1, 40)));
+  end;
 end;
 
 // A stream for an object of Size bytes: memory, or a scratch file in Dir.
@@ -1373,7 +1410,7 @@ end;
 
 { --- refs --------------------------------------------------------------------------- }
 
-procedure TGitRepo.LooseRefs(const Dir, Prefix: string; Into: TStringList);
+procedure TGitRepo.LooseRefs(const Dir, Prefix: string; Into: TStringList; Index: TFPStringHashTable);
 var
   Names: TStringList;
   I: Integer;
@@ -1386,13 +1423,13 @@ begin
     begin
       Full := GtPath([Dir, Names[I]]);
       case GtKind(Full, Size) of
-        gkDir: LooseRefs(Full, Prefix + Names[I] + '/', Into);
+        gkDir: LooseRefs(Full, Prefix + Names[I] + '/', Into, Index);
         gkFile:
           if (ExtractFileExt(Names[I]) <> '.lock') then
           begin
             V := Trim(ReadText(Full));
             if GitIsHex(V) then
-              Into.Values[Prefix + Names[I]] := LowerCase(V);
+              PutRef(Into, Index, Prefix + Names[I], LowerCase(V));
           end;
       end;
     end;
@@ -1403,23 +1440,17 @@ end;
 
 function TGitRepo.Refs: TStringList;
 var
-  Lines: TStringArray;
-  I, Sp: Integer;
-  L: string;
+  Index: TFPStringHashTable;
 begin
   Result := TStringList.Create;
   Result.NameValueSeparator := '=';
-  Lines := ReadText(GtPath([FDir, 'packed-refs'])).Split([#10]);
-  for I := 0 to High(Lines) do
-  begin
-    L := TrimRight(Lines[I]);
-    if (L = '') or (L[1] in ['#', '^']) then
-      Continue;
-    Sp := Pos(' ', L);
-    if (Sp = 41) and GitIsHex(System.Copy(L, 1, 40)) then
-      Result.Values[System.Copy(L, 42, MaxInt)] := LowerCase(System.Copy(L, 1, 40));
+  Index := TFPStringHashTable.Create;
+  try
+    ReadPackedRefs(GtPath([FDir, 'packed-refs']), Result, Index);
+    LooseRefs(GtPath([FDir, 'refs']), 'refs/', Result, Index);
+  finally
+    Index.Free;
   end;
-  LooseRefs(GtPath([FDir, 'refs']), 'refs/', Result);
   Result.CustomSort(@CompareRefNames);
 end;
 
@@ -1437,39 +1468,32 @@ end;
 
 procedure TGitRepo.SetRefs(Changes: TStringList);
 var
-  Lines: TStringArray;
-  Packed_: TStringList;
-  I, Sp: Integer;
-  L, Name, Text: string;
+  Packed_, Text: TStringList;
+  Index: TFPStringHashTable;
+  I: Integer;
 begin
   Packed_ := TStringList.Create;
+  Text := TStringList.Create;
+  Index := TFPStringHashTable.Create;
   try
     Packed_.NameValueSeparator := '=';
-    Lines := ReadText(GtPath([FDir, 'packed-refs'])).Split([#10]);
-    for I := 0 to High(Lines) do
-    begin
-      L := TrimRight(Lines[I]);
-      if (L = '') or (L[1] in ['#', '^']) then
-        Continue;
-      Sp := Pos(' ', L);
-      if Sp = 41 then
-        Packed_.Values[System.Copy(L, 42, MaxInt)] := System.Copy(L, 1, 40);
-    end;
+    ReadPackedRefs(GtPath([FDir, 'packed-refs']), Packed_, Index);
     for I := 0 to Changes.Count - 1 do
-      Packed_.Values[Changes.Names[I]] := LowerCase(Changes.ValueFromIndex[I]);
+      PutRef(Packed_, Index, Changes.Names[I], LowerCase(Changes.ValueFromIndex[I]));
     Packed_.CustomSort(@CompareRefNames);
     // No "peeled" trait: git peels these refs itself when it needs to.
-    Text := '# pack-refs with: sorted ' + #10;
+    Text.LineBreak := #10;
+    Text.Capacity := Packed_.Count + 1;
+    Text.Add('# pack-refs with: sorted ');
     for I := 0 to Packed_.Count - 1 do
-      Text := Text + Packed_.ValueFromIndex[I] + ' ' + Packed_.Names[I] + #10;
-    WriteText(GtPath([FDir, 'packed-refs']), Text);
+      Text.Add(Packed_.ValueFromIndex[I] + ' ' + Packed_.Names[I]);
+    WriteText(GtPath([FDir, 'packed-refs']), Text.Text);
     // A loose ref would beat its new packed value.
     for I := 0 to Changes.Count - 1 do
-    begin
-      Name := Changes.Names[I];
-      DeleteFile(GtPath([FDir, Name]));
-    end;
+      DeleteFile(GtPath([FDir, Changes.Names[I]]));
   finally
+    Index.Free;
+    Text.Free;
     Packed_.Free;
   end;
 end;
@@ -1702,8 +1726,10 @@ begin
     Sha := System.Copy(Line, 1, 40);
     Name := System.Copy(Line, 42, MaxInt);
     // An empty repository advertises only "capabilities^{}".
+    // Each name is advertised once: added, not looked up (Values searches
+    // the whole list, and a GitHub mirror advertises tens of thousands).
     if GitIsHex(Sha) and (Name <> '') and (Name <> 'capabilities^{}') then
-      Refs.Values[Name] := LowerCase(Sha);
+      Refs.Add(Name + '=' + LowerCase(Sha));
   end;
 end;
 
@@ -1870,7 +1896,7 @@ begin
       if not Wanted or (System.Copy(Name, Length(Name) - 2, 3) = '^{}') then
         Continue;
       V := Adv.ValueFromIndex[I];
-      Changes.Values[Name] := V;
+      Changes.Add(Name + '=' + V);
       if not Repo.Has(V) then
         Wants.Add(V);
     end;

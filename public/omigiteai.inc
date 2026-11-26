@@ -75,7 +75,11 @@ begin
   try
     Result := DateTimeToUnix(EncodeDateTime(Y, Mo, D, H, Mi, Se, 0));
   except
-    Result := Default;
+    on E: Exception do
+    begin
+      GwDebugError('date ' + S, E, 'handled: the default time is used');
+      Result := Default;
+    end;
   end;
 end;
 
@@ -418,7 +422,11 @@ begin
     try
       Proc.Execute;
     except
-      Exit;
+      on E: Exception do
+      begin
+        GwDebugError('git ' + Git + ' --version', E, 'handled: no git version');
+        Exit;
+      end;
     end;
     Outp := '';
     repeat
@@ -639,9 +647,20 @@ begin
     Result.Add('Authorization: token ' + Token);
 end;
 
+// An address for the debug log: without its query, where a file host's
+// signed links carry their signature.
+function DebugUrl(const Url: string): string;
+begin
+  Result := Url;
+  if Pos('?', Result) > 0 then
+    Result := Copy(Result, 1, Pos('?', Result) - 1) + '?...';
+end;
+
 function TGhClient.Fetch(const Url, Accept: string; Dest: TStream; out Status: Integer; out Body: string;
   out ContentType, Disposition: string): Boolean;
 var
+  Began: TDateTime;
+  Secs: Int64;
   C: TFPHTTPClient;
   H: TStringList;
   Cur, Loc: string;
@@ -682,11 +701,13 @@ begin
         C.AddHeader(Copy(H[I], 1, Pos(':', H[I]) - 1), Trim(Copy(H[I], Pos(':', H[I]) + 1, MaxInt)));
       if Pos('https://', LowerCase(Cur)) = 1 then
         GwNeedTls(Cur);
+      Began := Now;
       try
         C.HTTPMethod('GET', Cur, Into, []);
       except
         on E: Exception do
         begin
+          GwDebugError('http GET ' + DebugUrl(Cur), E, 'handled: the request failed, its caller decides');
           Body := E.Message;
           if Dest <> nil then
             Dest.Size := Start;
@@ -694,6 +715,11 @@ begin
         end;
       end;
       Status := C.ResponseStatusCode;
+      Secs := SecondsBetween(Now, Began);
+      if (Status >= 400) or (Status < 100) then
+        GwDebug('http GET ' + DebugUrl(Cur), 'HTTP ' + IntToStr(Status) + ' after ' + IntToStr(Secs) + ' s')
+      else if Secs >= 60 then
+        GwDebug('http GET ' + DebugUrl(Cur), 'slow: HTTP ' + IntToStr(Status) + ' after ' + IntToStr(Secs) + ' s');
       if (Dest <> nil) and (Status <> 200) then
       begin
         // Not the file: its body is the answer, and Dest is as it was.
@@ -709,7 +735,10 @@ begin
       begin
         Loc := C.GetHeader(C.ResponseHeaders, 'Location');
         if Loc = '' then
+        begin
+          GwDebug('http GET ' + DebugUrl(Cur), 'ERROR redirect ' + IntToStr(Status) + ' without a Location');
           Exit;
+        end;
         if Pos('://', Loc) = 0 then
           Loc := OriginOf(Cur) + Loc;
         Cur := Loc;
@@ -745,7 +774,13 @@ begin
       LastHttpStatus := Status;
       if ((Status = 403) or (Status = 429)) and ((LastRetryAfter <> '') or (LastRemaining = '0') or
         (Pos('rate limit', LowerCase(Body)) > 0)) then
+      begin
         Status := 429;
+        GwDebug('http GET ' + DebugUrl(Cur), 'rate limited: remaining ' + LastRemaining + ', retry after ' +
+          LastRetryAfter + ', reset ' + LastReset);
+      end
+      else if (Status >= 400) and (Body <> '') then
+        GwDebug('http GET ' + DebugUrl(Cur), 'answer: ' + Copy(StringReplace(Body, #10, ' ', [rfReplaceAll]), 1, 300));
       Result := True;
       Exit;
     finally
@@ -763,7 +798,10 @@ end;
 procedure GwCheckStop;
 begin
   if (GwStopFile <> '') and FileExists(GwStopFile) then
+  begin
+    GwDebug('stop', 'the job was stopped (' + GwStopFile + ')');
     raise EGw.Create('stopped');
+  end;
 end;
 
 function TGhClient.ClockOf(UnixTime: Int64): string;
@@ -809,6 +847,7 @@ begin
     Inc(Attempt);
     if not Fetch(Url, 'application/vnd.github+json', nil, Status, Body, Ct, Cd) then
     begin
+      GwDebug('github ' + Path, 'no answer (attempt ' + IntToStr(Attempt) + '): ' + Copy(Body, 1, 300));
       if Attempt < 4 then
       begin
         Sleep(2000 * (Attempt + 1));
@@ -837,6 +876,7 @@ begin
     end;
     if (Status >= 500) and (Attempt < 4) then
     begin
+      GwDebug('github ' + Path, 'HTTP ' + IntToStr(Status) + ', trying again (attempt ' + IntToStr(Attempt) + ')');
       Sleep(2000 * (Attempt + 1));
       Continue;
     end;
@@ -849,14 +889,21 @@ begin
           'Check it with Settings / Test GitHub token.');
       Continue;
     end;
+    if (Status <> 200) and (Status <> 0) then
+      GwDebug('github ' + Path, 'answered HTTP ' + IntToStr(Status));
     try
       if Trim(Body) <> '' then
         Result := GetJSON(Body);
     except
-      Result := nil;
+      on E: Exception do
+      begin
+        GwDebugError('github ' + Path, E, 'handled: the answer is not JSON, read as nothing');
+        Result := nil;
+      end;
     end;
     Exit;
   end;
+  GwDebug('github ' + Path, 'ERROR gave up after ' + IntToStr(Attempt) + ' attempts');
 end;
 
 function TGhClient.One(const Path, Params: string): TJSONData;
@@ -1123,7 +1170,8 @@ type
     procedure FetchPulls(const Full: string; Issues: TJSONArray; Pulls: TJSONObject);
     function CommentsIssuesOff(const Full, Params: string; Issues: TJSONArray): TJSONArray;
     function FetchReleases(const Full, Since: string): TJSONArray;
-    procedure PullRow(Db: TGwDb; const RepoId, IssueId: string; Number: Int64; Pr: TJSONObject; const GitDir: string);
+    procedure PullRow(Db: TGwDb; const RepoId, IssueId: string; Number: Int64; Pr: TJSONObject; Repo: TGitRepo;
+      Known, Changes: TStringList);
     procedure Counters(Db: TGwDb; const RepoId, OwnerId: string);
   end;
 
@@ -1435,6 +1483,7 @@ begin
         except
           on E: Exception do
           begin
+            GwDebugError('git fetch ' + GitDir, E, ifthen_(Wiki, 'handled: the wiki is left as it is', 'raised'));
             if not Wiki then
               raise EGw.Create('git fetch failed: ' + E.Message);
             Exit(GitDir);
@@ -1447,6 +1496,7 @@ begin
           '+refs/tags/*:refs/tags/*', '+refs/pull/*:refs/pull/*'], GitDir, Env);
         if R.Code <> 0 then
         begin
+          GwDebug('git fetch ' + GitDir, 'ERROR exit ' + IntToStr(R.Code) + ': ' + Copy(Trim(R.Output), 1, 500));
           if not Wiki then
             raise EGw.Create('git fetch failed: ' + Copy(Trim(R.Output), 1, 500));
           Exit(GitDir);
@@ -1478,6 +1528,7 @@ begin
     except
       on E: Exception do
       begin
+        GwDebugError('git clone ' + GitDir, E, ifthen_(Wiki, 'handled: no wiki', 'raised'));
         if DirectoryExists(Tmp) then
           RemoveTree(Tmp, N);
         if Wiki then
@@ -2135,8 +2186,12 @@ begin
           W.WriteJournal('older release files ' + Full, Entries);
         Db.Exec('COMMIT', []);
       except
-        Db.Exec('ROLLBACK', []);
-        raise;
+        on E: Exception do
+        begin
+          GwDebugError('free release space ' + Full, E, 'raised: rolled back');
+          Db.Exec('ROLLBACK', []);
+          raise;
+        end;
       end;
     finally
       Db.Free;
@@ -2195,8 +2250,12 @@ begin
       Inc(Page);
     until (N < 100) or ((Oldest <> '') and (Oldest < Since));
   except
-    Result.Free;
-    raise;
+    on E: Exception do
+    begin
+      GwDebugError('github releases', E, 'raised');
+      Result.Free;
+      raise;
+    end;
   end;
   if Assigned(Say) then
     Say('  GitHub: releases since ' + Since + ': ' + IntToStr(Result.Count) + ' read');
@@ -2305,13 +2364,12 @@ begin
 end;
 
 procedure TGwImporter.PullRow(Db: TGwDb; const RepoId, IssueId: string; Number: Int64; Pr: TJSONObject;
-  const GitDir: string);
+  Repo: TGitRepo; Known, Changes: TStringList);
 var
   Head, Base: TJSONObject;
   Merged: Boolean;
-  Pid, HeadSha: string;
-  Repo: TGitRepo;
-  Changes: TStringList;
+  Pid, HeadSha, Name: string;
+  At: Integer;
 begin
   Head := JObj(Pr, 'head');
   Base := JObj(Pr, 'base');
@@ -2331,21 +2389,17 @@ begin
       'merged_unix', IntToStr(ifthen_i(Merged, IsoToUnix(JStr(Pr, 'merged_at'), 0), 0)),
       'allow_maintainer_edit', '0', 'flow', '0', 'commits_ahead', '0', 'commits_behind', '0',
       'conflicted_files', 'null', 'changed_protected_files', 'null']);
-  // refs/pull/N/head: from the mirror clone; else the head commit, when the repository has it.
+  // refs/pull/N/head: from the mirror clone; else the head commit, when the
+  // repository has it. Known is the repository's refs, read once for all the
+  // pull requests, and Changes is written once after them (ContentRows): a
+  // read and a write of packed-refs for each of thousands of pull requests
+  // kept a large repository "writing to Gitea" for hours.
   HeadSha := JStr(Head, 'sha');
-  // refs/pull/<n>/head when GitHub's fetch did not bring it but has its commit.
-  Repo := TGitRepo.Open(GitDir);
-  Changes := TStringList.Create;
-  try
-    if (HeadSha <> '') and (Repo.RefValue('refs/pull/' + IntToStr(Number) + '/head') = '') and
-      (Repo.Kind(HeadSha) = GIT_COMMIT) then
-    begin
-      Changes.Values['refs/pull/' + IntToStr(Number) + '/head'] := LowerCase(HeadSha);
-      Repo.SetRefs(Changes);
-    end;
-  finally
-    Changes.Free;
-    Repo.Free;
+  Name := 'refs/pull/' + IntToStr(Number) + '/head';
+  if (HeadSha <> '') and not Known.Find(Name, At) and (Repo.Kind(HeadSha) = GIT_COMMIT) then
+  begin
+    Changes.Add(Name + '=' + LowerCase(HeadSha));
+    Known.Add(Name);
   end;
 end;
 
@@ -2354,7 +2408,7 @@ procedure TGwImporter.ContentRows(Db: TGwDb; const RepoId, GitDir: string; Label
 var
   T, Lid, Mid, Iid, Cid, Rid, Upd, Color, Title, Tag, Sha, NCommits, CTime, Poster_, Oa, Oaid, Created, Aid,
     Uuid, U: string;
-  LabelIds, MsIds, IssueIds, ReleaseIds: TStringList;
+  LabelIds, MsIds, IssueIds, ReleaseIds, KnownRefs, PullRefs: TStringList;
   I, K: Integer;
   O, Pr, Ms: TJSONObject;
   Arr: TJSONArray;
@@ -2384,6 +2438,8 @@ begin
   MsIds := TStringList.Create;
   IssueIds := TStringList.Create;
   ReleaseIds := TStringList.Create;
+  KnownRefs := nil;
+  PullRefs := TStringList.Create;
   Repo := TGitRepo.Open(GitDir);
   try
     // Labels, by GitHub id, else by name.
@@ -2436,9 +2492,17 @@ begin
       Remember(Db, 'milestone', StrToInt64Def(JStr(O, 'id'), 0), RepoId, Mid, '');
       MsIds.Values[JStr(O, 'id')] := Mid;
     end;
+    // The repository's ref names, read once, for PullRow.
+    KnownRefs := Repo.Refs;
+    for I := 0 to KnownRefs.Count - 1 do
+      KnownRefs[I] := KnownRefs.Names[I];
+    KnownRefs.Sorted := True;
     // Issues and pull requests, by GitHub id, else by number.
+    GwDebug('save rows', 'issues: ' + IntToStr(Issues.Count) + ', refs known: ' + IntToStr(KnownRefs.Count));
     for I := 0 to Issues.Count - 1 do
     begin
+      if (I > 0) and (I mod 200 = 0) then
+        GwDebug('save rows', 'issues: ' + IntToStr(I) + ' of ' + IntToStr(Issues.Count));
       O := TJSONObject(Issues.Items[I]);
       Number := StrToInt64Def(JStr(O, 'number'), 0);
       Iid := Mapped(Db, 'issue', StrToInt64Def(JStr(O, 'id'), 0), Upd);
@@ -2503,11 +2567,21 @@ begin
           if LabelIds.Values[JStr(Arr.Items[K], 'name')] <> '' then
             Insert(Db, 'issue_label', ['issue_id', Iid, 'label_id', LabelIds.Values[JStr(Arr.Items[K], 'name')]]);
       if Pr <> nil then
-        PullRow(Db, RepoId, Iid, Number, Pr, GitDir);
+        PullRow(Db, RepoId, Iid, Number, Pr, Repo, KnownRefs, PullRefs);
+    end;
+    // The pull requests' head refs that were missing, in one write.
+    if PullRefs.Count > 0 then
+    begin
+      Repo.SetRefs(PullRefs);
+      if Assigned(Say) then
+        Say('  refs/pull/*/head added: ' + IntToStr(PullRefs.Count));
     end;
     // Comments, by GitHub id.
+    GwDebug('save rows', 'comments: ' + IntToStr(Comments.Count));
     for I := 0 to Comments.Count - 1 do
     begin
+      if (I > 0) and (I mod 500 = 0) then
+        GwDebug('save rows', 'comments: ' + IntToStr(I) + ' of ' + IntToStr(Comments.Count));
       O := TJSONObject(Comments.Items[I]);
       U := JStr(O, 'issue_url');
       Number := StrToInt64Def(Copy(U, LastDelimiter('/', U) + 1, MaxInt), 0);
@@ -2550,6 +2624,7 @@ begin
       Remember(Db, 'comment', StrToInt64Def(JStr(O, 'id'), 0), RepoId, Cid, JStr(O, 'updated_at'));
     end;
     // Releases, by GitHub id, else by tag.
+    GwDebug('save rows', 'releases: ' + IntToStr(Releases.Count));
     for I := 0 to Releases.Count - 1 do
     begin
       O := TJSONObject(Releases.Items[I]);
@@ -2705,6 +2780,8 @@ begin
     MsIds.Free;
     IssueIds.Free;
     ReleaseIds.Free;
+    KnownRefs.Free;
+    PullRefs.Free;
     Repo.Free;
   end;
 end;
@@ -2858,15 +2935,19 @@ begin
         Files := Download(Releases, Issues, Comments);
         GwCheckStop;
       except
-        // The files fetched so far have no rows yet: they go now, not left in
-        // the attachments folder (Fetched, in Download's journal).
-        if Assigned(Fetched) and (Fetched.Count > 0) then
+        on E: Exception do
         begin
-          Removed := W.FinishJournal;
-          if Assigned(Say) then
-            Say('  removed ' + IntToStr(Removed) + ' files fetched before the import stopped');
+          GwDebugError('download ' + Full, E, 'raised: the files fetched so far are removed');
+          // The files fetched so far have no rows yet: they go now, not left in
+          // the attachments folder (Fetched, in Download's journal).
+          if Assigned(Fetched) and (Fetched.Count > 0) then
+          begin
+            Removed := W.FinishJournal;
+            if Assigned(Say) then
+              Say('  removed ' + IntToStr(Removed) + ' files fetched before the import stopped');
+          end;
+          raise;
         end;
-        raise;
       end;
       for I := 0 to High(Files) do
         AddEntry(NewFiles, GtPath([P.Attachments, Files[I].Uuid[1], Files[I].Uuid[2], Files[I].Uuid]),
@@ -2878,6 +2959,7 @@ begin
           ' comments, ' + IntToStr(Releases.Count) + ' releases, ' + IntToStr(Length(Files)) + ' files');
       Db := OpenDb;
       try
+        GwDebug('save ' + Full, 'BEGIN IMMEDIATE');
         Db.Exec('BEGIN IMMEDIATE', []);
         try
           // Folders and files that end up unused are removed by the journal.
@@ -2890,8 +2972,13 @@ begin
             raise EGw.Create('cannot move ' + Src + ' to ' + GitDir);
           if WikiNew and not GtRenameDir(WikiSrc, WikiDir) then
             raise EGw.Create('cannot move ' + WikiSrc + ' to ' + WikiDir);
+          GwDebug('save ' + Full, 'repository row');
           RepoId := RepoRows(Db, Gr, OwnerId, OwnerType, OwnerName, GitDir, Existing);
+          GwDebug('save ' + Full, 'content rows: ' + IntToStr(Labels.Count) + ' labels, ' + IntToStr(Milestones.Count) +
+            ' milestones, ' + IntToStr(Issues.Count) + ' issues, ' + IntToStr(Comments.Count) + ' comments, ' +
+            IntToStr(Releases.Count) + ' releases');
           ContentRows(Db, RepoId, GitDir, Labels, Milestones, Issues, Comments, Pulls, Releases, Files, OldFiles);
+          GwDebug('save ' + Full, 'counters');
           Counters(Db, RepoId, OwnerId);
           Db.Exec('INSERT OR REPLACE INTO omimap.repo_map (github_id, gitea_id, full_name, since) VALUES (?1, ?2, ?3, ?4)',
             [JStr(Gr, 'id'), RepoId, Full, Started]);
@@ -2906,14 +2993,20 @@ begin
               Both.Free;
             end;
           end;
+          GwDebug('save ' + Full, 'COMMIT');
           Db.Exec('COMMIT', []);
           Committed := True;
+          GwDebug('save ' + Full, 'committed');
           if Assigned(Say) then
             Say('  written to Gitea');
         except
-          // A new folder renamed into place has no row now: the journal removes it.
-          Db.Exec('ROLLBACK', []);
-          raise;
+          on E: Exception do
+          begin
+            GwDebugError('save ' + Full, E, 'raised: rolled back, nothing of this repository written');
+            // A new folder renamed into place has no row now: the journal removes it.
+            Db.Exec('ROLLBACK', []);
+            raise;
+          end;
         end;
       finally
         Db.Free;
@@ -3060,9 +3153,13 @@ begin
           [JStr(Info, 'id'), OwnerId, Login]);
         Db.Exec('COMMIT', []);
       except
-        Db.Exec('ROLLBACK', []);
-        W.FinishJournal;
-        raise;
+        on E: Exception do
+        begin
+          GwDebugError('owner ' + Login, E, 'raised: rolled back');
+          Db.Exec('ROLLBACK', []);
+          W.FinishJournal;
+          raise;
+        end;
       end;
       W.FinishJournal;
       OwnerName := Db.Scalar('SELECT name FROM user WHERE id = ?1', [OwnerId]);
@@ -3125,6 +3222,7 @@ begin
     except
       on E: Exception do
       begin
+        GwDebugError('test token', E, 'handled: unreachable');
         Detail := E.Message;
         Exit('unreachable');
       end;
@@ -3139,7 +3237,11 @@ begin
         if Trim(Body) <> '' then
           D := GetJSON(Body);
       except
-        D := nil;
+        on E: Exception do
+        begin
+          GwDebugError('test token', E, 'handled: the answer is not JSON');
+          D := nil;
+        end;
       end;
       if (Status = 200) and (D is TJSONObject) then
       begin

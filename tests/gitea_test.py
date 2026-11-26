@@ -657,6 +657,15 @@ def test_web(work, fixture_ids):
             time.sleep(0.2)
         log_text = open(os.path.join(srv, "gitea-jobs", job)).read()
         check(log_text.rstrip().endswith("exit 0") and "ghp_test_TOKEN" not in log_text, f"the job finished {log_text[-300:]}")
+        debug = os.path.join(srv, "gitea-jobs", job[:-4] + ".debug.txt")
+        debug_text = open(debug).read() if os.path.isfile(debug) else ""
+        check(re.search(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} \[job\] start: delete owner=Bob", debug_text, re.M)
+              and all(l in debug_text for l in log_text.splitlines() if l.strip())
+              and ("[job] " + log_text.splitlines()[0]) in debug_text
+              and "ghp_test_TOKEN" not in debug_text,
+              f"the job's debug log: its start, and every line of its log with the time {debug_text[:300]}")
+        check(not os.path.exists(os.path.join(srv, "gitea-jobs", job[:-4] + ".debug.log")),
+              "negative: the debug log is not a .log the job list would show as a job")
         progress = re.findall(r"^progress (\d+)/(\d+) ", log_text, re.M)
         check(progress and progress[0][0] == "0" and progress[-1][0] == progress[-1][1]
               and all(int(a) <= int(b) for a, b in progress)
@@ -665,6 +674,7 @@ def test_web(work, fixture_ids):
         b.click(action="/gitea")
         b.click(action="/gitea/jobs")
         check(job in b.page, "the jobs page lists it")
+        check(".debug.txt" not in b.page, "negative: the jobs page does not list the debug log as a job")
         b.click(action="/gitea/jobs/" + job)
         check("Finished with exit code" in b.page, "the job page")
         c = sqlite3.connect(os.path.join(work, "data", "gitea.db"))
@@ -958,6 +968,45 @@ def test_delete_orphans(work):
     rc, out, _ = cli("orphans", "--bytes", "--config", ini, "--index", index)
     check(sorted(x["kind"] for x in table(out)) == ["attachment-size"],
           f"orphans: measured again, only the size mismatch is left {out.strip()[-300:]}")
+
+
+def test_debug_log_and_pull_refs_source():
+    """Every error an import or a delete can meet is in the job's debug log, and
+    a large repository's pull requests are saved in linear time (#photocraft:
+    "writing to Gitea" for hours, the packed-refs read and written once per
+    pull request, each time searched with TStringList.Values)."""
+    def body_of(text, name):
+        start = text.index(name)
+        end = re.search(r"^end;", text[start:], re.M).end()
+        return text[start:start + end]
+    silent = []
+    for name in ("omigiteai.inc", "omigiteaw.pas"):
+        text = open(os.path.join(REPO, "public", name), encoding="utf-8").read()
+        lines = text.splitlines()
+        for n, line in enumerate(lines):
+            if not re.match(r"^\s*except\s*$", line):
+                continue
+            block = "\n".join(lines[n:n + 14])
+            # The debug log's own writer cannot log its own failure.
+            if "The debug log never stops the job it describes" in block:
+                continue
+            if "GwDebug" not in block:
+                silent.append(f"{name}:{n + 1}")
+    check(not silent, f"every except of the import and delete writes the debug log {silent}")
+    inc = open(os.path.join(REPO, "public", "omigiteai.inc"), encoding="utf-8").read()
+    pull = body_of(inc, "procedure TGwImporter.PullRow(")
+    check("TGitRepo.Open" not in pull and "SetRefs" not in pull and "RefValue" not in pull,
+          "PullRow opens no repository and reads and writes no packed-refs: ContentRows does that once")
+    rows = body_of(inc, "procedure TGwImporter.ContentRows(")
+    check(rows.count("Repo.SetRefs(PullRefs)") == 1 and "KnownRefs := Repo.Refs" in rows,
+          "ContentRows reads the refs once and writes the pull requests' head refs once")
+    git = open(os.path.join(REPO, "public", "omigit.pas"), encoding="utf-8").read()
+    quadratic = [f for f in ("function TGitRepo.Refs:", "procedure TGitRepo.SetRefs(", "procedure TGitRepo.LooseRefs(",
+                             "procedure ParseAdvert(")
+                 if f in git and re.search(r"\.Values\[[^\]]*\]\s*:=", body_of(git, f))]
+    check(not quadratic, f"no ref list is built with Values[...] := (a search of the whole list each time) {quadratic}")
+    check(".debug.txt" in open(os.path.join(REPO, "public", "server.pas"), encoding="utf-8").read(),
+          "a job's debug log is <name>.debug.txt, not .log, which the job list takes for a job")
 
 
 def test_no_python_or_gitea_at_runtime():
@@ -2091,6 +2140,7 @@ def main():
         test_web(g, ids)
         test_real(work)
         test_no_python_or_gitea_at_runtime()
+        test_debug_log_and_pull_refs_source()
         test_portable_source()
         test_no_wide_pascal_sets()
         test_stop_reaches_the_write()

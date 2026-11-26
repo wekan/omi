@@ -6480,6 +6480,8 @@ var
 begin
   S := Line + #10;
   FLog.WriteBuffer(S[1], Length(S));
+  // The debug log has every line too, with its time (omigiteaw's GwDebug).
+  GwDebug('job', Line);
 end;
 
 procedure TGiteaJob.Execute;
@@ -6495,6 +6497,9 @@ begin
   end;
   GwStopFile := ChangeFileExt(LogPath, '.stop');
   GwReleaseAssetsKeep := SettingText('RELEASE_ASSETS_KEEP');
+  // <name>.debug.txt: not .log, which the job list takes for a job.
+  GwDebugFile := ChangeFileExt(LogPath, '.debug.txt');
+  GwDebug('job', 'start: ' + Kind + ' owner=' + Owner + ' repo=' + Repo + ' by=' + By);
   try
     try
       if Kind = 'delete' then
@@ -6516,7 +6521,10 @@ begin
         Code := GiteaRunImport(P, Owner, Repo, @Say);
     except
       on E: Exception do
+      begin
+        GwDebugError('job', E, 'the job ended');
         Say('omi: ' + E.Message);
+      end;
     end;
     Say('exit ' + IntToStr(Code));
   finally
@@ -6524,6 +6532,7 @@ begin
     if FileExists(GwStopFile) then
       DeleteFile(GwStopFile);
     GwStopFile := '';
+    GwDebugFile := '';
   end;
 end;
 
